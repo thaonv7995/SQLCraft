@@ -1,17 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import type {
-  ListTracksQuery,
-  CreateTrackBody,
-  UpdateTrackBody,
-  TrackParams,
-  AdminTrackParams,
-} from './tracks.schema';
-import {
-  listTracksHandler,
-  getTrackHandler,
-  createTrackHandler,
-  updateTrackHandler,
-} from './tracks.handler';
+import type { ListTracksQuery, TrackParams } from './tracks.schema';
+import { listTracksHandler, getTrackHandler } from './tracks.handler';
 
 export default async function tracksRouter(fastify: FastifyInstance): Promise<void> {
   // GET /v1/tracks
@@ -52,52 +41,5 @@ export default async function tracksRouter(fastify: FastifyInstance): Promise<vo
       },
     },
     getTrackHandler,
-  );
-
-  // POST /v1/admin/tracks
-  fastify.post<{ Body: CreateTrackBody }>(
-    '/v1/admin/tracks',
-    {
-      onRequest: [fastify.authenticate, fastify.authorize(['admin'])],
-      schema: {
-        tags: ['Admin'],
-        summary: 'Create a new track',
-        security: [{ bearerAuth: [] }],
-        body: {
-          type: 'object',
-          required: ['slug', 'title'],
-          properties: {
-            slug: { type: 'string' },
-            title: { type: 'string' },
-            description: { type: 'string' },
-            coverUrl: { type: 'string' },
-            difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
-            sortOrder: { type: 'integer' },
-          },
-        },
-      },
-    },
-    createTrackHandler,
-  );
-
-  // PATCH /v1/admin/tracks/:id
-  fastify.patch<{ Params: AdminTrackParams; Body: UpdateTrackBody }>(
-    '/v1/admin/tracks/:id',
-    {
-      onRequest: [fastify.authenticate, fastify.authorize(['admin'])],
-      schema: {
-        tags: ['Admin'],
-        summary: 'Update a track',
-        security: [{ bearerAuth: [] }],
-        params: {
-          type: 'object',
-          required: ['id'],
-          properties: {
-            id: { type: 'string', format: 'uuid' },
-          },
-        },
-      },
-    },
-    updateTrackHandler,
   );
 }

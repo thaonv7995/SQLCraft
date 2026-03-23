@@ -184,7 +184,7 @@ export interface LeaderboardEntry {
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 
 const api: AxiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api',
+  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1',
   timeout: 30_000,
   headers: {
     'Content-Type': 'application/json',
