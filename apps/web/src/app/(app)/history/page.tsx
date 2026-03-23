@@ -20,55 +20,6 @@ import { formatDuration, formatRelativeTime, formatRows, truncateSql, classifyQu
 import { cn } from '@/lib/utils';
 import type { QueryExecution } from '@/lib/api';
 
-// Demo data
-const MOCK_HISTORY: QueryExecution[] = [
-  {
-    id: 'q1',
-    sessionId: 's1',
-    sql: 'SELECT u.name, u.email, COUNT(o.id) AS order_count, SUM(o.total) AS total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.created_at > \'2024-01-01\' GROUP BY u.id, u.name, u.email ORDER BY total_spent DESC LIMIT 20',
-    status: 'success',
-    durationMs: 142,
-    rowCount: 20,
-    createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-  },
-  {
-    id: 'q2',
-    sessionId: 's1',
-    sql: 'SELECT * FROM products WHERE price > 100 AND category_id IN (SELECT id FROM categories WHERE name = \'Electronics\') ORDER BY created_at DESC',
-    status: 'success',
-    durationMs: 67,
-    rowCount: 23,
-    createdAt: new Date(Date.now() - 18 * 60_000).toISOString(),
-  },
-  {
-    id: 'q3',
-    sessionId: 's2',
-    sql: 'UPDATE inventory SET quantity = quantity - 1 WHERE product_id = 42 AND warehouse_id = \'WH-001\'',
-    status: 'error',
-    durationMs: 12,
-    rowCount: 0,
-    errorMessage: 'ERROR: duplicate key value violates unique constraint "inventory_pkey"',
-    createdAt: new Date(Date.now() - 45 * 60_000).toISOString(),
-  },
-  {
-    id: 'q4',
-    sessionId: 's1',
-    sql: 'WITH monthly_sales AS (SELECT DATE_TRUNC(\'month\', created_at) AS month, SUM(total) AS revenue FROM orders GROUP BY 1) SELECT month, revenue, LAG(revenue) OVER (ORDER BY month) AS prev_revenue FROM monthly_sales',
-    status: 'success',
-    durationMs: 398,
-    rowCount: 12,
-    createdAt: new Date(Date.now() - 2 * 3600_000).toISOString(),
-  },
-  {
-    id: 'q5',
-    sessionId: 's3',
-    sql: 'EXPLAIN ANALYZE SELECT * FROM orders o JOIN order_items oi ON o.id = oi.order_id WHERE o.status = \'pending\'',
-    status: 'success',
-    durationMs: 856,
-    rowCount: 1,
-    createdAt: new Date(Date.now() - 5 * 3600_000).toISOString(),
-  },
-];
 
 const QUERY_TYPE_COLORS: Record<string, string> = {
   SELECT: 'text-primary',
@@ -167,7 +118,7 @@ export default function HistoryPage() {
     staleTime: 30_000,
   });
 
-  const allQueries = data?.items ?? MOCK_HISTORY;
+  const allQueries = data?.items ?? [];
   const filtered = allQueries.filter((q) => {
     if (statusFilter !== 'all' && q.status !== statusFilter) return false;
     if (search && !q.sql.toLowerCase().includes(search.toLowerCase())) return false;

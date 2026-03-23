@@ -21,6 +21,31 @@ export interface EndSessionResult {
   endedAt: Date | null;
 }
 
+export interface SessionListItem {
+  id: string;
+  status: string;
+  lessonVersionId: string;
+  lessonTitle: string | null;
+  sandboxStatus: string | null;
+  startedAt: Date;
+  lastActivityAt: Date | null;
+  createdAt: Date;
+}
+
+export async function listUserSessions(userId: string, limit = 20): Promise<SessionListItem[]> {
+  const rows = await sessionsRepository.findByUserId(userId, limit);
+  return rows.map((row) => ({
+    id: row.id,
+    status: row.status,
+    lessonVersionId: row.lessonVersionId,
+    lessonTitle: row.lessonTitle,
+    sandboxStatus: row.sandboxStatus,
+    startedAt: row.startedAt,
+    lastActivityAt: row.lastActivityAt,
+    createdAt: row.createdAt,
+  }));
+}
+
 export async function createSession(
   userId: string,
   body: CreateSessionBody,

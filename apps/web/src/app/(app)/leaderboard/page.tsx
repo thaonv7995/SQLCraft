@@ -31,21 +31,8 @@ const RANK_STYLES: Record<number, { bg: string; text: string; icon?: string }> =
   3: { bg: 'bg-[#CD7F32]/10', text: 'text-[#CD7F32]', icon: '🥉' },
 };
 
-const MOCK_ENTRIES: LeaderboardEntry[] = [
-  { rank: 1, userId: 'u1', username: 'alice_dev', displayName: 'Alice Johnson', points: 9847, challengesCompleted: 142, streak: 34 },
-  { rank: 2, userId: 'u2', username: 'bob_sql', displayName: 'Bob Chen', points: 8923, challengesCompleted: 128, streak: 21 },
-  { rank: 3, userId: 'u3', username: 'carol_data', displayName: 'Carol Martinez', points: 8154, challengesCompleted: 115, streak: 18 },
-  { rank: 4, userId: 'u4', username: 'dave_joins', displayName: 'Dave Wilson', points: 7234, challengesCompleted: 97, streak: 12 },
-  { rank: 5, userId: 'u5', username: 'eva_query', displayName: 'Eva Brown', points: 6891, challengesCompleted: 89, streak: 7 },
-  { rank: 6, userId: 'u6', username: 'frank_db', displayName: 'Frank Davis', points: 6234, challengesCompleted: 82, streak: 5 },
-  { rank: 7, userId: 'u7', username: 'grace_sql', displayName: 'Grace Lee', points: 5987, challengesCompleted: 74, streak: 14 },
-  { rank: 8, userId: 'u8', username: 'henry_cte', displayName: 'Henry Taylor', points: 5723, challengesCompleted: 68, streak: 3 },
-  { rank: 9, userId: 'u9', username: 'iris_index', displayName: 'Iris Moore', points: 5401, challengesCompleted: 63, streak: 9 },
-  { rank: 10, userId: 'u10', username: 'jack_olap', displayName: 'Jack Anderson', points: 5102, challengesCompleted: 58, streak: 2 },
-];
-
 // Podium for top 3
-function Podium({ entries }: { entries: typeof MOCK_ENTRIES }) {
+function Podium({ entries }: { entries: LeaderboardEntry[] }) {
   const top3 = entries.slice(0, 3);
   // Reorder: 2nd, 1st, 3rd
   const order = [top3[1], top3[0], top3[2]];
@@ -107,7 +94,7 @@ export default function LeaderboardPage() {
     staleTime: 60_000,
   });
 
-  const entries = data ?? MOCK_ENTRIES;
+  const entries = data ?? [];
 
   return (
     <div className="p-6 space-y-8 max-w-5xl mx-auto">

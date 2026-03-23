@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -87,6 +87,41 @@ export class SessionsRepository {
       .where(eq(schema.sandboxInstances.learningSessionId, sessionId))
       .limit(1);
     return row ?? null;
+  }
+
+  async findByUserId(
+    userId: string,
+    limit = 20,
+  ): Promise<Array<SessionRow & { sandboxStatus: string | null; lessonTitle: string | null }>> {
+    const rows = await this.db
+      .select({
+        id: schema.learningSessions.id,
+        userId: schema.learningSessions.userId,
+        lessonVersionId: schema.learningSessions.lessonVersionId,
+        challengeVersionId: schema.learningSessions.challengeVersionId,
+        status: schema.learningSessions.status,
+        startedAt: schema.learningSessions.startedAt,
+        lastActivityAt: schema.learningSessions.lastActivityAt,
+        endedAt: schema.learningSessions.endedAt,
+        createdAt: schema.learningSessions.createdAt,
+        sandboxStatus: schema.sandboxInstances.status,
+        lessonTitle: schema.lessons.title,
+      })
+      .from(schema.learningSessions)
+      .leftJoin(
+        schema.sandboxInstances,
+        eq(schema.sandboxInstances.learningSessionId, schema.learningSessions.id),
+      )
+      .leftJoin(
+        schema.lessonVersions,
+        eq(schema.lessonVersions.id, schema.learningSessions.lessonVersionId),
+      )
+      .leftJoin(schema.lessons, eq(schema.lessons.id, schema.lessonVersions.lessonId))
+      .where(eq(schema.learningSessions.userId, userId))
+      .orderBy(desc(schema.learningSessions.startedAt))
+      .limit(limit);
+
+    return rows as Array<SessionRow & { sandboxStatus: string | null; lessonTitle: string | null }>;
   }
 
   async expireSandboxBySessionId(sessionId: string): Promise<void> {

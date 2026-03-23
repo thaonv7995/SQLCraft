@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api';
-import type { SystemMetrics, SystemJob } from '@/lib/api';
+import type { SystemJob } from '@/lib/api';
 import { StatCard } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,22 +19,6 @@ import {
 import { formatRelativeTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
-const MOCK_METRICS: SystemMetrics = {
-  activeSandboxes: 24,
-  querySuccessRate: 97.3,
-  p95LatencyMs: 342,
-  totalUsers: 1_489,
-  totalQueriesLast24h: 15_832,
-  errorRate: 2.7,
-};
-
-const MOCK_JOBS: SystemJob[] = [
-  { id: 'j1', type: 'sandbox_cleanup', status: 'completed', target: '8 sandboxes', startedAt: new Date(Date.now() - 5 * 60_000).toISOString(), completedAt: new Date(Date.now() - 4 * 60_000).toISOString() },
-  { id: 'j2', type: 'db_migration', status: 'running', target: 'production', startedAt: new Date(Date.now() - 2 * 60_000).toISOString() },
-  { id: 'j3', type: 'content_sync', status: 'completed', target: '3 tracks', startedAt: new Date(Date.now() - 30 * 60_000).toISOString(), completedAt: new Date(Date.now() - 29 * 60_000).toISOString() },
-  { id: 'j4', type: 'session_expire', status: 'failed', target: 'batch #142', startedAt: new Date(Date.now() - 90 * 60_000).toISOString(), errorMessage: 'Connection timeout to sandbox pool' },
-];
-
 export default function AdminDashboardPage() {
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: ['admin-metrics'],
@@ -49,8 +33,7 @@ export default function AdminDashboardPage() {
     staleTime: 15_000,
   });
 
-  const displayMetrics = metrics ?? MOCK_METRICS;
-  const displayJobs = jobs ?? MOCK_JOBS;
+  const displayJobs = jobs ?? [];
 
   const handleTerminateAll = async (): Promise<void> => {
     try {
@@ -80,7 +63,7 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Metrics */}
-      {metricsLoading ? (
+      {metricsLoading || !metrics ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="h-24 bg-surface-container-low rounded-xl animate-pulse" />
@@ -90,13 +73,13 @@ export default function AdminDashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="Active Sandboxes"
-            value={displayMetrics.activeSandboxes}
+            value={metrics.activeSandboxes}
             accent="tertiary"
             icon={<span className="material-symbols-outlined">dns</span>}
           />
           <StatCard
             label="Query Success Rate"
-            value={`${displayMetrics.querySuccessRate}%`}
+            value={`${metrics.querySuccessRate}%`}
             delta="+0.3% vs yesterday"
             deltaPositive
             accent="secondary"
@@ -104,13 +87,13 @@ export default function AdminDashboardPage() {
           />
           <StatCard
             label="p95 Latency"
-            value={`${displayMetrics.p95LatencyMs}ms`}
+            value={`${metrics.p95LatencyMs}ms`}
             accent="primary"
             icon={<span className="material-symbols-outlined">speed</span>}
           />
           <StatCard
             label="Queries (24h)"
-            value={displayMetrics.totalQueriesLast24h.toLocaleString()}
+            value={metrics.totalQueriesLast24h.toLocaleString()}
             delta="+12% vs last week"
             deltaPositive
             accent="primary"
@@ -124,27 +107,29 @@ export default function AdminDashboardPage() {
         <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Total Users</h3>
           <p className="text-3xl font-headline font-bold text-on-surface">
-            {displayMetrics.totalUsers.toLocaleString()}
+            {metricsLoading || !metrics ? '—' : metrics.totalUsers.toLocaleString()}
           </p>
           <p className="text-xs text-secondary">+34 today</p>
         </div>
         <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Error Rate</h3>
-          <p className={`text-3xl font-headline font-bold ${displayMetrics.errorRate > 5 ? 'text-error' : 'text-on-surface'}`}>
-            {displayMetrics.errorRate}%
+          <p className={`text-3xl font-headline font-bold ${metrics && metrics.errorRate > 5 ? 'text-error' : 'text-on-surface'}`}>
+            {metricsLoading || !metrics ? '—' : `${metrics.errorRate}%`}
           </p>
           <p className="text-xs text-on-surface-variant">Query execution errors</p>
         </div>
         <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Sandbox Pool</h3>
           <div className="flex items-end gap-2">
-            <p className="text-3xl font-headline font-bold text-on-surface">{displayMetrics.activeSandboxes}</p>
+            <p className="text-3xl font-headline font-bold text-on-surface">
+              {metricsLoading || !metrics ? '—' : metrics.activeSandboxes}
+            </p>
             <p className="text-sm text-on-surface-variant mb-1">/ 50 max</p>
           </div>
           <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-tertiary to-secondary rounded-full"
-              style={{ width: `${(displayMetrics.activeSandboxes / 50) * 100}%` }}
+              style={{ width: metrics ? `${(metrics.activeSandboxes / 50) * 100}%` : '0%' }}
             />
           </div>
         </div>

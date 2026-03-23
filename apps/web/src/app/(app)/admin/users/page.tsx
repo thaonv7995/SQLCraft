@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usersApi } from '@/lib/api';
-import { StatusBadge, Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -32,18 +32,10 @@ const ROLE_TABS = [
   { value: 'admin', label: 'Admins' },
 ];
 
-const MOCK_USERS: AdminUser[] = [
-  { id: '1', username: 'alice_dev', email: 'alice@example.com', displayName: 'Alice Johnson', role: 'admin', createdAt: '2024-01-15T10:00:00Z', isActive: true, stats: { queriesRun: 2847, completedChallenges: 52, activeSessions: 0, currentStreak: 0, totalPoints: 0 } },
-  { id: '2', username: 'bob_sql', email: 'bob@example.com', displayName: 'Bob Chen', role: 'contributor', createdAt: '2024-02-20T08:30:00Z', isActive: true, stats: { queriesRun: 1243, completedChallenges: 38, activeSessions: 0, currentStreak: 0, totalPoints: 0 } },
-  { id: '3', username: 'carol_data', email: 'carol@example.com', displayName: 'Carol Martinez', role: 'student', createdAt: '2024-03-10T14:15:00Z', isActive: true, stats: { queriesRun: 567, completedChallenges: 14, activeSessions: 0, currentStreak: 0, totalPoints: 0 } },
-  { id: '4', username: 'dave_query', email: 'dave@example.com', displayName: 'Dave Wilson', role: 'student', createdAt: '2024-04-05T11:45:00Z', isActive: false, stats: { queriesRun: 89, completedChallenges: 3, activeSessions: 0, currentStreak: 0, totalPoints: 0 } },
-  { id: '5', username: 'eva_joins', email: 'eva@example.com', displayName: 'Eva Brown', role: 'student', createdAt: '2024-04-18T16:00:00Z', isActive: true, stats: { queriesRun: 342, completedChallenges: 21, activeSessions: 0, currentStreak: 0, totalPoints: 0 } },
-];
-
 const ROLE_COLORS: Record<string, string> = {
-  admin: 'text-error bg-error/10 border-error/20',
-  contributor: 'text-primary bg-primary/10 border-primary/20',
-  student: 'text-on-surface-variant bg-surface-container-high border-outline-variant',
+  admin: 'text-error bg-error/10',
+  contributor: 'text-primary bg-primary/10',
+  student: 'text-on-surface-variant bg-surface-container-high',
 };
 
 export default function AdminUsersPage() {
@@ -91,7 +83,7 @@ export default function AdminUsersPage() {
     onError: () => toast.error('Failed to update role'),
   });
 
-  const displayUsers: AdminUser[] = (data?.items as AdminUser[] | undefined) ?? MOCK_USERS;
+  const displayUsers: AdminUser[] = (data?.items as AdminUser[] | undefined) ?? [];
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -100,7 +92,7 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="font-headline text-2xl font-bold text-on-surface">User Management</h1>
           <p className="text-sm text-on-surface-variant mt-1">
-            {data?.total ?? MOCK_USERS.length} total users
+            {data?.total ?? 0} total users
           </p>
         </div>
         <Button
@@ -181,7 +173,7 @@ export default function AdminUsersPage() {
                     {/* Role */}
                     <TableCell>
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                           ROLE_COLORS[user.role] ?? ROLE_COLORS.student
                         }`}
                       >

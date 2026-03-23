@@ -84,8 +84,10 @@ export interface Lesson {
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   estimatedMinutes: number;
-  order: number;
-  isPublished: boolean;
+  sortOrder: number;
+  /** The currently published lesson version ID — pass this to create a session */
+  publishedVersionId?: string | null;
+  isPublished?: boolean;
   status?: 'locked' | 'available' | 'in_progress' | 'completed';
 }
 
@@ -94,16 +96,14 @@ export interface Lesson {
 export interface LearningSession {
   id: string;
   userId: string;
-  lessonId?: string;
-  trackId?: string;
-  status: 'provisioning' | 'ready' | 'active' | 'idle' | 'terminated' | 'error';
-  datasetSize: 'tiny' | 'small' | 'medium' | 'large';
-  sandboxConnectionString?: string;
+  lessonVersionId: string;
+  challengeVersionId?: string | null;
+  status: 'provisioning' | 'active' | 'paused' | 'ended' | 'expired' | 'failed';
+  sandboxStatus?: string | null;
+  lessonTitle?: string | null;
+  startedAt: string;
+  lastActivityAt?: string | null;
   createdAt: string;
-  lastActivityAt: string;
-  expiresAt?: string;
-  lesson?: Lesson;
-  track?: Track;
 }
 
 // ─── Query Execution ──────────────────────────────────────────────────────────
@@ -261,10 +261,13 @@ export const tracksApi = {
       .then((r) => r.data),
 
   get: (idOrSlug: string) =>
-    api.get<Track>(`/tracks/${idOrSlug}`).then((r) => r.data),
+    api.get<Track & { lessons?: Lesson[] }>(`/tracks/${idOrSlug}`).then((r) => r.data),
 
+  /** Convenience: get track then extract its embedded lessons list */
   getLessons: (trackId: string) =>
-    api.get<Lesson[]>(`/tracks/${trackId}/lessons`).then((r) => r.data),
+    api
+      .get<Track & { lessons?: Lesson[] }>(`/tracks/${trackId}`)
+      .then((r) => r.data.lessons ?? []),
 
   create: (payload: Partial<Track>) =>
     api.post<Track>('/tracks', payload).then((r) => r.data),
@@ -292,19 +295,22 @@ export const lessonsApi = {
 // ─── Sessions API ─────────────────────────────────────────────────────────────
 
 export const sessionsApi = {
-  list: () => api.get<LearningSession[]>('/sessions').then((r) => r.data),
+  list: () =>
+    api.get<LearningSession[]>('/learning-sessions').then((r) => r.data),
 
   get: (id: string) =>
-    api.get<LearningSession>(`/sessions/${id}`).then((r) => r.data),
+    api.get<LearningSession>(`/learning-sessions/${id}`).then((r) => r.data),
 
-  create: (payload: { lessonId?: string; trackId?: string; datasetSize?: string }) =>
-    api.post<LearningSession>('/sessions', payload).then((r) => r.data),
+  create: (payload: { lessonVersionId: string; challengeVersionId?: string }) =>
+    api.post<{ session: LearningSession; sandbox: { id: string; status: string } }>(
+      '/learning-sessions',
+      payload,
+    ).then((r) => r.data.session),
 
-  terminate: (id: string) =>
-    api.post<LearningSession>(`/sessions/${id}/terminate`).then((r) => r.data),
-
-  pollStatus: (id: string) =>
-    api.get<LearningSession>(`/sessions/${id}/status`).then((r) => r.data),
+  end: (id: string) =>
+    api.post<{ id: string; status: string; endedAt: string | null }>(
+      `/learning-sessions/${id}/end`,
+    ).then((r) => r.data),
 };
 
 // ─── Query Execution API ──────────────────────────────────────────────────────

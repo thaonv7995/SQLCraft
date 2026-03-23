@@ -136,39 +136,32 @@ export default function DashboardPage() {
               <TableRow>
                 <TableHead>Session</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Dataset</TableHead>
+                <TableHead>Sandbox</TableHead>
                 <TableHead>Last Active</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sessionsLoading ? (
-                <TableSkeleton rows={4} cols={5} />
+                <TableSkeleton rows={4} cols={4} />
               ) : recentSessions.length === 0 ? (
-                <TableEmpty message="No active sessions. Start a track to begin." colSpan={5} />
+                <TableEmpty message="No active sessions. Start a track to begin." colSpan={4} />
               ) : (
                 recentSessions.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell>
-                      <div>
-                        <p className="text-sm font-medium text-on-surface">
-                          {s.lesson?.title ?? s.track?.title ?? 'Free Session'}
-                        </p>
-                        <p className="text-xs text-on-surface-variant">
-                          {s.track?.title ?? 'No track'}
-                        </p>
-                      </div>
+                      <p className="text-sm font-medium text-on-surface">
+                        {s.lessonTitle ?? 'Lesson Session'}
+                      </p>
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={s.status} />
                     </TableCell>
                     <TableCell>
-                      <span className="text-xs font-mono bg-surface-container-high px-2 py-0.5 rounded text-on-surface-variant capitalize">
-                        {s.datasetSize}
-                      </span>
+                      <StatusBadge status={s.sandboxStatus ?? 'pending'} />
                     </TableCell>
                     <TableCell className="text-on-surface-variant text-xs">
-                      {formatRelativeTime(s.lastActivityAt)}
+                      {s.lastActivityAt ? formatRelativeTime(s.lastActivityAt) : formatRelativeTime(s.startedAt)}
                     </TableCell>
                     <TableCell>
                       <Link href={`/lab/${s.id}`}>

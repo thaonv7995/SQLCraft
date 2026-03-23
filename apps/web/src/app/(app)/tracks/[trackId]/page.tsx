@@ -42,14 +42,14 @@ export default function TrackDetailPage() {
 
   const isLoading = trackLoading || lessonsLoading;
 
-  const handleStartLesson = async (lessonId: string) => {
+  const handleStartLesson = async (lessonId: string, publishedVersionId: string | null | undefined) => {
+    if (!publishedVersionId) {
+      toast.error('This lesson is not available yet');
+      return;
+    }
     setStarting(lessonId);
     try {
-      const session = await sessionsApi.create({
-        lessonId,
-        trackId,
-        datasetSize: 'small',
-      });
+      const session = await sessionsApi.create({ lessonVersionId: publishedVersionId });
       router.push(`/lab/${session.id}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to start lesson';
@@ -85,14 +85,14 @@ export default function TrackDetailPage() {
   };
 
   const displayLessons = lessons ?? [
-    { id: 'l1', title: 'Introduction to SQL', estimatedMinutes: 20, difficulty: 'beginner', status: 'completed', order: 1 },
-    { id: 'l2', title: 'SELECT Basics', estimatedMinutes: 30, difficulty: 'beginner', status: 'completed', order: 2 },
-    { id: 'l3', title: 'Filtering with WHERE', estimatedMinutes: 35, difficulty: 'beginner', status: 'completed', order: 3 },
-    { id: 'l4', title: 'Sorting and Limiting', estimatedMinutes: 25, difficulty: 'beginner', status: 'in_progress', order: 4 },
-    { id: 'l5', title: 'Aggregate Functions', estimatedMinutes: 40, difficulty: 'beginner', status: 'available', order: 5 },
-    { id: 'l6', title: 'GROUP BY and HAVING', estimatedMinutes: 45, difficulty: 'intermediate', status: 'locked', order: 6 },
-    { id: 'l7', title: 'INNER JOIN', estimatedMinutes: 50, difficulty: 'intermediate', status: 'locked', order: 7 },
-    { id: 'l8', title: 'LEFT and RIGHT JOIN', estimatedMinutes: 50, difficulty: 'intermediate', status: 'locked', order: 8 },
+    { id: 'l1', title: 'Introduction to SQL', estimatedMinutes: 20, difficulty: 'beginner', status: 'completed', sortOrder: 1 },
+    { id: 'l2', title: 'SELECT Basics', estimatedMinutes: 30, difficulty: 'beginner', status: 'completed', sortOrder: 2 },
+    { id: 'l3', title: 'Filtering with WHERE', estimatedMinutes: 35, difficulty: 'beginner', status: 'completed', sortOrder: 3 },
+    { id: 'l4', title: 'Sorting and Limiting', estimatedMinutes: 25, difficulty: 'beginner', status: 'in_progress', sortOrder: 4 },
+    { id: 'l5', title: 'Aggregate Functions', estimatedMinutes: 40, difficulty: 'beginner', status: 'available', sortOrder: 5 },
+    { id: 'l6', title: 'GROUP BY and HAVING', estimatedMinutes: 45, difficulty: 'intermediate', status: 'locked', sortOrder: 6 },
+    { id: 'l7', title: 'INNER JOIN', estimatedMinutes: 50, difficulty: 'intermediate', status: 'locked', sortOrder: 7 },
+    { id: 'l8', title: 'LEFT and RIGHT JOIN', estimatedMinutes: 50, difficulty: 'intermediate', status: 'locked', sortOrder: 8 },
   ];
 
   const progress = displayTrack.userProgress
@@ -246,7 +246,7 @@ export default function TrackDetailPage() {
                     variant={isActive ? 'primary' : 'ghost'}
                     size="sm"
                     loading={starting === lesson.id}
-                    onClick={() => handleStartLesson(lesson.id)}
+                    onClick={() => handleStartLesson(lesson.id, lesson.publishedVersionId)}
                     leftIcon={
                       <span className="material-symbols-outlined text-sm">
                         {status === 'completed' ? 'replay' : 'play_arrow'}

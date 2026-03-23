@@ -10,19 +10,6 @@ import toast from 'react-hot-toast';
 
 type ContentTab = 'tracks' | 'lessons';
 
-const MOCK_TRACKS = [
-  { id: '1', title: 'SQL Fundamentals', difficulty: 'beginner', lessonCount: 12, isPublished: true, createdAt: '2024-01-10' },
-  { id: '2', title: 'Window Functions', difficulty: 'intermediate', lessonCount: 15, isPublished: true, createdAt: '2024-02-01' },
-  { id: '3', title: 'Query Optimization', difficulty: 'advanced', lessonCount: 14, isPublished: false, createdAt: '2024-03-15' },
-  { id: '4', title: 'Stored Procedures', difficulty: 'advanced', lessonCount: 16, isPublished: false, createdAt: '2024-04-20' },
-];
-
-const MOCK_LESSONS = [
-  { id: 'l1', trackTitle: 'SQL Fundamentals', title: 'Introduction to SQL', difficulty: 'beginner', estimatedMinutes: 20, isPublished: true, order: 1 },
-  { id: 'l2', trackTitle: 'SQL Fundamentals', title: 'SELECT Basics', difficulty: 'beginner', estimatedMinutes: 30, isPublished: true, order: 2 },
-  { id: 'l3', trackTitle: 'Window Functions', title: 'Understanding OVER()', difficulty: 'intermediate', estimatedMinutes: 45, isPublished: true, order: 1 },
-  { id: 'l4', trackTitle: 'Query Optimization', title: 'Reading Execution Plans', difficulty: 'advanced', estimatedMinutes: 60, isPublished: false, order: 1 },
-];
 
 export default function AdminContentPage() {
   const [activeTab, setActiveTab] = useState<ContentTab>('tracks');
@@ -33,7 +20,7 @@ export default function AdminContentPage() {
     staleTime: 60_000,
   });
 
-  const displayTracks = tracks?.items ?? MOCK_TRACKS;
+  const displayTracks = tracks?.items ?? [];
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -82,6 +69,12 @@ export default function AdminContentPage() {
                 <div key={i} className="h-20 bg-surface-container-low rounded-xl animate-pulse" />
               ))}
             </div>
+          ) : displayTracks.length === 0 ? (
+            <div className="bg-surface-container-low rounded-xl p-10 flex flex-col items-center justify-center text-center">
+              <span className="material-symbols-outlined text-3xl text-outline mb-3">route</span>
+              <p className="text-sm font-medium text-on-surface mb-1">No tracks yet</p>
+              <p className="text-xs text-on-surface-variant">Create your first learning track to get started.</p>
+            </div>
           ) : (
             displayTracks.map((track) => (
               <div
@@ -129,42 +122,20 @@ export default function AdminContentPage() {
 
       {/* Lessons */}
       {activeTab === 'lessons' && (
-        <div className="space-y-3">
-          {MOCK_LESSONS.map((lesson) => (
-            <div
-              key={lesson.id}
-              className="bg-surface-container-low rounded-xl px-5 py-4 flex items-center gap-4"
-            >
-              <div className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center text-xs font-mono font-medium text-on-surface-variant shrink-0">
-                {lesson.order}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="font-semibold text-on-surface text-sm">{lesson.title}</h3>
-                  <DifficultyBadge difficulty={lesson.difficulty} />
-                  <StatusBadge status={lesson.isPublished ? 'published' : 'draft'} />
-                </div>
-                <div className="flex items-center gap-4 text-xs text-on-surface-variant">
-                  <span className="text-tertiary">{lesson.trackTitle}</span>
-                  <span>{lesson.estimatedMinutes} min</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <Button variant="ghost" size="sm">
-                  <span className="material-symbols-outlined text-sm">edit</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => toast.success(`Lesson ${lesson.isPublished ? 'unpublished' : 'published'}`)}
-                >
-                  {lesson.isPublished ? 'Unpublish' : 'Publish'}
-                </Button>
-              </div>
-            </div>
-          ))}
+        <div className="bg-surface-container-low rounded-xl p-10 flex flex-col items-center justify-center text-center">
+          <span className="material-symbols-outlined text-3xl text-outline mb-3">menu_book</span>
+          <p className="text-sm font-medium text-on-surface mb-1">Select a track to manage its lessons</p>
+          <p className="text-xs text-on-surface-variant">
+            Lesson management is available from the individual track view.
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-4"
+            onClick={() => setActiveTab('tracks')}
+          >
+            View Tracks
+          </Button>
         </div>
       )}
     </div>

@@ -2,7 +2,16 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
 import type { CreateSessionBody, SessionParams } from './sessions.schema';
-import { createSession, getSession, endSession } from './sessions.service';
+import { createSession, getSession, endSession, listUserSessions } from './sessions.service';
+
+export async function listSessionsHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const result = await listUserSessions(userId);
+  reply.send(success(result, 'Sessions retrieved'));
+}
 
 export async function createSessionHandler(
   request: FastifyRequest<{ Body: CreateSessionBody }>,

@@ -1,8 +1,22 @@
 import { FastifyInstance } from 'fastify';
 import type { CreateSessionBody, SessionParams } from './sessions.schema';
-import { createSessionHandler, getSessionHandler, endSessionHandler } from './sessions.handler';
+import { listSessionsHandler, createSessionHandler, getSessionHandler, endSessionHandler } from './sessions.handler';
 
 export default async function sessionsRouter(fastify: FastifyInstance): Promise<void> {
+  // GET /v1/learning-sessions
+  fastify.get(
+    '/v1/learning-sessions',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Sessions'],
+        summary: 'List current user learning sessions',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    listSessionsHandler,
+  );
+
   // POST /v1/learning-sessions
   fastify.post<{ Body: CreateSessionBody }>(
     '/v1/learning-sessions',
