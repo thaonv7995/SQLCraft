@@ -433,7 +433,7 @@ export default function LabPage() {
             <>
               <StatusBadge status={session.status} />
               <span className="text-xs text-on-surface-variant hidden sm:block">
-                {session.lesson?.title ?? session.track?.title ?? 'Free Session'}
+                {session.lessonTitle ?? 'Lab Session'}
               </span>
             </>
           ) : (
@@ -556,7 +556,7 @@ export default function LabPage() {
           <div
             className={cn(
               'w-1.5 h-1.5 rounded-full',
-              session?.status === 'ready' || session?.status === 'active'
+              session?.status === 'active'
                 ? 'bg-secondary'
                 : session?.status === 'provisioning'
                 ? 'bg-tertiary animate-pulse'

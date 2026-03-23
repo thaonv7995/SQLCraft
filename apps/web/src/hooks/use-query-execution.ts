@@ -87,14 +87,14 @@ export function useSessionStatus(sessionId: string, enabled = true) {
 
   return useQuery({
     queryKey: ['session-status', sessionId],
-    queryFn: () => sessionsApi.pollStatus(sessionId),
+    queryFn: () => sessionsApi.get(sessionId),
     enabled: enabled && !!sessionId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       // Poll every 3s while provisioning
       if (status === 'provisioning') return 3_000;
       // Poll every 30s while active
-      if (status === 'ready' || status === 'active') return 30_000;
+      if (status === 'active') return 30_000;
       return false;
     },
     select: (data) => {

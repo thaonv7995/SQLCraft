@@ -85,14 +85,14 @@ export default function TrackDetailPage() {
   };
 
   const displayLessons = lessons ?? [
-    { id: 'l1', title: 'Introduction to SQL', estimatedMinutes: 20, difficulty: 'beginner', status: 'completed', sortOrder: 1 },
-    { id: 'l2', title: 'SELECT Basics', estimatedMinutes: 30, difficulty: 'beginner', status: 'completed', sortOrder: 2 },
-    { id: 'l3', title: 'Filtering with WHERE', estimatedMinutes: 35, difficulty: 'beginner', status: 'completed', sortOrder: 3 },
-    { id: 'l4', title: 'Sorting and Limiting', estimatedMinutes: 25, difficulty: 'beginner', status: 'in_progress', sortOrder: 4 },
-    { id: 'l5', title: 'Aggregate Functions', estimatedMinutes: 40, difficulty: 'beginner', status: 'available', sortOrder: 5 },
-    { id: 'l6', title: 'GROUP BY and HAVING', estimatedMinutes: 45, difficulty: 'intermediate', status: 'locked', sortOrder: 6 },
-    { id: 'l7', title: 'INNER JOIN', estimatedMinutes: 50, difficulty: 'intermediate', status: 'locked', sortOrder: 7 },
-    { id: 'l8', title: 'LEFT and RIGHT JOIN', estimatedMinutes: 50, difficulty: 'intermediate', status: 'locked', sortOrder: 8 },
+    { id: 'l1', title: 'Introduction to SQL', estimatedMinutes: 20, difficulty: 'beginner' as const, status: 'completed' as const, sortOrder: 1, publishedVersionId: null },
+    { id: 'l2', title: 'SELECT Basics', estimatedMinutes: 30, difficulty: 'beginner' as const, status: 'completed' as const, sortOrder: 2, publishedVersionId: null },
+    { id: 'l3', title: 'Filtering with WHERE', estimatedMinutes: 35, difficulty: 'beginner' as const, status: 'completed' as const, sortOrder: 3, publishedVersionId: null },
+    { id: 'l4', title: 'Sorting and Limiting', estimatedMinutes: 25, difficulty: 'beginner' as const, status: 'in_progress' as const, sortOrder: 4, publishedVersionId: null },
+    { id: 'l5', title: 'Aggregate Functions', estimatedMinutes: 40, difficulty: 'beginner' as const, status: 'available' as const, sortOrder: 5, publishedVersionId: null },
+    { id: 'l6', title: 'GROUP BY and HAVING', estimatedMinutes: 45, difficulty: 'intermediate' as const, status: 'locked' as const, sortOrder: 6, publishedVersionId: null },
+    { id: 'l7', title: 'INNER JOIN', estimatedMinutes: 50, difficulty: 'intermediate' as const, status: 'locked' as const, sortOrder: 7, publishedVersionId: null },
+    { id: 'l8', title: 'LEFT and RIGHT JOIN', estimatedMinutes: 50, difficulty: 'intermediate' as const, status: 'locked' as const, sortOrder: 8, publishedVersionId: null },
   ];
 
   const progress = displayTrack.userProgress
