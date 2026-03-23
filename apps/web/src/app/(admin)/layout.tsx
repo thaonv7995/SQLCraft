@@ -1,17 +1,15 @@
 import { Navbar } from '@/components/layout/navbar';
-import { Sidebar } from '@/components/layout/sidebar';
+import { AdminSidebar } from '@/components/layout/admin-sidebar';
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-surface flex flex-col">
-      {/* Top navbar */}
       <Navbar />
 
-      {/* Body: sidebar + content */}
       <div className="flex flex-1 pt-14">
-        {/* Sidebar — hidden on mobile */}
+        {/* Admin sidebar — hidden on mobile */}
         <div className="hidden md:flex flex-col h-[calc(100vh-3.5rem)] sticky top-14 w-64 shrink-0">
-          <Sidebar />
+          <AdminSidebar />
         </div>
 
         {/* Main content */}
