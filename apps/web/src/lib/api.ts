@@ -168,6 +168,54 @@ export interface SystemJob {
   errorMessage?: string;
 }
 
+// ─── Databases ────────────────────────────────────────────────────────────────
+
+export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'social' | 'analytics' | 'other';
+export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large' | 'massive';
+export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
+
+export interface Database {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  domain: DatabaseDomain;
+  scale: DatabaseScale;
+  difficulty: DatabaseDifficulty;
+  engine: string;
+  domainIcon: string;
+  tags: string[];
+  rowCount: number;
+  tableCount: number;
+  estimatedSizeGb: number;
+  region?: string;
+  uptime?: number;
+  isAvailable?: boolean;
+  schema?: DatabaseTable[];
+  relationships?: DatabaseRelationship[];
+}
+
+export interface DatabaseTable {
+  name: string;
+  role?: 'primary' | 'secondary' | 'junction';
+  columns: DatabaseColumn[];
+}
+
+export interface DatabaseColumn {
+  name: string;
+  type: string;
+  isPrimary?: boolean;
+  isForeign?: boolean;
+  isNullable?: boolean;
+  references?: string;
+}
+
+export interface DatabaseRelationship {
+  from: string;
+  to: string;
+  label?: string;
+}
+
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
 
 export interface LeaderboardEntry {
@@ -363,6 +411,26 @@ export const adminApi = {
 
   triggerMigration: () =>
     api.post('/admin/migrations/run').then((r) => r.data),
+};
+
+// ─── Databases API ────────────────────────────────────────────────────────────
+
+export const databasesApi = {
+  list: (params?: { domain?: string; scale?: string; difficulty?: string }) =>
+    api
+      .get<PaginatedResponse<Database>>('/databases', { params })
+      .then((r) => r.data),
+
+  get: (id: string) =>
+    api.get<Database>(`/databases/${id}`).then((r) => r.data),
+
+  createSession: (databaseId: string, scale?: DatabaseScale) =>
+    api
+      .post<{ session: LearningSession; sandbox: { id: string; status: string } }>(
+        '/databases/sessions',
+        { databaseId, scale },
+      )
+      .then((r) => r.data.session),
 };
 
 // ─── Leaderboard API ──────────────────────────────────────────────────────────

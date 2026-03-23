@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { sessionsApi, tracksApi, queryApi } from '@/lib/api';
+import { sessionsApi, databasesApi, queryApi } from '@/lib/api';
 import type { UserStats } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { StatCard } from '@/components/ui/card';
@@ -18,7 +18,8 @@ import {
   TableEmpty,
   TableSkeleton,
 } from '@/components/ui/table';
-import { formatRelativeTime, truncateSql } from '@/lib/utils';
+import { DATABASE_SCALE_LABELS, PLACEHOLDER_DATABASES } from '@/lib/database-catalog';
+import { formatRelativeTime, formatRows, truncateSql } from '@/lib/utils';
 
 // ─── Fallback stats while user data loads ─────────────────────────────────────
 const EMPTY_STATS: UserStats = {
@@ -38,9 +39,9 @@ export default function DashboardPage() {
     staleTime: 30_000,
   });
 
-  const { data: tracks, isLoading: tracksLoading } = useQuery({
-    queryKey: ['tracks'],
-    queryFn: () => tracksApi.list({ limit: 3 }),
+  const { data: databaseCatalog, isLoading: databasesLoading } = useQuery({
+    queryKey: ['dashboard-databases'],
+    queryFn: () => databasesApi.list(),
     staleTime: 60_000,
   });
 
@@ -52,9 +53,9 @@ export default function DashboardPage() {
 
   const displayName = user?.displayName ?? user?.username ?? 'Developer';
   const stats = user?.stats ?? EMPTY_STATS;
-  const statsLoading = !user;
   const recentSessions = sessions?.slice(0, 5) ?? [];
   const recentQueries = queryHistory?.items ?? [];
+  const featuredDatabases = (databaseCatalog?.items ?? PLACEHOLDER_DATABASES).slice(0, 3);
 
   const now = new Date();
   const hour = now.getHours();
@@ -145,7 +146,10 @@ export default function DashboardPage() {
               {sessionsLoading ? (
                 <TableSkeleton rows={4} cols={4} />
               ) : recentSessions.length === 0 ? (
-                <TableEmpty message="No active sessions. Start a track to begin." colSpan={4} />
+                <TableEmpty
+                  message="No active sessions. Launch a sandbox from the database explorer to begin."
+                  colSpan={5}
+                />
               ) : (
                 recentSessions.map((s) => (
                   <TableRow key={s.id}>
@@ -220,20 +224,20 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Continue Learning */}
+      {/* Explore Databases */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-headline text-lg font-semibold text-on-surface">
-            Continue Learning
+            Explore Databases
           </h2>
-          <Link href="/tracks">
+          <Link href="/explore">
             <Button variant="ghost" size="sm">
-              Browse all tracks
+              Open explorer
             </Button>
           </Link>
         </div>
 
-        {tracksLoading ? (
+        {databasesLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
               <div
@@ -244,64 +248,40 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {(tracks?.items ?? []).map((track) => (
-              <Link key={track.id} href={`/tracks/${track.id}`}>
+            {featuredDatabases.map((database) => (
+              <Link key={database.id} href={`/explore/${database.id}`}>
                 <div className="bg-surface-container-low rounded-xl p-5 hover:bg-surface-container transition-colors cursor-pointer group h-full">
                   <div className="flex items-start justify-between gap-2 mb-3">
-                    <DifficultyBadge difficulty={track.difficulty} />
+                    <DifficultyBadge difficulty={database.difficulty} />
                     <span className="text-xs text-on-surface-variant">
-                      {track.lessonCount} lessons
+                      {database.engine}
                     </span>
                   </div>
-                  <h3 className="font-headline text-base font-semibold text-on-surface group-hover:text-primary transition-colors mb-2">
-                    {track.title}
-                  </h3>
-                  <p className="text-xs text-on-surface-variant line-clamp-2 mb-4">
-                    {track.description}
-                  </p>
-
-                  {track.userProgress && (
-                    <div className="mt-auto">
-                      <div className="flex justify-between text-xs text-on-surface-variant mb-1.5">
-                        <span>Progress</span>
-                        <span>
-                          {track.userProgress.completedLessons}/{track.lessonCount}
-                        </span>
-                      </div>
-                      <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-primary to-[#4453a7] rounded-full transition-all"
-                          style={{
-                            width: `${Math.round(
-                              (track.userProgress.completedLessons / track.lessonCount) * 100
-                            )}%`,
-                          }}
-                        />
-                      </div>
+                  <div className="mb-3 flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-container-high text-tertiary">
+                      <span
+                        className="material-symbols-outlined text-xl"
+                        style={{ fontVariationSettings: "'FILL' 1" }}
+                      >
+                        {database.domainIcon}
+                      </span>
                     </div>
-                  )}
-                </div>
-              </Link>
-            ))}
-
-            {/* Placeholder cards if not enough data */}
-            {(tracks?.items?.length ?? 0) === 0 && [
-              { title: 'SQL Fundamentals', difficulty: 'Beginner', lessons: 12 },
-              { title: 'Advanced Queries', difficulty: 'Intermediate', lessons: 18 },
-              { title: 'Query Optimization', difficulty: 'Advanced', lessons: 10 },
-            ].map((t, i) => (
-              <Link key={i} href="/tracks">
-                <div className="bg-surface-container-low rounded-xl p-5 hover:bg-surface-container transition-colors cursor-pointer group">
-                  <div className="flex items-start justify-between gap-2 mb-3">
-                    <DifficultyBadge difficulty={t.difficulty.toLowerCase()} />
-                    <span className="text-xs text-on-surface-variant">{t.lessons} lessons</span>
+                    <div className="min-w-0">
+                      <h3 className="font-headline text-base font-semibold text-on-surface group-hover:text-primary transition-colors">
+                        {database.name}
+                      </h3>
+                      <p className="text-xs uppercase tracking-[0.18em] text-outline">
+                        {DATABASE_SCALE_LABELS[database.scale] ?? database.scale}
+                      </p>
+                    </div>
                   </div>
-                  <h3 className="font-headline text-base font-semibold text-on-surface group-hover:text-primary transition-colors mb-2">
-                    {t.title}
-                  </h3>
-                  <p className="text-xs text-on-surface-variant">
-                    Master SQL concepts through hands-on exercises and real-world challenges.
+                  <p className="text-xs text-on-surface-variant line-clamp-2 mb-4">
+                    {database.description}
                   </p>
+                  <div className="mt-auto flex items-center justify-between border-t border-outline-variant/10 pt-3 text-xs text-on-surface-variant">
+                    <span>{formatRows(database.rowCount)} rows</span>
+                    <span>{database.tableCount} tables</span>
+                  </div>
                 </div>
               </Link>
             ))}

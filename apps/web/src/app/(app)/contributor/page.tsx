@@ -1,107 +1,140 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useAuthStore } from '@/stores/auth';
-import { StatCard } from '@/components/ui/card';
-import { StatusBadge } from '@/components/ui/badge';
+import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatRelativeTime } from '@/lib/utils';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { useAuthStore } from '@/stores/auth';
+import { cn, formatRelativeTime } from '@/lib/utils';
 
-type ContributionDay = { count: number; weekIdx: number; dayIdx: number };
-
-function generateContributionWeeks(): ContributionDay[][] {
-  return Array.from({ length: 12 }, (_, weekIdx) =>
-    Array.from({ length: 7 }, (_, dayIdx) => {
-      const count = Math.random() < 0.4 ? 0 : Math.floor(Math.random() * 5);
-      return { count, weekIdx, dayIdx };
-    })
-  );
-}
-
-const RECENT_CONTRIBUTIONS = [
-  { id: 'c1', type: 'lesson', title: 'Advanced Window Functions Exercise', status: 'published', date: new Date(Date.now() - 2 * 86400_000).toISOString(), track: 'Window Functions' },
-  { id: 'c2', type: 'pr', title: 'Fix: Incorrect expected output in JOIN exercises', status: 'merged', date: new Date(Date.now() - 5 * 86400_000).toISOString(), track: null },
-  { id: 'c3', type: 'lesson', title: 'Introduction to CTEs', status: 'draft', date: new Date(Date.now() - 8 * 86400_000).toISOString(), track: 'CTEs & Subqueries' },
-  { id: 'c4', type: 'issue', title: 'Outdated syntax in MySQL lesson 4', status: 'closed', date: new Date(Date.now() - 12 * 86400_000).toISOString(), track: null },
+const KPI_CARDS = [
+  {
+    label: 'Merged This Quarter',
+    value: '18',
+    delta: '+4 vs last sprint',
+    icon: 'merge',
+    accent: 'border-secondary',
+    tone: 'text-secondary',
+  },
+  {
+    label: 'Active Drafts',
+    value: '06',
+    delta: '2 awaiting review',
+    icon: 'edit_note',
+    accent: 'border-primary',
+    tone: 'text-primary',
+  },
+  {
+    label: 'Average Review SLA',
+    value: '31h',
+    delta: 'steady in the green',
+    icon: 'timer',
+    accent: 'border-tertiary',
+    tone: 'text-tertiary',
+  },
+  {
+    label: 'Issue Coverage',
+    value: '92%',
+    delta: 'high priority queue stable',
+    icon: 'query_stats',
+    accent: 'border-error',
+    tone: 'text-error',
+  },
 ];
 
-const OPEN_ISSUES = [
-  { id: 'i1', title: 'Need exercises for recursive CTEs', label: 'help wanted', difficulty: 'advanced', assignees: 0 },
-  { id: 'i2', title: 'Add PostgreSQL-specific window function examples', label: 'enhancement', difficulty: 'intermediate', assignees: 1 },
-  { id: 'i3', title: 'Improve explanation in GROUP BY lesson 3', label: 'good first issue', difficulty: 'beginner', assignees: 0 },
-  { id: 'i4', title: 'Add test cases for ROLLUP and CUBE operators', label: 'help wanted', difficulty: 'advanced', assignees: 0 },
+const ACTIVE_DRAFTS = [
+  {
+    id: 'draft-1',
+    title: 'Retention Cohorts for Subscription Rescue',
+    domain: 'Analytics',
+    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    status: 'draft',
+  },
+  {
+    id: 'draft-2',
+    title: 'Chargeback Investigation Drill',
+    domain: 'Fintech',
+    updatedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
+    status: 'pending',
+  },
+  {
+    id: 'draft-3',
+    title: 'Healthcare Claims Reconciliation Lab',
+    domain: 'Health Systems',
+    updatedAt: new Date(Date.now() - 28 * 60 * 60 * 1000).toISOString(),
+    status: 'active',
+  },
+  {
+    id: 'draft-4',
+    title: 'Warehouse Order Velocity Benchmark',
+    domain: 'E-Commerce',
+    updatedAt: new Date(Date.now() - 52 * 60 * 60 * 1000).toISOString(),
+    status: 'draft',
+  },
 ];
 
-const CONTRIBUTION_TYPE_ICONS: Record<string, string> = {
-  lesson: 'menu_book',
-  pr: 'merge',
-  issue: 'bug_report',
-};
+const HIGH_PRIORITY_REQUESTS = [
+  {
+    title: 'Recursive CTE mission pack',
+    detail: 'Leaderboard demand is climbing after three consecutive advanced track completions.',
+    signal: 'High urgency',
+  },
+  {
+    title: 'Fraud analytics sandbox refresh',
+    detail: 'Contributors are asking for fresher fintech data with clearer anomaly labels.',
+    signal: 'New brief',
+  },
+  {
+    title: 'Postgres 16 query plan snapshots',
+    detail: 'Need updated execution plan screenshots for the optimizer lessons.',
+    signal: 'Review needed',
+  },
+];
 
-function ContributionGrid() {
-  const [weeks, setWeeks] = useState<ContributionDay[][]>([]);
-  useEffect(() => {
-    setWeeks(generateContributionWeeks());
-  }, []);
+const TRENDING_DOMAINS = [
+  { name: 'Fintech', growth: '+18%', note: 'Fraud ops and ledger balancing missions lead the queue.' },
+  { name: 'Analytics', growth: '+12%', note: 'Demand is centered on cohorting, rollups, and materialized views.' },
+  { name: 'Health Systems', growth: '+9%', note: 'Interest is shifting toward claims joins and encounter timelines.' },
+];
 
+function MetricCard({
+  label,
+  value,
+  delta,
+  icon,
+  accent,
+  tone,
+}: (typeof KPI_CARDS)[number]) {
   return (
-    <div className="bg-surface-container-low rounded-xl p-5">
-      <h3 className="font-headline text-sm font-semibold text-on-surface mb-4">
-        Contribution Activity
-      </h3>
-      <div className="overflow-x-auto">
-        <div className="flex gap-1 min-w-max">
-          {weeks.length === 0
-            ? Array.from({ length: 12 }, (_, wi) => (
-                <div key={wi} className="flex flex-col gap-1">
-                  {Array.from({ length: 7 }, (_, di) => (
-                    <div key={di} className="w-3 h-3 rounded-sm bg-surface-container-highest" />
-                  ))}
-                </div>
-              ))
-            : weeks.map((week, wi) => (
-            <div key={wi} className="flex flex-col gap-1">
-              {week.map((day, di) => (
-                <div
-                  key={di}
-                  title={`${day.count} contributions`}
-                  className={`w-3 h-3 rounded-sm transition-colors ${
-                    day.count === 0
-                      ? 'bg-surface-container-highest'
-                      : day.count === 1
-                      ? 'bg-primary/20'
-                      : day.count === 2
-                      ? 'bg-primary/40'
-                      : day.count === 3
-                      ? 'bg-primary/60'
-                      : 'bg-primary/90'
-                  }`}
-                />
-              ))}
-            </div>
-          ))}
+    <div
+      className={cn(
+        'rounded-2xl border border-outline-variant/10 border-l-4 bg-surface-container-low p-5 shadow-[0_10px_30px_rgba(0,0,0,0.12)]',
+        accent,
+      )}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.18em] text-outline">{label}</p>
+          <p className={cn('mt-3 font-headline text-3xl font-bold', tone)}>{value}</p>
+          <p className="mt-2 text-sm text-on-surface-variant">{delta}</p>
         </div>
-      </div>
-      <div className="flex items-center gap-2 mt-3 text-xs text-outline">
-        <span>Less</span>
-        {[0, 1, 2, 3, 4].map((level) => (
-          <div
-            key={level}
-            className={`w-3 h-3 rounded-sm ${
-              level === 0
-                ? 'bg-surface-container-highest'
-                : level === 1
-                ? 'bg-primary/20'
-                : level === 2
-                ? 'bg-primary/40'
-                : level === 3
-                ? 'bg-primary/60'
-                : 'bg-primary/90'
-            }`}
-          />
-        ))}
-        <span>More</span>
+        <div
+          className={cn(
+            'flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-container-high',
+            tone,
+          )}
+        >
+          <span className="material-symbols-outlined text-2xl">{icon}</span>
+        </div>
       </div>
     </div>
   );
@@ -112,146 +145,171 @@ export default function ContributorPage() {
   const displayName = user?.displayName ?? user?.username ?? 'Contributor';
 
   return (
-    <div className="p-6 space-y-8 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-on-surface-variant mb-1">Contributor Dashboard</p>
-          <h1 className="font-headline text-2xl font-bold text-on-surface">{displayName}</h1>
-          <p className="text-sm text-on-surface-variant mt-1">
-            Thank you for building SQLCraft with us.
-          </p>
-        </div>
-        <Link href="/admin/content">
-          <Button
-            variant="primary"
-            leftIcon={<span className="material-symbols-outlined text-sm">add</span>}
-          >
-            Create New Lesson
-          </Button>
-        </Link>
-      </div>
+    <>
+      <div className="p-8 max-w-7xl mx-auto space-y-8">
+        <section className="rounded-[28px] border border-outline-variant/10 bg-[radial-gradient(circle_at_top_left,_rgba(68,216,241,0.12),_transparent_32%),linear-gradient(180deg,_rgba(255,255,255,0.03),_rgba(255,255,255,0))] px-8 py-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="border-l-2 border-primary pl-5">
+              <p className="text-xs uppercase tracking-[0.24em] text-outline">
+                Contributor command board
+              </p>
+              <h1 className="mt-3 font-headline text-4xl font-bold tracking-tight text-on-surface">
+                {displayName}
+              </h1>
+              <p className="mt-3 max-w-3xl text-base leading-7 text-on-surface-variant">
+                Review pipeline pressure, keep high-priority drafts moving, and respond to what the
+                catalog needs next before demand overtakes supply.
+              </p>
+            </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="PRs Merged"
-          value="12"
-          delta="+2 this month"
-          deltaPositive
-          accent="secondary"
-          icon={<span className="material-symbols-outlined">merge</span>}
-        />
-        <StatCard
-          label="Lessons Authored"
-          value="8"
-          accent="primary"
-          icon={<span className="material-symbols-outlined">menu_book</span>}
-        />
-        <StatCard
-          label="Issues Closed"
-          value="27"
-          delta="+5 this month"
-          deltaPositive
-          accent="tertiary"
-          icon={<span className="material-symbols-outlined">task_alt</span>}
-        />
-        <StatCard
-          label="Contributor Rank"
-          value="#14"
-          accent="error"
-          icon={<span className="material-symbols-outlined">military_tech</span>}
-        />
-      </div>
-
-      {/* Contribution chart */}
-      <ContributionGrid />
-
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* Recent contributions */}
-        <div className="bg-surface-container-low rounded-xl overflow-hidden">
-          <div className="px-5 py-4">
-            <h2 className="font-headline text-base font-semibold text-on-surface">
-              Recent Contributions
-            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge className="bg-surface-container-high text-on-surface-variant">
+                Review lane healthy
+              </Badge>
+              <Badge className="bg-secondary/10 text-secondary">6 drafts in motion</Badge>
+              <Link href="/admin/content">
+                <Button
+                  leftIcon={<span className="material-symbols-outlined text-sm">add</span>}
+                >
+                  New Mission
+                </Button>
+              </Link>
+            </div>
           </div>
-          <div className="flex flex-col">
-            {RECENT_CONTRIBUTIONS.map((c) => (
-              <div key={c.id} className="px-5 py-3 flex items-center gap-3 hover:bg-surface-container transition-colors">
-                <div className="w-8 h-8 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-sm text-on-surface-variant">
-                    {CONTRIBUTION_TYPE_ICONS[c.type] ?? 'code'}
-                  </span>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {KPI_CARDS.map((metric) => (
+            <MetricCard key={metric.label} {...metric} />
+          ))}
+        </section>
+
+        <section className="grid gap-6 xl:grid-cols-12">
+          <div className="space-y-6 xl:col-span-8">
+            <Card className="rounded-[28px] border border-outline-variant/10">
+              <CardHeader className="px-6 py-5">
+                <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <CardTitle className="text-xl">Active Drafts</CardTitle>
+                    <CardDescription className="mt-1 max-w-2xl">
+                      Content in motion right now. Keep these artifacts flowing through review,
+                      validation, and launch.
+                    </CardDescription>
+                  </div>
+                  <Link href="/admin/content">
+                    <Button variant="secondary" size="sm">
+                      Open content queue
+                    </Button>
+                  </Link>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-on-surface truncate">{c.title}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <StatusBadge status={c.status} />
-                    {c.track && (
-                      <span className="text-xs text-tertiary truncate">{c.track}</span>
+              </CardHeader>
+              <CardContent className="px-0 pb-2 pt-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Domain</TableHead>
+                      <TableHead>Last Updated</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ACTIVE_DRAFTS.length === 0 ? (
+                      <TableEmpty colSpan={4} message="No active drafts right now." />
+                    ) : (
+                      ACTIVE_DRAFTS.map((draft) => (
+                        <TableRow key={draft.id}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <p className="font-medium text-on-surface">{draft.title}</p>
+                              <p className="text-xs uppercase tracking-[0.18em] text-outline">
+                                Draft {draft.id}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="bg-surface-container-high text-on-surface-variant">
+                              {draft.domain}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-on-surface-variant">
+                            {formatRelativeTime(draft.updatedAt)}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={draft.status} />
+                          </TableCell>
+                        </TableRow>
+                      ))
                     )}
-                  </div>
-                </div>
-                <span className="text-xs text-outline shrink-0">
-                  {formatRelativeTime(c.date)}
-                </span>
-              </div>
-            ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           </div>
-        </div>
 
-        {/* Open issues */}
-        <div className="bg-surface-container-low rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4">
-            <h2 className="font-headline text-base font-semibold text-on-surface">
-              Open Tasks
-            </h2>
-            <Button variant="ghost" size="sm">
-              View all issues
-            </Button>
-          </div>
-          <div className="flex flex-col">
-            {OPEN_ISSUES.map((issue) => (
-              <div key={issue.id} className="px-5 py-3 hover:bg-surface-container transition-colors">
-                <div className="flex items-start gap-3">
-                  <span className="material-symbols-outlined text-base text-outline mt-0.5 shrink-0">
-                    radio_button_unchecked
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-on-surface leading-snug">{issue.title}</p>
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          issue.label === 'good first issue'
-                            ? 'text-secondary bg-secondary/15'
-                            : issue.label === 'help wanted'
-                            ? 'text-primary bg-primary/15'
-                            : 'text-on-surface-variant bg-surface-container-highest'
-                        }`}
-                      >
-                        {issue.label}
-                      </span>
-                      <span className={`text-xs ${
-                        issue.difficulty === 'advanced' ? 'text-error' :
-                        issue.difficulty === 'intermediate' ? 'text-primary' : 'text-secondary'
-                      }`}>
-                        {issue.difficulty}
-                      </span>
-                      {issue.assignees === 0 && (
-                        <span className="text-xs text-outline">unassigned</span>
-                      )}
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm">
-                    Claim
-                  </Button>
+          <div className="space-y-6 xl:col-span-4">
+            <Card className="rounded-[28px] border border-outline-variant/10">
+              <CardHeader className="px-6 py-5">
+                <div>
+                  <CardTitle className="text-xl">Market Intelligence</CardTitle>
+                  <CardDescription className="mt-1">
+                    Signals that should shape the next contributor sprint.
+                  </CardDescription>
                 </div>
-              </div>
-            ))}
+              </CardHeader>
+              <CardContent className="space-y-4 px-6 pb-6 pt-0">
+                <div className="space-y-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-outline">
+                    High Priority Requests
+                  </p>
+                  {HIGH_PRIORITY_REQUESTS.map((request) => (
+                    <div
+                      key={request.title}
+                      className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="font-medium text-on-surface">{request.title}</p>
+                        <Badge className="bg-error/10 text-error">{request.signal}</Badge>
+                      </div>
+                      <p className="text-sm leading-6 text-on-surface-variant">
+                        {request.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-outline">
+                    Trending Domains
+                  </p>
+                  {TRENDING_DOMAINS.map((domain) => (
+                    <div
+                      key={domain.name}
+                      className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p className="font-medium text-on-surface">{domain.name}</p>
+                        <span className="font-mono text-sm text-secondary">{domain.growth}</span>
+                      </div>
+                      <p className="text-sm leading-6 text-on-surface-variant">{domain.note}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+
+      <Link href="/admin/content" className="fixed bottom-8 right-8 z-30">
+        <Button
+          size="lg"
+          className="shadow-[0_18px_40px_rgba(68,83,167,0.35)]"
+          leftIcon={<span className="material-symbols-outlined">add_circle</span>}
+        >
+          New Mission
+        </Button>
+      </Link>
+    </>
   );
 }

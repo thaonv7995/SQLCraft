@@ -28,7 +28,7 @@ export default function LabIndexPage() {
           </div>
           <h1 className="font-headline text-2xl font-bold text-on-surface">SQL Lab</h1>
           <p className="text-sm text-on-surface-variant mt-2">
-            Select a lesson from a track to spin up your sandbox workspace.
+            Launch or resume a sandbox workspace from the database catalog.
           </p>
         </div>
 
@@ -72,24 +72,24 @@ export default function LabIndexPage() {
         <div className="bg-surface-container-low rounded-xl p-5 space-y-4">
           <div className="flex items-start gap-3">
             <span className="material-symbols-outlined text-2xl text-secondary mt-0.5 shrink-0">
-              school
+              database
             </span>
             <div>
-              <h2 className="text-sm font-semibold text-on-surface">Start from a Track</h2>
+              <h2 className="text-sm font-semibold text-on-surface">Start from a Database</h2>
               <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
-                Each lesson provides its own sandboxed PostgreSQL environment with a pre-loaded
-                dataset. Browse the available tracks to pick a lesson and launch your workspace.
+                Explore the catalog, inspect the schema, and launch a dedicated sandbox from the
+                database that matches the query problem you want to practice.
               </p>
             </div>
           </div>
-          <Link href="/tracks">
+          <Link href="/explore">
             <Button
               variant="primary"
               fullWidth
               size="lg"
-              leftIcon={<span className="material-symbols-outlined">menu_book</span>}
+              leftIcon={<span className="material-symbols-outlined">travel_explore</span>}
             >
-              Browse Tracks &amp; Lessons
+              Browse Databases
             </Button>
           </Link>
         </div>

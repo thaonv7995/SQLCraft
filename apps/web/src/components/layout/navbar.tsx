@@ -10,7 +10,7 @@ import { generateInitials } from '@/lib/utils';
 
 const NAV_LINKS = [
   { href: '/dashboard', label: 'Dashboard' },
-  { href: '/tracks', label: 'Tracks' },
+  { href: '/explore', label: 'Databases' },
   { href: '/lab', label: 'Workspace' },
   { href: '/docs', label: 'Documentation' },
 ];
