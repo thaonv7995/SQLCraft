@@ -27,11 +27,10 @@ const variantClasses: Record<ButtonVariant, string> = {
   ].join(' '),
 
   secondary: [
-    'bg-transparent',
+    'bg-primary/10',
     'text-primary',
-    'border border-primary/20',
-    'hover:bg-primary/5',
-    'active:bg-primary/10',
+    'hover:bg-primary/15',
+    'active:bg-primary/20',
   ].join(' '),
 
   ghost: [
@@ -43,11 +42,10 @@ const variantClasses: Record<ButtonVariant, string> = {
   ].join(' '),
 
   destructive: [
-    'bg-transparent',
+    'bg-error/10',
     'text-error',
-    'border border-error/20',
-    'hover:bg-error/5',
-    'active:bg-error/10',
+    'hover:bg-error/15',
+    'active:bg-error/20',
   ].join(' '),
 };
 

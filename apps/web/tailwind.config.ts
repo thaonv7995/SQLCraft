@@ -60,11 +60,11 @@ const config: Config = {
         'on-primary': '#15267b',
       },
       fontFamily: {
-        headline: ['Space Grotesk', 'sans-serif'],
-        body: ['Inter', 'sans-serif'],
-        label: ['Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
-        sans: ['Inter', 'sans-serif'],
+        headline: ['var(--font-space-grotesk)', 'sans-serif'],
+        body: ['var(--font-inter)', 'sans-serif'],
+        label: ['var(--font-inter)', 'sans-serif'],
+        mono: ['var(--font-jetbrains-mono)', 'monospace'],
+        sans: ['var(--font-inter)', 'sans-serif'],
       },
       borderRadius: {
         DEFAULT: '0.125rem',

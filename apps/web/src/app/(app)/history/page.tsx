@@ -97,7 +97,7 @@ function ExpandedQueryRow({ query }: { query: QueryExecution }) {
 
       {/* Error */}
       {query.errorMessage && (
-        <div className="flex gap-2.5 bg-error/5 border border-error/20 rounded-xl p-3">
+        <div className="flex gap-2.5 bg-error/10 rounded-xl p-3">
           <span className="material-symbols-outlined text-error text-sm shrink-0">error</span>
           <p className="text-xs font-mono text-error">{query.errorMessage}</p>
         </div>
@@ -121,7 +121,7 @@ function ExpandedQueryRow({ query }: { query: QueryExecution }) {
           <p className="text-xs font-semibold uppercase tracking-wider text-outline mb-2">
             Result Preview ({query.result.rows.length} rows)
           </p>
-          <div className="overflow-x-auto rounded-xl border border-outline-variant/20">
+          <div className="overflow-x-auto rounded-xl bg-surface-container-high">
             <table className="text-xs font-mono min-w-full">
               <thead className="bg-surface-container-high">
                 <tr>
@@ -307,7 +307,7 @@ export default function HistoryPage() {
         </Table>
 
         {/* Pagination */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-outline-variant/10">
+        <div className="flex items-center justify-between px-5 py-3 bg-surface-container/30">
           <p className="text-xs text-on-surface-variant">
             {filtered.length} queries shown
           </p>

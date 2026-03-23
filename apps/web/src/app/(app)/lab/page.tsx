@@ -56,8 +56,8 @@ export default function LabIndexPage() {
                 onClick={() => setDatasetSize(opt.value)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left ${
                   datasetSize === opt.value
-                    ? 'bg-primary/10 border border-primary/30'
-                    : 'bg-surface-container hover:bg-surface-container-high border border-transparent'
+                    ? 'bg-primary/15'
+                    : 'bg-surface-container hover:bg-surface-container-high'
                 }`}
               >
                 <div

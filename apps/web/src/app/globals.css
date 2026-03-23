@@ -19,6 +19,17 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Browser autofill override — prevents Chrome's blue/yellow autofill background */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 9999px #2a2a2a inset !important;
+    -webkit-text-fill-color: #e5e2e1 !important;
+    caret-color: #e5e2e1;
+    transition: background-color 0s 600000s;
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;

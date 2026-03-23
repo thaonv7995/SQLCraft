@@ -39,20 +39,22 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               'text-on-surface',
               'text-sm font-body',
               'rounded-lg',
-              'border border-outline-variant',
               'h-9 px-3',
               // Placeholder
               'placeholder:text-outline',
               // Focus
               'outline-none',
-              'focus:border-primary',
-              'focus:ring-1 focus:ring-primary/30',
+              'ring-1 ring-transparent',
+              'focus:ring-primary/40',
               // Transition
-              'transition-colors duration-150',
+              'transition-all duration-150',
               // Disabled
               'disabled:opacity-40 disabled:cursor-not-allowed',
+              // Autofill
+              '[&:-webkit-autofill]:shadow-[inset_0_0_0_9999px_#2a2a2a]',
+              '[&:-webkit-autofill]:[-webkit-text-fill-color:#e5e2e1]',
               // Error
-              error && 'border-error/60 focus:border-error focus:ring-error/20',
+              error && 'bg-error/5 ring-error/30 focus:ring-error/50',
               // Icons
               leftIcon && 'pl-9',
               rightIcon && 'pr-9',
@@ -108,15 +110,15 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             'bg-surface-container-high',
             'text-on-surface text-sm font-body',
             'rounded-lg',
-            'border border-outline-variant',
             'px-3 py-2',
             'placeholder:text-outline',
             'outline-none',
-            'focus:border-primary focus:ring-1 focus:ring-primary/30',
-            'transition-colors duration-150',
+            'ring-1 ring-transparent',
+            'focus:ring-primary/40',
+            'transition-all duration-150',
             'disabled:opacity-40 disabled:cursor-not-allowed',
             'resize-y',
-            error && 'border-error/60 focus:border-error focus:ring-error/20',
+            error && 'bg-error/5 ring-error/30 focus:ring-error/50',
             className
           )}
           {...props}
@@ -161,14 +163,14 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
             'bg-surface-container-high',
             'text-on-surface text-sm font-body',
             'rounded-lg',
-            'border border-outline-variant',
             'h-9 px-3',
             'outline-none',
-            'focus:border-primary focus:ring-1 focus:ring-primary/30',
-            'transition-colors duration-150',
+            'ring-1 ring-transparent',
+            'focus:ring-primary/40',
+            'transition-all duration-150',
             'disabled:opacity-40 disabled:cursor-not-allowed',
             'cursor-pointer',
-            error && 'border-error/60',
+            error && 'bg-error/5 ring-error/30',
             className
           )}
           {...props}

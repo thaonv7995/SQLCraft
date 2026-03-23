@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth';
 import { StatCard } from '@/components/ui/card';
@@ -7,13 +8,16 @@ import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { formatRelativeTime } from '@/lib/utils';
 
-// Demo contribution data
-const CONTRIBUTION_WEEKS = Array.from({ length: 12 }, (_, weekIdx) =>
-  Array.from({ length: 7 }, (_, dayIdx) => {
-    const count = Math.random() < 0.4 ? 0 : Math.floor(Math.random() * 5);
-    return { count, weekIdx, dayIdx };
-  })
-);
+type ContributionDay = { count: number; weekIdx: number; dayIdx: number };
+
+function generateContributionWeeks(): ContributionDay[][] {
+  return Array.from({ length: 12 }, (_, weekIdx) =>
+    Array.from({ length: 7 }, (_, dayIdx) => {
+      const count = Math.random() < 0.4 ? 0 : Math.floor(Math.random() * 5);
+      return { count, weekIdx, dayIdx };
+    })
+  );
+}
 
 const RECENT_CONTRIBUTIONS = [
   { id: 'c1', type: 'lesson', title: 'Advanced Window Functions Exercise', status: 'published', date: new Date(Date.now() - 2 * 86400_000).toISOString(), track: 'Window Functions' },
@@ -36,6 +40,11 @@ const CONTRIBUTION_TYPE_ICONS: Record<string, string> = {
 };
 
 function ContributionGrid() {
+  const [weeks, setWeeks] = useState<ContributionDay[][]>([]);
+  useEffect(() => {
+    setWeeks(generateContributionWeeks());
+  }, []);
+
   return (
     <div className="bg-surface-container-low rounded-xl p-5">
       <h3 className="font-headline text-sm font-semibold text-on-surface mb-4">
@@ -43,7 +52,15 @@ function ContributionGrid() {
       </h3>
       <div className="overflow-x-auto">
         <div className="flex gap-1 min-w-max">
-          {CONTRIBUTION_WEEKS.map((week, wi) => (
+          {weeks.length === 0
+            ? Array.from({ length: 12 }, (_, wi) => (
+                <div key={wi} className="flex flex-col gap-1">
+                  {Array.from({ length: 7 }, (_, di) => (
+                    <div key={di} className="w-3 h-3 rounded-sm bg-surface-container-highest" />
+                  ))}
+                </div>
+              ))
+            : weeks.map((week, wi) => (
             <div key={wi} className="flex flex-col gap-1">
               {week.map((day, di) => (
                 <div
@@ -159,7 +176,7 @@ export default function ContributorPage() {
               Recent Contributions
             </h2>
           </div>
-          <div className="divide-y divide-outline-variant/10">
+          <div className="flex flex-col">
             {RECENT_CONTRIBUTIONS.map((c) => (
               <div key={c.id} className="px-5 py-3 flex items-center gap-3 hover:bg-surface-container transition-colors">
                 <div className="w-8 h-8 rounded-lg bg-surface-container-high flex items-center justify-center shrink-0">
@@ -194,7 +211,7 @@ export default function ContributorPage() {
               View all issues
             </Button>
           </div>
-          <div className="divide-y divide-outline-variant/10">
+          <div className="flex flex-col">
             {OPEN_ISSUES.map((issue) => (
               <div key={issue.id} className="px-5 py-3 hover:bg-surface-container transition-colors">
                 <div className="flex items-start gap-3">
@@ -205,12 +222,12 @@ export default function ContributorPage() {
                     <p className="text-sm text-on-surface leading-snug">{issue.title}</p>
                     <div className="flex items-center gap-2 mt-1.5">
                       <span
-                        className={`text-xs px-2 py-0.5 rounded-full border ${
+                        className={`text-xs px-2 py-0.5 rounded-full ${
                           issue.label === 'good first issue'
-                            ? 'text-secondary bg-secondary/10 border-secondary/20'
+                            ? 'text-secondary bg-secondary/15'
                             : issue.label === 'help wanted'
-                            ? 'text-primary bg-primary/10 border-primary/20'
-                            : 'text-on-surface-variant bg-surface-container-high border-outline-variant'
+                            ? 'text-primary bg-primary/15'
+                            : 'text-on-surface-variant bg-surface-container-highest'
                         }`}
                       >
                         {issue.label}

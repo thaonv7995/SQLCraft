@@ -11,6 +11,8 @@ export type BadgeVariant =
   | 'archived'
   | 'draft'
   | 'published'
+  | 'merged'
+  | 'closed'
   | 'beginner'
   | 'intermediate'
   | 'advanced'
@@ -27,79 +29,89 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 const variantConfig: Record<BadgeVariant, { label: string; classes: string; dotClass?: string }> = {
   provisioning: {
     label: 'Provisioning',
-    classes: 'text-tertiary bg-tertiary/10 border border-tertiary/20 animate-pulse-glow',
+    classes: 'text-tertiary bg-tertiary/15 animate-pulse-glow',
     dotClass: 'bg-tertiary',
   },
   ready: {
     label: 'Ready',
-    classes: 'text-secondary bg-secondary/10 border border-secondary/20',
+    classes: 'text-secondary bg-secondary/15',
     dotClass: 'bg-secondary',
   },
   success: {
     label: 'Success',
-    classes: 'text-secondary bg-secondary/10 border border-secondary/20',
+    classes: 'text-secondary bg-secondary/15',
     dotClass: 'bg-secondary',
   },
   error: {
     label: 'Error',
-    classes: 'text-error bg-error/10 border border-error/20',
+    classes: 'text-error bg-error/15',
     dotClass: 'bg-error',
   },
   pending: {
     label: 'Pending',
-    classes: 'text-on-surface-variant bg-surface-container-high border border-outline-variant',
+    classes: 'text-on-surface-variant bg-surface-container-highest',
     dotClass: 'bg-on-surface-variant',
   },
   active: {
     label: 'Active',
-    classes: 'text-primary bg-primary/10 border border-primary/20',
+    classes: 'text-primary bg-primary/15',
     dotClass: 'bg-primary',
   },
   archived: {
     label: 'Archived',
-    classes: 'text-on-surface-variant bg-surface-container border border-outline-variant/50',
+    classes: 'text-on-surface-variant bg-surface-container-high',
     dotClass: 'bg-on-surface-variant',
   },
   draft: {
     label: 'Draft',
-    classes: 'text-on-surface-variant bg-surface-container-high border border-outline-variant',
+    classes: 'text-on-surface-variant bg-surface-container-highest',
     dotClass: 'bg-on-surface-variant',
   },
   published: {
     label: 'Published',
-    classes: 'text-secondary bg-secondary/10 border border-secondary/20',
+    classes: 'text-secondary bg-secondary/15',
     dotClass: 'bg-secondary',
+  },
+  merged: {
+    label: 'Merged',
+    classes: 'text-primary bg-primary/15',
+    dotClass: 'bg-primary',
+  },
+  closed: {
+    label: 'Closed',
+    classes: 'text-on-surface-variant bg-surface-container-high',
+    dotClass: 'bg-on-surface-variant',
   },
   beginner: {
     label: 'Beginner',
-    classes: 'text-secondary bg-secondary/10 border border-secondary/20',
+    classes: 'text-secondary bg-secondary/15',
   },
   intermediate: {
     label: 'Intermediate',
-    classes: 'text-primary bg-primary/10 border border-primary/20',
+    classes: 'text-primary bg-primary/15',
   },
   advanced: {
     label: 'Advanced',
-    classes: 'text-error bg-error/10 border border-error/20',
+    classes: 'text-error bg-error/15',
   },
   running: {
     label: 'Running',
-    classes: 'text-tertiary bg-tertiary/10 border border-tertiary/20',
+    classes: 'text-tertiary bg-tertiary/15',
     dotClass: 'bg-tertiary animate-pulse',
   },
   terminated: {
     label: 'Terminated',
-    classes: 'text-on-surface-variant bg-surface-container border border-outline-variant/50',
+    classes: 'text-on-surface-variant bg-surface-container-high',
     dotClass: 'bg-on-surface-variant',
   },
   idle: {
     label: 'Idle',
-    classes: 'text-on-surface-variant bg-surface-container-high border border-outline-variant',
+    classes: 'text-on-surface-variant bg-surface-container-highest',
     dotClass: 'bg-on-surface-variant',
   },
   default: {
     label: 'Unknown',
-    classes: 'text-on-surface-variant bg-surface-container border border-outline-variant/50',
+    classes: 'text-on-surface-variant bg-surface-container-high',
   },
 };
 
@@ -144,6 +156,8 @@ export function StatusBadge({ status, ...props }: { status: string } & Omit<Badg
     draft: 'draft',
     archived: 'archived',
     completed: 'success',
+    merged: 'merged',
+    closed: 'closed',
   };
   const v = map[status?.toLowerCase()] ?? 'default';
   return <Badge variant={v} dot {...props} />;

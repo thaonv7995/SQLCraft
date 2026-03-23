@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table';
 import { cn, formatDuration, formatRows, formatRelativeTime, truncateSql } from '@/lib/utils';
 import type { QueryResultColumn } from '@/lib/api';
+import { SqlEditor } from '@/components/ui/sql-editor';
 
 // ─── Dataset Size Selector ────────────────────────────────────────────────────
 
@@ -50,54 +51,26 @@ function DatasetSizeSelector() {
   );
 }
 
-// ─── SQL Editor (textarea-based, CodeMirror integration point) ────────────────
+// ─── SQL Editor (CodeMirror 6) ────────────────────────────────────────────────
 
-function SqlEditor() {
+function SqlEditorPanel() {
   const { currentQuery, setQuery } = useLabStore();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const { mutate: executeQuery } = useExecuteQuery();
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Handle Tab key for indentation
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const start = e.currentTarget.selectionStart;
-        const end = e.currentTarget.selectionEnd;
-        const newValue = currentQuery.slice(0, start) + '  ' + currentQuery.slice(end);
-        setQuery(newValue);
-        requestAnimationFrame(() => {
-          if (textareaRef.current) {
-            textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + 2;
-          }
-        });
-      }
-    },
-    [currentQuery, setQuery]
-  );
+  const handleExecute = useCallback(() => {
+    if (currentQuery.trim()) {
+      executeQuery({ sessionId, sql: currentQuery });
+    }
+  }, [currentQuery, executeQuery, sessionId]);
 
   return (
-    <div className="relative h-full bg-surface-container-lowest">
-      {/* Line numbers + editor area */}
-      <textarea
-        ref={textareaRef}
-        value={currentQuery}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={handleKeyDown}
-        spellCheck={false}
-        className={cn(
-          'w-full h-full resize-none',
-          'bg-surface-container-lowest',
-          'text-on-surface text-sm font-mono',
-          'p-4',
-          'outline-none',
-          'leading-relaxed',
-          'caret-primary',
-          'selection:bg-primary/20'
-        )}
-        placeholder="-- Write your SQL query here..."
-        style={{ tabSize: 2 }}
-      />
-    </div>
+    <SqlEditor
+      value={currentQuery}
+      onChange={setQuery}
+      onExecute={handleExecute}
+      placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
+    />
   );
 }
 
@@ -120,7 +93,7 @@ function ResultsPanel() {
   if (error) {
     return (
       <div className="flex-1 p-4">
-        <div className="bg-error/5 border border-error/20 rounded-xl p-4 flex gap-3">
+        <div className="bg-error/10 rounded-xl p-4 flex gap-3">
           <span className="material-symbols-outlined text-error text-xl shrink-0">error</span>
           <div>
             <p className="text-sm font-medium text-error mb-1">Query Error</p>
@@ -255,7 +228,7 @@ function QueryHistoryPanel() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto divide-y divide-outline-variant/10">
+    <div className="flex-1 overflow-y-auto flex flex-col">
       {queryHistory.map((q) => (
         <div
           key={q.id}
@@ -453,7 +426,7 @@ export default function LabPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)] bg-surface overflow-hidden">
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-surface-container-low shrink-0 border-b border-outline-variant/10">
+      <div className="flex items-center gap-2 px-4 py-2 bg-surface-container-low shrink-0">
         {/* Left: session info */}
         <div className="flex items-center gap-2 mr-2">
           {session ? (
@@ -468,7 +441,7 @@ export default function LabPage() {
           )}
         </div>
 
-        <div className="h-4 w-px bg-outline-variant/30" />
+        <div className="w-1" />
 
         {/* Execute */}
         <Button
@@ -505,7 +478,7 @@ export default function LabPage() {
           Format
         </Button>
 
-        <div className="h-4 w-px bg-outline-variant/30" />
+        <div className="w-1" />
 
         {/* Dataset size */}
         <DatasetSizeSelector />
@@ -524,7 +497,7 @@ export default function LabPage() {
           className="flex flex-col overflow-hidden"
           style={{ width: `${leftWidth}%` }}
         >
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-lowest border-b border-outline-variant/10">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-lowest">
             <span className="material-symbols-outlined text-sm text-on-surface-variant">terminal</span>
             <span className="text-xs text-on-surface-variant font-mono">query.sql</span>
             <div className="ml-auto flex items-center gap-1">
@@ -536,7 +509,7 @@ export default function LabPage() {
               </kbd>
             </div>
           </div>
-          <SqlEditor />
+          <SqlEditorPanel />
         </div>
 
         {/* Resize handle */}
@@ -549,7 +522,7 @@ export default function LabPage() {
         {/* Right: Results */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Tabs */}
-          <div className="flex items-center gap-0 bg-surface-container-low shrink-0 border-b border-outline-variant/10 overflow-x-auto">
+          <div className="flex items-center gap-0 bg-surface-container-low shrink-0 overflow-x-auto">
             {TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -578,7 +551,7 @@ export default function LabPage() {
       </div>
 
       {/* ── Status bar ── */}
-      <div className="flex items-center gap-4 px-4 py-1.5 bg-surface-container-low shrink-0 border-t border-outline-variant/10 text-xs text-on-surface-variant">
+      <div className="flex items-center gap-4 px-4 py-1.5 bg-surface-container shrink-0 text-xs text-on-surface-variant">
         <div className="flex items-center gap-1.5">
           <div
             className={cn(

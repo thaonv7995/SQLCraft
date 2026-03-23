@@ -258,7 +258,7 @@ export default function AdminUsersPage() {
 
         {/* Pagination */}
         {(data?.totalPages ?? 1) > 1 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-outline-variant/10">
+          <div className="flex items-center justify-between px-5 py-3 bg-surface-container/30">
             <p className="text-xs text-on-surface-variant">
               Page {page} of {data?.totalPages}
             </p>

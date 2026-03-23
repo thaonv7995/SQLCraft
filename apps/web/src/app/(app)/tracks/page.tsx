@@ -106,9 +106,14 @@ export default function TracksPage() {
     staleTime: 60_000,
   });
 
+  // When using API data, it's already filtered by the difficulty param.
+  // Client-side filter is only needed for the placeholder fallback.
   const tracks = apiTracks?.items ?? PLACEHOLDER_TRACKS;
-  const filtered =
-    filter === 'all' ? tracks : tracks.filter((t) => t.difficulty === filter);
+  const filtered = apiTracks
+    ? tracks
+    : filter === 'all'
+      ? tracks
+      : tracks.filter((t) => t.difficulty === filter);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">

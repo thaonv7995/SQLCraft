@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { sessionsApi, tracksApi } from '@/lib/api';
-import type { UserStats, QueryExecution } from '@/lib/api';
+import { sessionsApi, tracksApi, queryApi } from '@/lib/api';
+import type { UserStats } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { StatCard } from '@/components/ui/card';
 import { StatusBadge, DifficultyBadge } from '@/components/ui/badge';
@@ -20,41 +20,14 @@ import {
 } from '@/components/ui/table';
 import { formatRelativeTime, truncateSql } from '@/lib/utils';
 
-// ─── Mock data for demo purposes ──────────────────────────────────────────────
-const MOCK_STATS: UserStats = {
-  activeSessions: 2,
-  completedChallenges: 34,
-  queriesRun: 1_247,
-  currentStreak: 7,
+// ─── Fallback stats while user data loads ─────────────────────────────────────
+const EMPTY_STATS: UserStats = {
+  activeSessions: 0,
+  completedChallenges: 0,
+  queriesRun: 0,
+  currentStreak: 0,
   totalPoints: 0,
 };
-
-const MOCK_HISTORY: Pick<QueryExecution, 'id' | 'sql' | 'status' | 'durationMs' | 'rowCount' | 'createdAt'>[] = [
-  {
-    id: '1',
-    sql: 'SELECT u.name, COUNT(o.id) AS order_count FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id',
-    status: 'success',
-    durationMs: 142,
-    rowCount: 89,
-    createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-  },
-  {
-    id: '2',
-    sql: "SELECT * FROM products WHERE price > 100 AND category = 'Electronics' ORDER BY created_at DESC",
-    status: 'success',
-    durationMs: 67,
-    rowCount: 23,
-    createdAt: new Date(Date.now() - 18 * 60_000).toISOString(),
-  },
-  {
-    id: '3',
-    sql: 'UPDATE inventory SET quantity = quantity - 1 WHERE product_id = 42',
-    status: 'error',
-    durationMs: 12,
-    rowCount: 0,
-    createdAt: new Date(Date.now() - 45 * 60_000).toISOString(),
-  },
-];
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -71,9 +44,17 @@ export default function DashboardPage() {
     staleTime: 60_000,
   });
 
+  const { data: queryHistory, isLoading: historyLoading } = useQuery({
+    queryKey: ['query-history', 'recent'],
+    queryFn: () => queryApi.history(undefined, { limit: 5 }),
+    staleTime: 30_000,
+  });
+
   const displayName = user?.displayName ?? user?.username ?? 'Developer';
-  const stats = user?.stats ?? MOCK_STATS;
+  const stats = user?.stats ?? EMPTY_STATS;
+  const statsLoading = !user;
   const recentSessions = sessions?.slice(0, 5) ?? [];
+  const recentQueries = queryHistory?.items ?? [];
 
   const now = new Date();
   const hour = now.getHours();
@@ -213,24 +194,35 @@ export default function DashboardPage() {
               <Button variant="ghost" size="sm">All</Button>
             </Link>
           </div>
-          <div className="divide-y divide-outline-variant/10">
-            {MOCK_HISTORY.map((q) => (
-              <div key={q.id} className="px-5 py-3 hover:bg-surface-container transition-colors">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <StatusBadge status={q.status} />
-                  <span className="text-xs text-on-surface-variant ml-auto">
-                    {formatRelativeTime(q.createdAt)}
-                  </span>
-                </div>
-                <code className="text-xs font-mono text-on-surface-variant block truncate">
-                  {truncateSql(q.sql, 55)}
-                </code>
-                <div className="flex items-center gap-3 mt-1.5 text-xs text-outline">
-                  <span>{q.durationMs}ms</span>
-                  {(q.rowCount ?? 0) > 0 && <span>{q.rowCount} rows</span>}
-                </div>
+          <div className="flex flex-col">
+            {historyLoading ? (
+              <div className="px-5 py-8 flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
               </div>
-            ))}
+            ) : recentQueries.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <span className="material-symbols-outlined text-2xl text-outline mb-2 block">history</span>
+                <p className="text-xs text-on-surface-variant">No queries yet. Run your first SQL!</p>
+              </div>
+            ) : (
+              recentQueries.map((q) => (
+                <div key={q.id} className="px-5 py-3 hover:bg-surface-container transition-colors">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <StatusBadge status={q.status} />
+                    <span className="text-xs text-on-surface-variant ml-auto">
+                      {formatRelativeTime(q.createdAt)}
+                    </span>
+                  </div>
+                  <code className="text-xs font-mono text-on-surface-variant block truncate">
+                    {truncateSql(q.sql, 55)}
+                  </code>
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-outline">
+                    {q.durationMs && <span>{q.durationMs}ms</span>}
+                    {(q.rowCount ?? 0) > 0 && <span>{q.rowCount} rows</span>}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

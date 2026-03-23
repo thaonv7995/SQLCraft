@@ -36,7 +36,7 @@ export function CardHeader({ className, border = false, ...props }: CardHeaderPr
       className={cn(
         'flex items-center justify-between',
         'px-5 py-4',
-        border && 'border-b border-outline-variant/30',
+        border && 'bg-surface-container',
         className
       )}
       {...props}

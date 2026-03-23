@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -50,8 +50,8 @@ function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl
             className="fixed inset-0 z-10"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute right-0 top-full mt-1 w-48 bg-surface-container-high border border-outline-variant/30 rounded-xl shadow-xl z-20 overflow-hidden">
-            <div className="px-3 py-2.5 border-b border-outline-variant/20">
+          <div className="absolute right-0 top-full mt-1 w-48 bg-surface-container-high rounded-xl shadow-xl shadow-black/50 z-20 overflow-hidden">
+            <div className="px-3 py-2.5 bg-surface-container-highest/50">
               <p className="text-sm font-medium text-on-surface truncate">{displayName}</p>
             </div>
             <nav className="py-1">
@@ -73,7 +73,7 @@ function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl
                 </Link>
               ))}
             </nav>
-            <div className="border-t border-outline-variant/20 py-1">
+            <div className="bg-surface-container-highest/30 py-1">
               <button
                 onClick={() => {
                   clearAuth();
@@ -94,13 +94,13 @@ function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, isAuthenticated } = useAuthStore();
   const authed = isAuthenticated();
 
   return (
     <nav
       className="fixed top-0 left-0 right-0 z-50 h-14 bg-surface flex items-center px-4 lg:px-6"
-      style={{ borderBottom: '1px solid rgba(69, 70, 82, 0.10)' }}
     >
       {/* Brand */}
       <Link
@@ -145,9 +145,7 @@ export function Navbar() {
               variant="primary"
               size="sm"
               leftIcon={<span className="material-symbols-outlined text-sm">play_arrow</span>}
-              onClick={() => {
-                window.location.href = '/lab';
-              }}
+              onClick={() => router.push('/lab')}
               className="hidden sm:inline-flex"
             >
               Execute Query

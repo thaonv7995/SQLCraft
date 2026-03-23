@@ -88,7 +88,7 @@ export function Sidebar() {
       </div>
 
       {/* Bottom section */}
-      <div className="shrink-0 border-t border-outline-variant/20">
+      <div className="shrink-0 bg-surface-container">
         <div className="px-3 py-3 space-y-1">
           {BOTTOM_NAV.map((item) => (
             <NavLink
@@ -101,7 +101,7 @@ export function Sidebar() {
 
         {/* User info */}
         {user && (
-          <div className="px-3 py-3 border-t border-outline-variant/20">
+          <div className="px-3 py-3 bg-surface">
             <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-container transition-colors cursor-pointer">
               {user.avatarUrl ? (
                 <img
