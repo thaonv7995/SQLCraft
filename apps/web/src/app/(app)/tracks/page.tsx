@@ -116,47 +116,57 @@ export default function TracksPage() {
       : tracks.filter((t) => t.difficulty === filter);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div>
-        <h1 className="font-headline text-2xl font-bold text-on-surface">Learning Tracks</h1>
-        <p className="text-sm text-on-surface-variant mt-1">
+    <div className="p-8 max-w-7xl mx-auto">
+      {/* Page header */}
+      <div className="mb-10">
+        <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface mb-2">
+          Learning Tracks
+        </h1>
+        <p className="text-outline font-light max-w-2xl">
           Structured paths to SQL mastery — from fundamentals to expert-level optimization.
+          Compete against the engine and the community in precision-focused challenges.
         </p>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex items-center gap-1 bg-surface-container-low rounded-xl p-1 w-fit">
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setFilter(tab.value)}
-            className={cn(
-              'px-4 py-1.5 rounded-lg text-sm font-medium font-body transition-all duration-150',
-              filter === tab.value
-                ? 'bg-surface-container-high text-on-surface'
-                : 'text-on-surface-variant hover:text-on-surface'
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Count */}
-      <p className="text-xs text-on-surface-variant">
-        {isLoading ? 'Loading...' : `${filtered.length} track${filtered.length !== 1 ? 's' : ''}`}
-      </p>
-
-      {/* Grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="h-64 bg-surface-container-low rounded-xl animate-pulse" />
+      {/* Filters row */}
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="font-headline text-xl font-medium flex items-center gap-2">
+          <span className="w-1.5 h-6 bg-tertiary rounded-full shrink-0" />
+          Active Tracks
+        </h2>
+        <div className="flex items-center gap-1 bg-surface-container-low rounded-xl p-1">
+          {FILTER_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setFilter(tab.value)}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-medium font-body transition-all duration-150',
+                filter === tab.value
+                  ? 'bg-surface-container-highest text-on-surface'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              )}
+            >
+              {tab.label}
+            </button>
           ))}
         </div>
+      </div>
+
+      {/* Track list */}
+      {isLoading ? (
+        <div className="space-y-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-36 bg-surface-container-low rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-surface-container-low rounded-xl p-12 flex flex-col items-center text-center">
+          <span className="material-symbols-outlined text-3xl text-outline mb-3">library_books</span>
+          <p className="text-sm font-medium text-on-surface mb-1">No tracks found</p>
+          <p className="text-xs text-on-surface-variant">Try a different difficulty filter.</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="space-y-4">
           {filtered.map((track) => {
             const progress = track.userProgress
               ? Math.round((track.userProgress.completedLessons / track.lessonCount) * 100)
@@ -165,76 +175,69 @@ export default function TracksPage() {
 
             return (
               <Link key={track.id} href={`/tracks/${track.id}`}>
-                <article className="bg-surface-container-low rounded-xl p-5 h-full flex flex-col hover:bg-surface-container transition-colors group cursor-pointer">
-                  {/* Top meta */}
-                  <div className="flex items-center justify-between gap-2 mb-4">
-                    <DifficultyBadge difficulty={track.difficulty} />
-                    <div className="flex items-center gap-3 text-xs text-on-surface-variant">
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-sm">menu_book</span>
-                        {track.lessonCount} lessons
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-sm">schedule</span>
-                        ~{track.estimatedHours}h
-                      </span>
-                    </div>
-                  </div>
+                <article className="bg-surface-container-low rounded-xl p-6 group hover:bg-surface-container-high transition-all duration-200 border-l-4 border-transparent hover:border-primary cursor-pointer">
+                  <div className="flex justify-between items-start gap-6">
+                    <div className="flex-1 min-w-0">
+                      {/* Title row */}
+                      <div className="flex items-center gap-3 mb-1.5">
+                        <h2 className="font-headline text-lg font-bold text-on-surface group-hover:text-primary transition-colors">
+                          {track.title}
+                        </h2>
+                        <DifficultyBadge difficulty={track.difficulty} />
+                      </div>
 
-                  {/* Title & desc */}
-                  <h2 className="font-headline text-base font-semibold text-on-surface group-hover:text-primary transition-colors mb-2">
-                    {track.title}
-                  </h2>
-                  <p className="text-sm text-on-surface-variant line-clamp-3 mb-4 flex-1">
-                    {track.description}
-                  </p>
+                      {/* Description */}
+                      <p className="text-sm text-outline leading-relaxed mb-4 line-clamp-2">
+                        {track.description}
+                      </p>
 
-                  {/* Tags */}
-                  {track.tags && (
-                    <div className="flex flex-wrap gap-1.5 mb-4">
-                      {track.tags.slice(0, 4).map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-xs font-mono bg-surface-container-high text-on-surface-variant px-2 py-0.5 rounded"
-                        >
-                          {tag}
+                      {/* Tags + meta */}
+                      <div className="flex items-center gap-4 flex-wrap">
+                        {track.tags?.slice(0, 4).map((tag) => (
+                          <span
+                            key={tag}
+                            className="text-[10px] font-mono bg-surface-container-high text-on-surface-variant px-2 py-0.5 rounded uppercase tracking-wide"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                        <span className="h-3 w-px bg-outline-variant/30 hidden sm:block" />
+                        <span className="text-xs text-outline flex items-center gap-1">
+                          <span className="material-symbols-outlined text-sm">menu_book</span>
+                          {track.lessonCount} lessons
                         </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Progress bar */}
-                  {started && (
-                    <div className="mb-4">
-                      <div className="flex justify-between text-xs text-on-surface-variant mb-1.5">
-                        <span>Progress</span>
-                        <span>
-                          {track.userProgress!.completedLessons}/{track.lessonCount} lessons
+                        <span className="text-xs text-outline flex items-center gap-1">
+                          <span className="material-symbols-outlined text-sm">schedule</span>
+                          ~{track.estimatedHours}h
                         </span>
                       </div>
-                      <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-primary to-[#4453a7] rounded-full"
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
                     </div>
-                  )}
 
-                  {/* CTA */}
-                  <div className="mt-auto">
-                    <Button
-                      variant={started ? 'secondary' : 'primary'}
-                      size="sm"
-                      fullWidth
-                      leftIcon={
-                        <span className="material-symbols-outlined text-sm">
-                          {started ? 'play_arrow' : 'rocket_launch'}
-                        </span>
-                      }
-                    >
-                      {started ? 'Continue' : 'Start Track'}
-                    </Button>
+                    {/* Right: progress + CTA */}
+                    <div className="shrink-0 flex flex-col items-end gap-3 min-w-[140px]">
+                      {started ? (
+                        <>
+                          <div className="text-right">
+                            <span className="text-xs text-on-surface-variant">
+                              {track.userProgress!.completedLessons}/{track.lessonCount} done
+                            </span>
+                          </div>
+                          <div className="w-32 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-primary to-[#4453a7] rounded-full"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <Button variant="secondary" size="sm" leftIcon={<span className="material-symbols-outlined text-sm">play_arrow</span>}>
+                            Continue
+                          </Button>
+                        </>
+                      ) : (
+                        <Button variant="ghost" size="sm" leftIcon={<span className="material-symbols-outlined text-sm">rocket_launch</span>}>
+                          Start Track
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </article>
               </Link>

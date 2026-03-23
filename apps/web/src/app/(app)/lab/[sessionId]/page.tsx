@@ -426,67 +426,106 @@ export default function LabPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)] bg-surface overflow-hidden">
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-surface-container-low shrink-0">
-        {/* Left: session info */}
-        <div className="flex items-center gap-2 mr-2">
-          {session ? (
-            <>
-              <StatusBadge status={session.status} />
-              <span className="text-xs text-on-surface-variant hidden sm:block">
-                {session.lessonTitle ?? 'Lab Session'}
+      <div className="h-12 flex items-center justify-between px-4 bg-surface border-b border-outline-variant/10 shrink-0">
+        {/* Left: actions */}
+        <div className="flex items-center gap-1">
+          {/* RUN QUERY button */}
+          <button
+            disabled={!currentQuery.trim() || isExecuting || session?.status === 'provisioning'}
+            onClick={() => executeQuery({ sessionId, sql: currentQuery })}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 bg-primary text-on-primary rounded text-[11px] font-bold uppercase tracking-wide hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed'
+            )}
+          >
+            {isExecuting ? (
+              <div className="w-3.5 h-3.5 border border-on-primary/30 border-t-on-primary rounded-full animate-spin" />
+            ) : (
+              <span
+                className="material-symbols-outlined text-sm"
+                style={{ fontVariationSettings: "'FILL' 1" }}
+              >
+                play_arrow
               </span>
-            </>
-          ) : (
-            <div className="h-5 w-24 bg-surface-container-high rounded animate-pulse" />
-          )}
+            )}
+            Run Query
+          </button>
+
+          <div className="h-6 w-px bg-outline-variant/20 mx-1.5" />
+
+          {/* EXPLAIN PLAN text button */}
+          <button
+            disabled={!currentQuery.trim() || isExplaining || session?.status === 'provisioning'}
+            onClick={() => explainQuery({ sessionId, sql: currentQuery })}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-surface-container-highest transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isExplaining ? (
+              <div className="w-3 h-3 border border-outline/30 border-t-outline rounded-full animate-spin" />
+            ) : (
+              <span className="material-symbols-outlined text-sm text-outline group-hover:text-on-surface-variant transition-colors">
+                account_tree
+              </span>
+            )}
+            <span className="text-[11px] font-bold text-outline group-hover:text-on-surface-variant transition-colors uppercase tracking-wide">
+              Explain
+            </span>
+          </button>
+
+          {/* FORMAT text button */}
+          <button
+            disabled={isFormatting}
+            onClick={() => formatSql(currentQuery)}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-surface-container-highest transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isFormatting ? (
+              <div className="w-3 h-3 border border-outline/30 border-t-outline rounded-full animate-spin" />
+            ) : (
+              <span className="material-symbols-outlined text-sm text-outline group-hover:text-on-surface-variant transition-colors">
+                format_align_left
+              </span>
+            )}
+            <span className="text-[11px] font-bold text-outline group-hover:text-on-surface-variant transition-colors uppercase tracking-wide">
+              Format
+            </span>
+          </button>
+
+          <div className="h-6 w-px bg-outline-variant/20 mx-1.5" />
+
+          {/* Dataset size */}
+          <DatasetSizeSelector />
         </div>
 
-        <div className="w-1" />
+        {/* Right: ENV badge + session title */}
+        <div className="flex items-center gap-3">
+          {session?.lessonTitle && (
+            <span className="text-xs text-outline hidden sm:block truncate max-w-[160px]">
+              {session.lessonTitle}
+            </span>
+          )}
 
-        {/* Execute */}
-        <Button
-          variant="primary"
-          size="sm"
-          loading={isExecuting}
-          disabled={!currentQuery.trim() || session?.status === 'provisioning'}
-          onClick={() => executeQuery({ sessionId, sql: currentQuery })}
-          leftIcon={<span className="material-symbols-outlined text-sm">play_arrow</span>}
-        >
-          Execute
-        </Button>
+          <span className="text-[10px] text-outline font-bold uppercase">ENV:</span>
+          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-tertiary-container/20 rounded-full border border-tertiary/20">
+            <span
+              className={cn(
+                'w-1.5 h-1.5 rounded-full',
+                session?.status === 'active'
+                  ? 'bg-tertiary animate-pulse'
+                  : session?.status === 'provisioning'
+                  ? 'bg-tertiary/50 animate-pulse'
+                  : 'bg-outline'
+              )}
+            />
+            <span className="text-[10px] text-tertiary font-medium uppercase tracking-wide">
+              {session?.status === 'provisioning' ? 'Provisioning' : 'Prod-Read-Only'}
+            </span>
+          </div>
 
-        {/* Explain */}
-        <Button
-          variant="secondary"
-          size="sm"
-          loading={isExplaining}
-          disabled={!currentQuery.trim() || session?.status === 'provisioning'}
-          onClick={() => explainQuery({ sessionId, sql: currentQuery })}
-          leftIcon={<span className="material-symbols-outlined text-sm">account_tree</span>}
-        >
-          Explain
-        </Button>
-
-        {/* Format */}
-        <Button
-          variant="ghost"
-          size="sm"
-          loading={isFormatting}
-          onClick={() => formatSql(currentQuery)}
-          leftIcon={<span className="material-symbols-outlined text-sm">format_align_left</span>}
-        >
-          Format
-        </Button>
-
-        <div className="w-1" />
-
-        {/* Dataset size */}
-        <DatasetSizeSelector />
-
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" size="sm">
+          <button
+            onClick={() => {}}
+            className="p-1.5 rounded hover:bg-surface-container-highest text-outline hover:text-on-surface transition-colors"
+            title="Reset session"
+          >
             <span className="material-symbols-outlined text-sm">restart_alt</span>
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -497,14 +536,19 @@ export default function LabPage() {
           className="flex flex-col overflow-hidden"
           style={{ width: `${leftWidth}%` }}
         >
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-lowest">
-            <span className="material-symbols-outlined text-sm text-on-surface-variant">terminal</span>
-            <span className="text-xs text-on-surface-variant font-mono">query.sql</span>
-            <div className="ml-auto flex items-center gap-1">
-              <span className="text-xs text-outline">
-                {currentQuery.split('\n').length} lines
+          <div className="flex items-center bg-surface-container-lowest border-b border-outline-variant/10">
+            {/* IDE-style file tab */}
+            <div className="flex items-center gap-1.5 px-4 py-1.5 bg-surface border-r border-outline-variant/10 border-t-2 border-t-primary">
+              <span className="material-symbols-outlined text-sm text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
+                terminal
               </span>
-              <kbd className="text-xs bg-surface-container px-1.5 py-0.5 rounded text-outline font-mono hidden sm:inline">
+              <span className="text-xs text-on-surface font-mono">query.sql</span>
+            </div>
+            <div className="ml-auto flex items-center gap-2 px-3">
+              <span className="text-[9px] text-outline font-mono uppercase">
+                {currentQuery.split('\n').length}L
+              </span>
+              <kbd className="text-[9px] bg-surface-container px-1.5 py-0.5 rounded text-outline font-mono hidden sm:inline tracking-wide">
                 Ctrl+Enter
               </kbd>
             </div>
@@ -551,54 +595,76 @@ export default function LabPage() {
       </div>
 
       {/* ── Status bar ── */}
-      <div className="flex items-center gap-4 px-4 py-1.5 bg-surface-container shrink-0 text-xs text-on-surface-variant">
-        <div className="flex items-center gap-1.5">
-          <div
-            className={cn(
-              'w-1.5 h-1.5 rounded-full',
-              session?.status === 'active'
-                ? 'bg-secondary'
+      <div className="h-6 flex items-center justify-between px-4 bg-surface-container-lowest border-t border-outline-variant/10 shrink-0">
+        {/* Left: system metrics */}
+        <div className="flex items-center gap-3">
+          {/* Connection indicator */}
+          <div className="flex items-center gap-1.5">
+            <div
+              className={cn(
+                'w-1.5 h-1.5 rounded-full',
+                session?.status === 'active'
+                  ? 'bg-secondary'
+                  : session?.status === 'provisioning'
+                  ? 'bg-tertiary animate-pulse'
+                  : 'bg-outline'
+              )}
+            />
+            <span className="text-[9px] font-bold uppercase text-outline tracking-widest">
+              {session?.status === 'active'
+                ? 'Connected'
                 : session?.status === 'provisioning'
-                ? 'bg-tertiary animate-pulse'
-                : 'bg-outline'
-            )}
-          />
-          <span className="capitalize">{session?.status ?? 'Connecting...'}</span>
-        </div>
+                ? 'Provisioning'
+                : 'Offline'}
+            </span>
+          </div>
 
-        <div className="h-3 w-px bg-outline-variant/30" />
+          <div className="h-3 w-px bg-outline-variant/20" />
 
-        {lastExecution?.durationMs !== undefined && (
-          <span>
-            Duration:{' '}
-            <span className="text-on-surface font-mono">
+          {/* CPU meter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-bold text-outline uppercase">CPU</span>
+            <div className="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+              <div className="w-[24%] h-full bg-tertiary rounded-full" />
+            </div>
+          </div>
+
+          {/* MEM meter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-bold text-outline uppercase">MEM</span>
+            <div className="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+              <div className="w-[41%] h-full bg-primary/60 rounded-full" />
+            </div>
+          </div>
+
+          <div className="h-3 w-px bg-outline-variant/20" />
+
+          {/* Query stats */}
+          {lastExecution?.durationMs !== undefined && (
+            <span className="text-[9px] text-outline font-mono">
               {formatDuration(lastExecution.durationMs)}
             </span>
+          )}
+          {results && (
+            <span className="text-[9px] text-outline font-mono">
+              {formatRows(results.totalRows)} rows
+              {results.truncated && ' (truncated)'}
+            </span>
+          )}
+          {error && (
+            <span className="text-[9px] text-error font-mono truncate max-w-[200px]">
+              {error.slice(0, 50)}{error.length > 50 ? '…' : ''}
+            </span>
+          )}
+        </div>
+
+        {/* Right: encoding + session ID */}
+        <div className="flex items-center gap-3">
+          <span className="text-[9px] text-outline uppercase tracking-widest">UTF-8</span>
+          <div className="h-3 w-px bg-outline-variant/20" />
+          <span className="text-[9px] text-outline font-mono">
+            {sessionId.slice(0, 8)}…
           </span>
-        )}
-
-        {results && (
-          <>
-            <span>
-              Rows:{' '}
-              <span className="text-on-surface font-mono">
-                {formatRows(results.totalRows)}
-                {results.truncated && ' (truncated)'}
-              </span>
-            </span>
-            <span>
-              Columns:{' '}
-              <span className="text-on-surface font-mono">{results.columns.length}</span>
-            </span>
-          </>
-        )}
-
-        {error && (
-          <span className="text-error">{error.slice(0, 60)}{error.length > 60 ? '...' : ''}</span>
-        )}
-
-        <div className="ml-auto text-outline">
-          Session: <span className="font-mono">{sessionId.slice(0, 8)}...</span>
         </div>
       </div>
     </div>
