@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SQL Engine | Query Workbench</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary-fixed-variant": "#004e59",
+                        "on-secondary-fixed": "#00201d",
+                        "outline-variant": "#454652",
+                        "tertiary": "#44d8f1",
+                        "primary": "#bac3ff",
+                        "surface-dim": "#131313",
+                        "secondary-fixed": "#84f5e8",
+                        "on-tertiary": "#00363e",
+                        "on-background": "#e5e2e1",
+                        "on-tertiary-container": "#55e4fd",
+                        "surface-container-high": "#2a2a2a",
+                        "on-primary-fixed-variant": "#2f3f92",
+                        "on-primary-fixed": "#00105b",
+                        "on-surface": "#e5e2e1",
+                        "surface-container-highest": "#353534",
+                        "on-surface-variant": "#c5c5d4",
+                        "surface-tint": "#bac3ff",
+                        "inverse-on-surface": "#313030",
+                        "on-primary-container": "#c9cfff",
+                        "surface-container-lowest": "#0e0e0e",
+                        "inverse-primary": "#4858ab",
+                        "secondary": "#66d9cc",
+                        "primary-container": "#4453a7",
+                        "on-tertiary-fixed": "#001f25",
+                        "surface-container-low": "#1c1b1b",
+                        "tertiary-fixed-dim": "#44d8f1",
+                        "tertiary-fixed": "#a1efff",
+                        "primary-fixed": "#dee0ff",
+                        "on-secondary-container": "#00302b",
+                        "inverse-surface": "#e5e2e1",
+                        "tertiary-container": "#006471",
+                        "outline": "#8f909e",
+                        "error-container": "#93000a",
+                        "surface-bright": "#393939",
+                        "surface": "#131313",
+                        "secondary-fixed-dim": "#66d9cc",
+                        "on-error": "#690005",
+                        "on-secondary-fixed-variant": "#005049",
+                        "on-error-container": "#ffdad6",
+                        "surface-container": "#201f1f",
+                        "background": "#131313",
+                        "secondary-container": "#1ea296",
+                        "primary-fixed-dim": "#bac3ff",
+                        "on-secondary": "#003732",
+                        "surface-variant": "#353534",
+                        "error": "#ffb4ab",
+                        "on-primary": "#15267b"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .sql-syntax-keyword { color: #bac3ff; }
+        .sql-syntax-string { color: #66d9cc; }
+        .sql-syntax-function { color: #44d8f1; }
+        .sql-syntax-comment { color: #8f909e; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary/30 antialiased overflow-hidden">
+<!-- Top Navigation Bar -->
+<header class="fixed top-0 z-50 flex justify-between items-center w-full px-6 h-16 bg-[#131313] dark:bg-neutral-950 font-['Space_Grotesk'] tracking-tight border-b border-outline-variant/10">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold text-[#e5e2e1] uppercase tracking-widest">The Architectural Lab</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-[#8f909e] hover:text-[#e5e2e1] transition-colors" href="#">Dashboard</a>
+<a class="text-[#8f909e] hover:text-[#e5e2e1] transition-colors" href="#">Workspace</a>
+<a class="text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1" href="#">Sessions</a>
+<a class="text-[#8f909e] hover:text-[#e5e2e1] transition-colors" href="#">Documentation</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-gradient-to-br from-primary to-primary-container text-on-primary-fixed px-4 py-1.5 rounded-lg text-sm font-medium hover:opacity-90 transition-all duration-200">Execute Query</button>
+<div class="flex items-center gap-2 text-outline">
+<span class="material-symbols-outlined p-2 hover:bg-[#353534] rounded-full cursor-pointer transition-colors" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined p-2 hover:bg-[#353534] rounded-full cursor-pointer transition-colors" data-icon="settings">settings</span>
+<span class="material-symbols-outlined p-2 hover:bg-[#353534] rounded-full cursor-pointer transition-colors" data-icon="help_outline">help_outline</span>
+</div>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant/20 bg-surface-container">
+<img alt="User Profile Avatar" class="w-full h-full object-cover" data-alt="Close-up portrait of professional software architect" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAAr4KlCroPUK3h0l5iKV9cnu4Ks95CFeRoB6T5ksiea-bwoPo6Bem-2pjtkO84dUTouf0ap-C8wJhGSoDd2fFpqb8Z5PED8xCL-hAlMI9oyoHvI-d7j03sCDDNtMj2SRdXqZONadqqRtpUzC-fMu8TmbQQE1qH7QMZ5j7lDm5fiS71MR7VrfCTplKxxMaR9skRhD7C40nQhaqPv4hytmJUh1F9azI6phVfjVU3UWSvwooWBjgkPXAiM2r7_XoCZyTCYUPQt3dtCt0c"/>
+</div>
+</div>
+</header>
+<div class="flex h-screen pt-16">
+<!-- Sidebar Navigation -->
+<aside class="flex flex-col h-full fixed left-0 top-0 pt-16 w-64 bg-[#1c1b1b] dark:bg-neutral-900 border-r border-outline-variant/10 z-40">
+<div class="p-4 flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-tertiary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary" data-icon="database">database</span>
+</div>
+<div>
+<h2 class="text-lg font-black text-[#44d8f1] leading-none">Learner Lab</h2>
+<p class="text-[10px] text-outline uppercase tracking-wider mt-1">v2.4.0-stable</p>
+</div>
+</div>
+<div class="px-3 mt-4 space-y-1">
+<button class="w-full flex items-center gap-3 px-3 py-2 text-[#8f909e] hover:bg-[#131313] transition-all rounded active:scale-95">
+<span class="material-symbols-outlined text-xl" data-icon="storage">storage</span>
+<span class="font-medium text-sm">Databases</span>
+</button>
+<button class="w-full flex items-center gap-3 px-3 py-2 text-[#e5e2e1] bg-[#353534] border-l-4 border-[#bac3ff] transition-all active:scale-95">
+<span class="material-symbols-outlined text-xl" data-icon="terminal">terminal</span>
+<span class="font-medium text-sm">SQL Lab</span>
+</button>
+<button class="w-full flex items-center gap-3 px-3 py-2 text-[#8f909e] hover:bg-[#131313] transition-all rounded active:scale-95">
+<span class="material-symbols-outlined text-xl" data-icon="leaderboard">leaderboard</span>
+<span class="font-medium text-sm">Competitive Tracks</span>
+</button>
+<button class="w-full flex items-center gap-3 px-3 py-2 text-[#8f909e] hover:bg-[#131313] transition-all rounded active:scale-95">
+<span class="material-symbols-outlined text-xl" data-icon="volunteer_activism">volunteer_activism</span>
+<span class="font-medium text-sm">Contributions</span>
+</button>
+</div>
+<div class="mt-8 px-4">
+<button class="w-full py-2 bg-surface-container-highest border border-outline-variant/20 rounded flex items-center justify-center gap-2 text-sm font-medium hover:bg-surface-bright transition-colors"><span class="material-symbols-outlined text-lg" data-icon="add">add</span>
+                    New Query</button>
+</div>
+<!-- Nested Explorer -->
+<div class="mt-6 flex-1 overflow-y-auto no-scrollbar">
+<div class="px-6 mb-2">
+<p class="text-[10px] font-bold text-outline uppercase tracking-widest">Saved Queries</p>
+</div>
+<div class="space-y-1">
+<div class="group px-6 py-1.5 flex items-center gap-2 hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="folder">folder</span>
+<span class="text-xs text-on-surface-variant">Analytics</span>
+</div>
+<div class="group px-6 py-1.5 flex items-center gap-2 hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="folder">folder</span>
+<span class="text-xs text-on-surface-variant">System Admin</span>
+</div>
+<div class="group px-6 py-1.5 flex items-center gap-2 hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="folder">folder</span>
+<span class="text-xs text-on-surface-variant">Drafts</span>
+</div>
+</div>
+<div class="px-6 mt-6 mb-2">
+<p class="text-[10px] font-bold text-outline uppercase tracking-widest">Recent Activity</p>
+</div>
+<div class="space-y-1">
+<div class="group px-6 py-1.5 flex items-center gap-2 hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-tertiary text-sm" data-icon="description">description</span>
+<span class="text-xs text-on-surface whitespace-nowrap overflow-hidden text-ellipsis">revenue_report.sql</span>
+</div>
+<div class="group px-6 py-1.5 flex items-center gap-2 hover:bg-surface-container cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-outline text-sm" data-icon="description">description</span>
+<span class="text-xs text-on-surface whitespace-nowrap overflow-hidden text-ellipsis">user_retention.sql</span>
+</div>
+</div>
+</div>
+<div class="p-4 border-t border-outline-variant/10 space-y-2">
+<div class="flex items-center justify-between text-[11px] text-outline mb-4">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(102,217,204,0.4)]"></span>
+<span>Engine Ready</span>
+</div>
+<span>142ms</span>
+</div>
+<div class="flex items-center gap-3 px-2 py-1.5 text-outline hover:text-on-surface cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-lg" data-icon="cloud_done">cloud_done</span>
+<span class="text-xs">Cloud Status</span>
+</div>
+<div class="flex items-center gap-3 px-2 py-1.5 text-outline hover:text-on-surface cursor-pointer transition-colors">
+<span class="material-symbols-outlined text-lg" data-icon="account_circle">account_circle</span>
+<span class="text-xs">User Settings</span>
+</div>
+</div>
+</aside>
+<!-- Main Workspace Area -->
+<main class="flex-1 ml-64 flex flex-col bg-surface-container-lowest overflow-hidden">
+<!-- Tabs Bar -->
+<div class="h-10 flex items-center bg-surface-container-low border-b border-outline-variant/10">
+<div class="h-full flex items-center px-4 bg-surface-container-lowest border-r border-outline-variant/10 gap-2 border-t-2 border-primary">
+<span class="material-symbols-outlined text-sm text-primary" data-icon="description">description</span>
+<span class="text-[12px] font-medium text-on-surface">revenue_report.sql</span>
+<span class="material-symbols-outlined text-[14px] text-outline hover:text-error cursor-pointer" data-icon="close">close</span>
+</div>
+<div class="h-full flex items-center px-4 hover:bg-surface-container-high transition-colors border-r border-outline-variant/10 gap-2 cursor-pointer group">
+<span class="material-symbols-outlined text-sm text-outline group-hover:text-on-surface-variant" data-icon="description">description</span>
+<span class="text-[12px] font-medium text-outline group-hover:text-on-surface-variant">user_retention.sql</span>
+<span class="material-symbols-outlined text-[14px] text-outline/0 group-hover:text-outline/100 hover:text-error cursor-pointer" data-icon="close">close</span>
+</div>
+<div class="flex-1"></div>
+<div class="px-4 flex items-center gap-4">
+<div class="flex items-center gap-1 text-[11px] text-outline">
+<span class="font-mono">UTF-8</span>
+<span class="material-symbols-outlined text-xs" data-icon="expand_more">expand_more</span>
+</div>
+</div>
+</div>
+<!-- Toolbar -->
+<div class="h-12 flex items-center justify-between px-4 bg-surface border-b border-outline-variant/10">
+<div class="flex items-center gap-2">
+<button class="flex items-center gap-2 px-3 py-1 bg-primary text-on-primary rounded text-xs font-bold hover:brightness-110 transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="play_arrow" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+                        RUN QUERY
+                    </button>
+<div class="h-6 w-[1px] bg-outline-variant/20 mx-1"></div>
+<div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-surface-container-highest cursor-pointer group">
+<span class="text-[11px] font-bold text-outline group-hover:text-on-surface-variant">EXPLAIN PLAN</span>
+<div class="w-8 h-4 rounded-full bg-outline-variant/30 relative flex items-center px-0.5">
+<div class="w-3 h-3 rounded-full bg-outline"></div>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="text-[10px] text-outline font-bold">ENV:</span>
+<div class="flex items-center gap-1.5 px-2 py-0.5 bg-tertiary-container/20 rounded-full border border-tertiary/20">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse"></span>
+<span class="text-[10px] text-tertiary font-medium">PROD-READ-ONLY</span>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline hover:text-on-surface cursor-pointer" data-icon="file_download">file_download</span>
+<span class="material-symbols-outlined text-outline hover:text-on-surface cursor-pointer" data-icon="share">share</span>
+</div>
+</div>
+<!-- Code Editor Pane -->
+<div class="flex-1 relative font-mono text-[13px] leading-relaxed p-4 overflow-auto bg-surface-container-lowest">
+<div class="absolute left-0 top-0 w-12 h-full bg-surface-container-low/30 border-r border-outline-variant/5 flex flex-col items-center pt-4 text-outline/30 select-none">
+<span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+</div>
+<div class="pl-10 space-y-1">
+<p><span class="sql-syntax-keyword">SELECT</span></p>
+<p class="pl-4">u.user_id,</p>
+<p class="pl-4">u.email,</p>
+<p class="pl-4"><span class="sql-syntax-function">SUM</span>(t.amount) <span class="sql-syntax-keyword">AS</span> total_revenue,</p>
+<p class="pl-4"><span class="sql-syntax-function">COUNT</span>(t.id) <span class="sql-syntax-keyword">AS</span> transaction_count</p>
+<p><span class="sql-syntax-keyword">FROM</span> users u</p>
+<p><span class="sql-syntax-keyword">JOIN</span> transactions t <span class="sql-syntax-keyword">ON</span> u.user_id = t.user_id</p>
+<p><span class="sql-syntax-keyword">WHERE</span> t.created_at &gt;= <span class="sql-syntax-string">'2023-01-01'</span></p>
+<p><span class="sql-syntax-keyword">GROUP BY</span> 1, 2</p>
+<p><span class="sql-syntax-keyword">HAVING</span> total_revenue &gt; 1000</p>
+<p><span class="sql-syntax-keyword">ORDER BY</span> total_revenue <span class="sql-syntax-keyword">DESC</span>;</p>
+<p class="sql-syntax-comment">-- Fetching top tier users for Q4 report</p>
+</div>
+</div>
+<!-- Results Pane -->
+<div class="h-64 flex flex-col bg-surface border-t-4 border-surface-bright shadow-2xl relative">
+<!-- Draggable Handle -->
+<div class="absolute -top-1 left-0 right-0 h-1 cursor-ns-resize hover:bg-primary transition-colors"></div>
+<div class="h-9 flex items-center justify-between px-4 border-b border-outline-variant/10 bg-surface-container-low">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm text-secondary" data-icon="check_circle">check_circle</span>
+<span class="text-[11px] font-bold text-on-surface tracking-wider">QUERY RESULTS</span>
+</div>
+<span class="text-[10px] text-outline font-mono bg-surface-container-highest px-1.5 py-0.5 rounded">1,248 rows</span>
+<span class="text-[10px] text-outline font-mono">142ms</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="material-symbols-outlined text-lg text-outline hover:text-on-surface" data-icon="filter_list">filter_list</button>
+<button class="material-symbols-outlined text-lg text-outline hover:text-on-surface" data-icon="fullscreen">fullscreen</button>
+</div>
+</div>
+<div class="flex-1 overflow-auto">
+<table class="w-full text-left border-collapse">
+<thead class="sticky top-0 bg-surface-container-high z-10">
+<tr>
+<th class="px-4 py-2 text-[10px] font-bold text-outline uppercase tracking-widest border-r border-outline-variant/10">user_id</th>
+<th class="px-4 py-2 text-[10px] font-bold text-outline uppercase tracking-widest border-r border-outline-variant/10">email</th>
+<th class="px-4 py-2 text-[10px] font-bold text-outline uppercase tracking-widest border-r border-outline-variant/10 text-right">total_revenue</th>
+<th class="px-4 py-2 text-[10px] font-bold text-outline uppercase tracking-widest text-right">transaction_count</th>
+</tr>
+</thead>
+<tbody class="text-[12px] font-mono">
+<tr class="bg-surface hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-2 text-tertiary border-r border-outline-variant/5">#U-9921</td>
+<td class="px-4 py-2 text-on-surface-variant border-r border-outline-variant/5">alex.v@lab.arch</td>
+<td class="px-4 py-2 text-right text-secondary border-r border-outline-variant/5">$14,205.00</td>
+<td class="px-4 py-2 text-right text-on-surface-variant">122</td>
+</tr>
+<tr class="bg-surface-container-low/40 hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-2 text-tertiary border-r border-outline-variant/5">#U-8812</td>
+<td class="px-4 py-2 text-on-surface-variant border-r border-outline-variant/5">m.sarah@data.dev</td>
+<td class="px-4 py-2 text-right text-secondary border-r border-outline-variant/5">$12,940.50</td>
+<td class="px-4 py-2 text-right text-on-surface-variant">94</td>
+</tr>
+<tr class="bg-surface hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-2 text-tertiary border-r border-outline-variant/5">#U-1029</td>
+<td class="px-4 py-2 text-on-surface-variant border-r border-outline-variant/5">jason.k@system.sql</td>
+<td class="px-4 py-2 text-right text-secondary border-r border-outline-variant/5">$11,102.00</td>
+<td class="px-4 py-2 text-right text-on-surface-variant">108</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Footer Status Bar -->
+<div class="h-6 flex items-center justify-between px-4 bg-surface-container-lowest border-t border-outline-variant/10">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<span class="text-[9px] font-bold text-outline uppercase">CPU</span>
+<div class="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="w-[24%] h-full bg-tertiary"></div>
+</div>
+<span class="text-[9px] font-mono text-tertiary">24%</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-[9px] font-bold text-outline uppercase">MEM</span>
+<div class="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="w-[68%] h-full bg-primary"></div>
+</div>
+<span class="text-[9px] font-mono text-primary">6.4GB</span>
+</div>
+</div>
+<div class="flex items-center gap-4 text-[9px] font-bold text-outline uppercase">
+<span>Ln 12, Col 45</span>
+<span class="text-secondary">Connected: AWS-US-EAST-1</span>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

@@ -1,0 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-surface text-on-surface font-body;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #454652;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #8f909e;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #454652 transparent;
+  }
+}
+
+@layer components {
+  /* SQL Syntax Highlighting */
+  .sql-syntax-keyword {
+    color: #bac3ff;
+    font-weight: 600;
+  }
+
+  .sql-syntax-string {
+    color: #66d9cc;
+  }
+
+  .sql-syntax-function {
+    color: #44d8f1;
+  }
+
+  .sql-syntax-comment {
+    color: #8f909e;
+    font-style: italic;
+  }
+
+  .sql-syntax-number {
+    color: #ffb4ab;
+  }
+
+  .sql-syntax-operator {
+    color: #c5c5d4;
+  }
+
+  /* Material Symbols */
+  .material-symbols-outlined {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 20px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    user-select: none;
+  }
+
+  /* CodeMirror theme overrides */
+  .cm-editor {
+    background-color: #0e0e0e !important;
+    height: 100%;
+  }
+
+  .cm-editor.cm-focused {
+    outline: none !important;
+  }
+
+  .cm-content {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 13px;
+    color: #e5e2e1;
+  }
+
+  .cm-gutters {
+    background-color: #0e0e0e !important;
+    border-right: 1px solid #2a2a2a !important;
+    color: #454652 !important;
+  }
+
+  .cm-cursor {
+    border-left-color: #bac3ff !important;
+  }
+
+  .cm-selectionBackground {
+    background: rgba(186, 195, 255, 0.2) !important;
+  }
+
+  .cm-activeLine {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  .cm-activeLineGutter {
+    background: rgba(255, 255, 255, 0.03) !important;
+    color: #8f909e !important;
+  }
+
+  /* Resizable panel handle */
+  .resize-handle {
+    width: 4px;
+    background: transparent;
+    cursor: col-resize;
+    transition: background 0.15s;
+    position: relative;
+  }
+
+  .resize-handle:hover,
+  .resize-handle.dragging {
+    background: #bac3ff;
+  }
+
+  /* Pulsing animation for provisioning state */
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(68, 216, 241, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 6px rgba(68, 216, 241, 0);
+    }
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  /* Contribution chart bar */
+  .contribution-bar {
+    @apply bg-surface-container-highest rounded-sm transition-all duration-200;
+  }
+
+  .contribution-bar:hover {
+    @apply bg-primary opacity-80;
+  }
+}
+
+@layer utilities {
+  .text-gradient-primary {
+    background: linear-gradient(135deg, #bac3ff, #4453a7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}

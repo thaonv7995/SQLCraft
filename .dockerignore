@@ -1,0 +1,52 @@
+# ─── Dependencies (will be installed inside container) ────────────────────────
+**/node_modules
+**/.pnp
+**/.pnp.js
+
+# ─── Build outputs ────────────────────────────────────────────────────────────
+**/.next
+**/dist
+**/build
+**/out
+**/*.tsbuildinfo
+
+# ─── Git & CI ─────────────────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ─── Environment files ────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+**/*.log
+**/npm-debug.log*
+
+# ─── Testing & Coverage ───────────────────────────────────────────────────────
+**/coverage
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
+**/vitest.config.ts
+
+# ─── OS & Editor ──────────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+.idea
+.vscode
+
+# ─── Turborepo cache ──────────────────────────────────────────────────────────
+**/.turbo
+
+# ─── Docs (not needed in container) ──────────────────────────────────────────
+docs/
+README.md
+CONTRIBUTING.md
+CHECKLIST.md
+LICENSE
+Makefile
+
+# ─── Claude AI ────────────────────────────────────────────────────────────────
+.claude/

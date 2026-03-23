@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Architectural Lab - E-Commerce_Global_V4</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Space+Grotesk:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-variant": "#353534",
+              "error-container": "#93000a",
+              "on-surface": "#e5e2e1",
+              "on-background": "#e5e2e1",
+              "surface-container-low": "#1c1b1b",
+              "on-secondary-fixed": "#00201d",
+              "inverse-primary": "#4858ab",
+              "on-secondary": "#003732",
+              "surface-dim": "#131313",
+              "secondary-container": "#1ea296",
+              "on-tertiary-fixed": "#001f25",
+              "outline-variant": "#454652",
+              "on-secondary-fixed-variant": "#005049",
+              "on-primary-container": "#c9cfff",
+              "inverse-on-surface": "#313030",
+              "tertiary-container": "#006471",
+              "on-error": "#690005",
+              "on-tertiary": "#00363e",
+              "primary-fixed-dim": "#bac3ff",
+              "primary-container": "#4453a7",
+              "secondary-fixed": "#84f5e8",
+              "surface-container": "#201f1f",
+              "secondary": "#66d9cc",
+              "on-surface-variant": "#c5c5d4",
+              "surface-bright": "#393939",
+              "on-tertiary-container": "#55e4fd",
+              "inverse-surface": "#e5e2e1",
+              "surface-container-high": "#2a2a2a",
+              "on-secondary-container": "#00302b",
+              "tertiary-fixed": "#a1efff",
+              "on-primary-fixed-variant": "#2f3f92",
+              "on-primary": "#15267b",
+              "tertiary": "#44d8f1",
+              "on-tertiary-fixed-variant": "#004e59",
+              "background": "#131313",
+              "surface-container-highest": "#353534",
+              "surface-container-lowest": "#0e0e0e",
+              "error": "#ffb4ab",
+              "secondary-fixed-dim": "#66d9cc",
+              "surface-tint": "#bac3ff",
+              "outline": "#8f909e",
+              "on-primary-fixed": "#00105b",
+              "on-error-container": "#ffdad6",
+              "surface": "#131313",
+              "primary-fixed": "#dee0ff",
+              "primary": "#bac3ff",
+              "tertiary-fixed-dim": "#44d8f1"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Inter"],
+              "label": ["Inter"],
+              "mono": ["JetBrains Mono"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .code-bg {
+        background-color: #0e0e0e;
+      }
+      .erd-connector {
+        background: repeating-linear-gradient(90deg, #454652 0, #454652 2px, transparent 2px, transparent 4px);
+      }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body selection:bg-primary selection:text-on-primary">
+<!-- Top Navigation -->
+<nav class="bg-[#131313] dark:bg-[#131313] font-['Space_Grotesk'] tracking-tight flex justify-between items-center w-full px-6 h-16 fixed top-0 z-50">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold text-[#bac3ff] uppercase tracking-widest">Architectural Lab</span>
+<div class="hidden md:flex items-center gap-6">
+<a class="text-[#bac3ff] border-b-2 border-[#bac3ff] pb-1" href="#">Databases</a>
+<a class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors duration-200" href="#">Playground</a>
+<a class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors duration-200" href="#">History</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+<button class="text-[#e5e2e1]/60 hover:text-[#e5e2e1] transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-surface-container-highest overflow-hidden border border-outline-variant/20">
+<img class="w-full h-full object-cover" data-alt="User Profile Avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCQDkyMErqRKNq7TI-OZ7wR5OdJpV9K1JH_zzANX2uCDncpFhrhDe-lNwZn5VKivoAHHSzU7bfqK6uF00rsdJUkWk0OWeM3u37n5IWW_w0BlyjVWcQiWLO9Ty0_k4y5JLoviHanErJsK4s_AQTohognN0BAK0PsxPixnQNWAcWcBQEd4R4BK_7yFgpBx-t_Ci3PA-6dBM40Vc53OT8bgZEFDKGbWfxASPzwME42VwAzpLiKcyykRgqOzY_lIsB5nxuSttAuanPdCHDv"/>
+</div>
+</div>
+</nav>
+<!-- Side Navigation -->
+<aside class="hidden md:flex bg-[#1c1b1b] dark:bg-[#1c1b1b] font-['Inter'] text-sm fixed left-0 top-16 bottom-0 w-64 border-r border-[#454652]/15 flex-col py-4 z-40">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-3 mb-1">
+<div class="w-8 h-8 rounded bg-surface-container-highest flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" data-icon="database">database</span>
+</div>
+<div>
+<h2 class="text-[#e5e2e1] font-mono font-bold leading-none">LEARNER LAB</h2>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-tighter">v2.4.0-stable</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 px-2 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 text-[#44d8f1] bg-[#353534] border-l-4 border-[#44d8f1] Active: scale-[0.99] transition-transform" href="#">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span>Databases</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e2e1]/50 hover:bg-[#353534] hover:text-[#e5e2e1] transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="terminal">terminal</span>
+<span>SQL Lab</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e2e1]/50 hover:bg-[#353534] hover:text-[#e5e2e1] transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="emoji_events">emoji_events</span>
+<span>Competitive Tracks</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e2e1]/50 hover:bg-[#353534] hover:text-[#e5e2e1] transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="handshake">handshake</span>
+<span>Contributions</span>
+</a>
+</nav>
+<div class="mt-auto px-4 space-y-4">
+<button class="w-full py-2 bg-gradient-to-br from-primary to-primary-container text-on-primary-fixed font-semibold rounded-md shadow-lg shadow-primary/10">
+                New Query
+            </button>
+<div class="pt-4 border-t border-outline-variant/10 space-y-1">
+<a class="flex items-center gap-3 px-4 py-2 text-[#e5e2e1]/50 hover:text-[#e5e2e1]" href="#">
+<span class="material-symbols-outlined text-xs" data-icon="menu_book">menu_book</span>
+<span class="text-xs">Documentation</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-[#e5e2e1]/50 hover:text-[#e5e2e1]" href="#">
+<span class="material-symbols-outlined text-xs" data-icon="help_outline">help_outline</span>
+<span class="text-xs">Support</span>
+</a>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="md:ml-64 mt-16 p-8 min-h-screen">
+<!-- Hero Header -->
+<header class="relative mb-12 p-10 bg-surface-container-low overflow-hidden rounded-xl border border-outline-variant/10">
+<div class="absolute top-0 right-0 w-1/3 h-full opacity-10 pointer-events-none">
+<img class="w-full h-full object-cover grayscale" data-alt="Abstract glowing network grid" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAyRbUaZMdGyPuDKXG40lTapgifNDiO8ijD9gxiH_dGHcahacAHxIwyAKui-FS2V5Y666M5LUv7N2k8ontJR-_KdajK6mxi6LNnToB9PY6ZDqwEFp9FqeHY3ROMwznIEfcjMkpU3xvd6GnFkqrCPXyYxO8l-CjxOX9uO5zXyR72b5ZZMuFQgcztIYWukQWvqin0o8Vn_ak3RrPM45flTbiNU0VVbwz2lsM4s226gI0WCCKjBePa0aAkcZIiQKBGrbpgFt3WfulN8IlG"/>
+</div>
+<div class="relative z-10">
+<div class="flex items-center gap-3 mb-4">
+<span class="bg-secondary/10 text-secondary text-[10px] font-bold px-2 py-0.5 rounded border border-secondary/20 tracking-widest uppercase">Production</span>
+<span class="text-on-surface-variant font-mono text-xs">US-EAST-1</span>
+</div>
+<h1 class="text-4xl md:text-6xl font-headline font-bold text-on-surface tracking-tighter mb-2">E-Commerce_Global_V4</h1>
+<p class="text-on-surface-variant font-body max-w-xl text-lg">Master node for global transaction processing. Real-time consistency enabled across 4 availability zones.</p>
+<div class="flex gap-4 mt-8">
+<div class="flex flex-col">
+<span class="text-[10px] uppercase tracking-widest text-outline">Engine</span>
+<span class="text-primary font-mono">PostgreSQL 15.4</span>
+</div>
+<div class="w-px h-8 bg-outline-variant/30 self-end"></div>
+<div class="flex flex-col">
+<span class="text-[10px] uppercase tracking-widest text-outline">Uptime</span>
+<span class="text-secondary font-mono">99.998%</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Two Column Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Left Column: Schema Architecture -->
+<section class="lg:col-span-8 bg-surface-container rounded-xl overflow-hidden flex flex-col min-h-[600px]">
+<div class="p-6 border-b border-outline-variant/10 flex justify-between items-center">
+<div>
+<h3 class="font-headline text-xl text-on-surface">Schema Architecture</h3>
+<p class="text-xs text-on-surface-variant">Visual map of primary relations &amp; foreign keys</p>
+</div>
+<div class="flex gap-2">
+<button class="p-2 bg-surface-container-high rounded text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined" data-icon="zoom_in">zoom_in</span>
+</button>
+<button class="p-2 bg-surface-container-high rounded text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined" data-icon="fullscreen">fullscreen</span>
+</button>
+</div>
+</div>
+<div class="flex-1 relative bg-surface-container-lowest p-12 overflow-hidden">
+<!-- ERD Visualization Simulation -->
+<div class="grid grid-cols-2 gap-x-24 gap-y-16">
+<!-- Users Table -->
+<div class="relative group">
+<div class="bg-surface-container-high border border-outline-variant/30 rounded-lg w-64 shadow-2xl">
+<div class="bg-primary/10 px-4 py-2 border-b border-outline-variant/30 flex justify-between">
+<span class="font-mono text-sm text-primary font-bold">users</span>
+<span class="material-symbols-outlined text-xs text-primary" data-icon="person">person</span>
+</div>
+<div class="p-3 space-y-1">
+<div class="flex justify-between text-[11px] font-mono"><span class="text-secondary">id (PK)</span><span class="text-outline">uuid</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>email</span><span class="text-outline">varchar</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>full_name</span><span class="text-outline">varchar</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>created_at</span><span class="text-outline">timestamp</span></div>
+</div>
+</div>
+<div class="absolute top-1/2 -right-12 w-12 h-px erd-connector"></div>
+</div>
+<!-- Orders Table -->
+<div class="relative">
+<div class="bg-surface-container-high border border-outline-variant/30 rounded-lg w-64 shadow-2xl">
+<div class="bg-tertiary/10 px-4 py-2 border-b border-outline-variant/30 flex justify-between">
+<span class="font-mono text-sm text-tertiary font-bold">orders</span>
+<span class="material-symbols-outlined text-xs text-tertiary" data-icon="shopping_cart">shopping_cart</span>
+</div>
+<div class="p-3 space-y-1">
+<div class="flex justify-between text-[11px] font-mono"><span class="text-secondary">id (PK)</span><span class="text-outline">uuid</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>user_id (FK)</span><span class="text-outline">uuid</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>status</span><span class="text-outline">enum</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>total_cents</span><span class="text-outline">int4</span></div>
+</div>
+</div>
+</div>
+<!-- Products Table -->
+<div class="relative group">
+<div class="absolute -top-12 left-1/2 w-px h-12 erd-connector"></div>
+<div class="bg-surface-container-high border border-outline-variant/30 rounded-lg w-64 shadow-2xl">
+<div class="bg-surface-variant px-4 py-2 border-b border-outline-variant/30 flex justify-between">
+<span class="font-mono text-sm text-on-surface font-bold">products</span>
+<span class="material-symbols-outlined text-xs text-on-surface-variant" data-icon="inventory_2">inventory_2</span>
+</div>
+<div class="p-3 space-y-1">
+<div class="flex justify-between text-[11px] font-mono"><span class="text-secondary">id (PK)</span><span class="text-outline">uuid</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>sku</span><span class="text-outline">varchar</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>inventory</span><span class="text-outline">int4</span></div>
+</div>
+</div>
+</div>
+<!-- Order_Items Table -->
+<div class="relative">
+<div class="absolute -top-12 left-1/2 w-px h-12 erd-connector"></div>
+<div class="bg-surface-container-high border border-outline-variant/30 rounded-lg w-64 shadow-2xl">
+<div class="bg-surface-variant px-4 py-2 border-b border-outline-variant/30 flex justify-between">
+<span class="font-mono text-sm text-on-surface font-bold">order_items</span>
+<span class="material-symbols-outlined text-xs text-on-surface-variant" data-icon="list_alt">list_alt</span>
+</div>
+<div class="p-3 space-y-1">
+<div class="flex justify-between text-[11px] font-mono"><span class="text-secondary">order_id (FK)</span><span class="text-outline">uuid</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>product_id (FK)</span><span class="text-outline">uuid</span></div>
+<div class="flex justify-between text-[11px] font-mono"><span>quantity</span><span class="text-outline">int4</span></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Background Code Ghosting -->
+<div class="absolute bottom-4 left-6 opacity-5 pointer-events-none">
+<pre class="font-mono text-[10px]">CREATE TABLE orders (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id),
+    status order_status NOT NULL,
+    total_cents INTEGER CHECK (total_cents &gt;= 0)
+);</pre>
+</div>
+</div>
+</section>
+<!-- Right Column: Database Health & Metrics -->
+<section class="lg:col-span-4 space-y-8">
+<!-- Health Metrics -->
+<div class="bg-surface-container-low p-8 rounded-xl border border-outline-variant/10">
+<h4 class="font-headline text-lg mb-6 tracking-tight uppercase text-primary">Database Health</h4>
+<div class="space-y-6">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary" data-icon="storage">storage</span>
+<div>
+<p class="text-xs text-outline tracking-wider">TOTAL ROWS</p>
+<p class="text-2xl font-mono font-medium">842.4M</p>
+</div>
+</div>
+<div class="text-secondary text-xs flex items-center gap-1 font-mono">
+<span class="material-symbols-outlined text-xs" data-icon="trending_up">trending_up</span>
+                                2.4%
+                            </div>
+</div>
+<div class="h-px bg-outline-variant/10"></div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary" data-icon="format_list_numbered">format_list_numbered</span>
+<div>
+<p class="text-xs text-outline tracking-wider">INDEXED COLUMNS</p>
+<p class="text-2xl font-mono font-medium">142</p>
+</div>
+</div>
+<div class="text-outline text-xs font-mono">92.1% Cov.</div>
+</div>
+<div class="h-px bg-outline-variant/10"></div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-tertiary" data-icon="cloud_done">cloud_done</span>
+<div>
+<p class="text-xs text-outline tracking-wider">STORAGE SIZE</p>
+<p class="text-2xl font-mono font-medium">1.2 TB</p>
+</div>
+</div>
+<div class="text-secondary text-xs font-mono">Provisioning...</div>
+</div>
+</div>
+</div>
+<!-- Sandbox Controls -->
+<div class="bg-surface-container-highest p-8 rounded-xl border border-primary/20 relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-2">
+<span class="material-symbols-outlined text-primary/30 text-6xl" data-icon="terminal" style="font-variation-settings: 'FILL' 1;">terminal</span>
+</div>
+<div class="relative z-10">
+<h4 class="font-headline text-xl mb-4 text-on-surface">Sandbox Environment</h4>
+<p class="text-sm text-on-surface-variant mb-8 leading-relaxed">Execute complex SQL queries against a live-synced read-only replica of the global dataset.</p>
+<button class="w-full py-4 bg-gradient-to-r from-primary to-primary-container text-on-primary-fixed font-bold rounded-lg shadow-xl shadow-primary/20 flex items-center justify-center gap-3 active:scale-95 transition-all">
+<span class="material-symbols-outlined" data-icon="play_arrow" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+<span>START QUERYING</span>
+</button>
+<div class="mt-6 flex items-center gap-4 text-[10px] text-outline uppercase tracking-widest justify-center">
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-secondary"></span> Live Link</span>
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-secondary"></span> Read Only</span>
+<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-secondary"></span> Auto-Indexing</span>
+</div>
+</div>
+</div>
+<!-- Active Sessions Card -->
+<div class="p-6 bg-surface-container-low rounded-xl border border-outline-variant/10">
+<div class="flex justify-between items-center mb-4">
+<span class="text-[10px] font-bold tracking-widest uppercase text-on-tertiary-container">Performance Logs</span>
+<span class="material-symbols-outlined text-xs text-outline" data-icon="info">info</span>
+</div>
+<div class="space-y-4">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-secondary animate-pulse"></div>
+<div class="flex-1">
+<p class="text-xs font-mono text-on-surface">VACUUM ANALYZE full_scan</p>
+<div class="w-full h-1 bg-surface-container-highest rounded-full mt-1 overflow-hidden">
+<div class="w-3/4 h-full bg-secondary"></div>
+</div>
+</div>
+<span class="text-[10px] font-mono text-outline">75%</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-tertiary"></div>
+<div class="flex-1">
+<p class="text-xs font-mono text-on-surface">REINDEX CONCURRENTLY idx_users</p>
+<div class="w-full h-1 bg-surface-container-highest rounded-full mt-1 overflow-hidden">
+<div class="w-1/3 h-full bg-tertiary"></div>
+</div>
+</div>
+<span class="text-[10px] font-mono text-outline">32%</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+<!-- Background Decoration -->
+<div class="fixed inset-0 pointer-events-none -z-10 opacity-30">
+<div class="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[120px]"></div>
+<div class="absolute bottom-0 left-0 w-[500px] h-[500px] bg-tertiary/5 rounded-full blur-[120px]"></div>
+</div>
+</body></html>

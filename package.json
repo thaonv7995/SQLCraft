@@ -1,0 +1,34 @@
+{
+  "name": "sqlcraft",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source SQL learning platform",
+  "license": "MIT",
+  "workspaces": ["apps/*", "services/*", "packages/*"],
+  "scripts": {
+    "dev": "make dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:migrate": "pnpm --filter @sqlcraft/api db:migrate",
+    "db:seed": "pnpm --filter @sqlcraft/api db:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "prettier": "^3.2.0",
+    "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "pnpm": {
+    "overrides": {
+      "ioredis": "^5.3.2"
+    }
+  }
+}

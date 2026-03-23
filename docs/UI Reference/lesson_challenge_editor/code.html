@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "outline-variant": "#454652",
+                        "surface-container-highest": "#353534",
+                        "on-secondary-fixed-variant": "#005049",
+                        "on-error-container": "#ffdad6",
+                        "secondary": "#66d9cc",
+                        "primary-container": "#4453a7",
+                        "primary-fixed": "#dee0ff",
+                        "on-secondary-fixed": "#00201d",
+                        "secondary-fixed-dim": "#66d9cc",
+                        "secondary-fixed": "#84f5e8",
+                        "on-error": "#690005",
+                        "error": "#ffb4ab",
+                        "on-surface-variant": "#c5c5d4",
+                        "surface": "#131313",
+                        "outline": "#8f909e",
+                        "on-background": "#e5e2e1",
+                        "tertiary-fixed-dim": "#44d8f1",
+                        "tertiary-container": "#006471",
+                        "on-surface": "#e5e2e1",
+                        "tertiary": "#44d8f1",
+                        "surface-container": "#201f1f",
+                        "on-tertiary": "#00363e",
+                        "on-primary-fixed-variant": "#2f3f92",
+                        "primary": "#bac3ff",
+                        "on-tertiary-fixed-variant": "#004e59",
+                        "error-container": "#93000a",
+                        "inverse-primary": "#4858ab",
+                        "tertiary-fixed": "#a1efff",
+                        "on-secondary": "#003732",
+                        "surface-dim": "#131313",
+                        "inverse-on-surface": "#313030",
+                        "surface-container-high": "#2a2a2a",
+                        "surface-bright": "#393939",
+                        "secondary-container": "#1ea296",
+                        "on-primary-container": "#c9cfff",
+                        "surface-tint": "#bac3ff",
+                        "surface-variant": "#353534",
+                        "surface-container-low": "#1c1b1b",
+                        "inverse-surface": "#e5e2e1",
+                        "on-primary-fixed": "#00105b",
+                        "on-tertiary-fixed": "#001f25",
+                        "primary-fixed-dim": "#bac3ff",
+                        "on-tertiary-container": "#55e4fd",
+                        "on-secondary-container": "#00302b",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-primary": "#15267b",
+                        "background": "#131313"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            background-color: #131313;
+            color: #e5e2e1;
+            font-family: 'Inter', sans-serif;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #131313;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #353534;
+        }
+    </style>
+</head>
+<body class="antialiased overflow-hidden">
+<!-- TopAppBar Shell -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-[#131313] dark:bg-[#131313] border-b border-[#454652]/15 font-['Space_Grotesk'] text-sm tracking-tight">
+<div class="flex items-center gap-8">
+<div class="text-xl font-bold tracking-tighter text-[#e5e2e1]">Learner Lab</div>
+<nav class="hidden md:flex items-center gap-6">
+<div class="flex items-center gap-2 text-[#8f909e]"><span>Contributions</span><span class="material-symbols-outlined text-xs">chevron_right</span><span class="text-[#bac3ff] font-medium">New Lesson</span></div>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="px-4 py-2 text-[#8f909e] hover:text-[#e5e2e1] transition-colors duration-200">Save Draft</button>
+<button class="px-5 py-2 bg-gradient-to-br from-[#bac3ff] to-[#4453a7] text-[#00105b] font-semibold rounded-md active:scale-95 duration-100">Submit for Review</button>
+<div class="flex items-center gap-3 ml-2 pl-4 border-l border-[#454652]/15">
+<span class="material-symbols-outlined text-[#8f909e] hover:text-[#e5e2e1] cursor-pointer">notifications</span>
+<img class="w-8 h-8 rounded-full border border-[#454652]/30" data-alt="Contributor Profile Avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQXU2gnJKC02ddotXhvm8CyulWxVbO8Bq9TxRpQC7A0YL_42Ot6VtyavoT84E1JdP5tbLiYLXLJILI3-ZJoKaO3VfpvLJ7unMsZJQxuAdVNYzVmMXNUazJHHO2U5lDtH-nfnOZKJFQC2qt21wcTm-79gbShgDTkUA6wIAd1LWX-0LUaJ4No1sThjaePeJYOtjTZHGGVxYWveX53xtq8EOSkSYGpW23cwILWt1p1jADQkDQRVgRR_OSV43TwugrPpgRmAL2y3EuJvsu"/>
+</div>
+</div>
+</header>
+<!-- Sidebar Shell -->
+<aside class="fixed left-0 top-16 h-[calc(100vh-4rem)] w-64 flex flex-col py-4 bg-[#1c1b1b] border-r border-[#454652]/15 font-['Inter'] text-xs font-medium">
+<div class="px-6 mb-8">
+<div class="text-[#e5e2e1] text-lg font-semibold">Editor Mode</div>
+<div class="text-[#8f909e] text-[10px] uppercase tracking-widest mt-1">SQL Track Alpha</div>
+</div>
+<nav class="flex-1 space-y-1 px-3"><div class="flex items-center gap-3 text-[#8f909e] px-4 py-3 hover:bg-[#353534]/50 hover:text-[#e5e2e1] transition-all duration-200 ease-in-out cursor-pointer"><span class="material-symbols-outlined text-lg">database</span><span>Databases</span></div><div class="flex items-center gap-3 text-[#8f909e] px-4 py-3 hover:bg-[#353534]/50 hover:text-[#e5e2e1] transition-all duration-200 ease-in-out cursor-pointer"><span class="material-symbols-outlined text-lg">terminal</span><span>SQL Lab</span></div><div class="flex items-center gap-3 text-[#8f909e] px-4 py-3 hover:bg-[#353534]/50 hover:text-[#e5e2e1] transition-all duration-200 ease-in-out cursor-pointer"><span class="material-symbols-outlined text-lg">emoji_events</span><span>Competitive Tracks</span></div><div class="flex items-center gap-3 bg-[#353534] text-[#bac3ff] rounded-md px-4 py-3 transition-all duration-200 ease-in-out cursor-pointer"><span class="material-symbols-outlined text-lg" style="font-variation-settings: 'FILL' 1;">edit_note</span><span>Contributions</span></div></nav>
+<div class="mt-auto px-4 space-y-1 border-t border-[#454652]/15 pt-4">
+<div class="flex items-center gap-3 text-[#8f909e] px-4 py-2 hover:text-[#e5e2e1] cursor-pointer">
+<span class="material-symbols-outlined text-sm">help</span>
+<span>Documentation</span>
+</div>
+<div class="flex items-center gap-3 text-[#8f909e] px-4 py-2 hover:text-[#e5e2e1] cursor-pointer">
+<span class="material-symbols-outlined text-sm">contact_support</span>
+<span>Support</span>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="ml-64 mt-16 h-[calc(100vh-4rem)] overflow-y-auto custom-scrollbar bg-[#131313]">
+<div class="max-w-6xl mx-auto p-12">
+<!-- Header Section (Intentional Asymmetry) -->
+<div class="mb-12 pl-4 border-l-2 border-[#bac3ff]">
+<h1 class="font-headline text-4xl font-bold tracking-tight text-[#e5e2e1] mb-2">Challenge Configuration</h1>
+<p class="text-[#8f909e] text-lg max-w-2xl">Define the core objective, expected output, and automated validation rules for this lesson's practical task.</p>
+</div>
+<!-- Editor Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Left Column: Form & Settings -->
+<div class="lg:col-span-7 space-y-8">
+<!-- Basic Config Card -->
+<section class="bg-[#1c1b1b] p-8 rounded-lg">
+<h3 class="font-headline text-lg font-semibold text-[#bac3ff] mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">settings_input_component</span>
+                            Challenge Metadata
+                        </h3>
+<div class="space-y-6">
+<div>
+<label class="block text-xs font-medium text-[#8f909e] uppercase tracking-widest mb-2">Challenge Title</label>
+<input class="w-full bg-[#0e0e0e] border-none text-[#e5e2e1] px-4 py-3 rounded focus:ring-1 focus:ring-[#bac3ff] font-body" type="text" value="Aggregating Revenue by Region"/>
+</div>
+<div class="grid grid-cols-2 gap-6">
+<div>
+<label class="block text-xs font-medium text-[#8f909e] uppercase tracking-widest mb-2">Difficulty Level</label>
+<select class="w-full bg-[#0e0e0e] border-none text-[#e5e2e1] px-4 py-3 rounded focus:ring-1 focus:ring-[#bac3ff] font-body appearance-none">
+<option>Beginner</option>
+<option selected="">Intermediate</option>
+<option>Advanced</option>
+<option>Architect</option>
+</select>
+</div>
+<div>
+<label class="block text-xs font-medium text-[#8f909e] uppercase tracking-widest mb-2">Points Awarded</label>
+<input class="w-full bg-[#0e0e0e] border-none text-[#e5e2e1] px-4 py-3 rounded focus:ring-1 focus:ring-[#bac3ff] font-body" type="number" value="250"/>
+</div>
+</div>
+<div>
+<label class="block text-xs font-medium text-[#8f909e] uppercase tracking-widest mb-2">Instruction Markdown</label>
+<textarea class="w-full bg-[#0e0e0e] border-none text-[#e5e2e1] px-4 py-4 rounded focus:ring-1 focus:ring-[#bac3ff] font-mono text-sm leading-relaxed" placeholder="Write instructions for the learner..." rows="6">## Task
+Write a query that calculates the total revenue for each 'Region' in the `sales_data` table. 
+
+### Requirements
+- Join with the `geography` table.
+- Filter out regions with less than $10,000 in total sales.
+- Sort results by revenue in descending order.</textarea>
+</div>
+</div>
+</section>
+<!-- Validator Settings Card -->
+<section class="bg-[#1c1b1b] p-8 rounded-lg">
+<h3 class="font-headline text-lg font-semibold text-[#bac3ff] mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">verified_user</span>
+                            Validator Settings
+                        </h3>
+<div class="space-y-4">
+<!-- Toggle Item -->
+<div class="flex items-center justify-between p-4 bg-[#2a2a2a] rounded group">
+<div class="flex flex-col">
+<span class="text-[#e5e2e1] font-medium">Row Order Sensitivity</span>
+<span class="text-[#8f909e] text-xs">Verify if the result order matches the reference exactly.</span>
+</div>
+<div class="w-12 h-6 bg-[#353534] rounded-full relative cursor-pointer">
+<div class="absolute right-1 top-1 w-4 h-4 bg-[#bac3ff] rounded-full"></div>
+</div>
+</div>
+<!-- Toggle Item -->
+<div class="flex items-center justify-between p-4 bg-[#2a2a2a] rounded group">
+<div class="flex flex-col">
+<span class="text-[#e5e2e1] font-medium">Column Name Matching</span>
+<span class="text-[#8f909e] text-xs">Check for exact header alias matches (e.g., 'Total_Revenue').</span>
+</div>
+<div class="w-12 h-6 bg-[#353534] rounded-full relative cursor-pointer">
+<div class="absolute left-1 top-1 w-4 h-4 bg-[#8f909e] rounded-full"></div>
+</div>
+</div>
+<!-- Input Item -->
+<div class="flex items-center justify-between p-4 bg-[#2a2a2a] rounded">
+<div class="flex flex-col">
+<span class="text-[#e5e2e1] font-medium">Performance Threshold (ms)</span>
+<span class="text-[#8f909e] text-xs">Flag queries exceeding this execution time.</span>
+</div>
+<div class="flex items-center gap-3">
+<input class="w-20 bg-[#0e0e0e] border-none text-[#bac3ff] text-right px-2 py-1 rounded font-mono" type="number" value="150"/>
+<span class="text-[#8f909e] text-xs">ms</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Right Column: Code Editor & Preview -->
+<div class="lg:col-span-5 space-y-8">
+<!-- IDE Editor -->
+<div class="flex flex-col h-full bg-[#0e0e0e] rounded-lg border border-[#454652]/15 overflow-hidden shadow-2xl">
+<div class="bg-[#1c1b1b] px-4 py-2 flex items-center justify-between border-b border-[#454652]/15">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-xs text-[#bac3ff]">code</span>
+<span class="text-[11px] font-mono text-[#8f909e] uppercase tracking-widest">Expected Query Result-set SQL</span>
+</div>
+<div class="flex gap-1">
+<div class="w-2 h-2 rounded-full bg-error/40"></div>
+<div class="w-2 h-2 rounded-full bg-secondary/40"></div>
+<div class="w-2 h-2 rounded-full bg-primary/40"></div>
+</div>
+</div>
+<div class="flex-1 p-4 font-mono text-sm leading-relaxed text-[#bac3ff]">
+<div class="flex gap-4">
+<div class="text-[#353534] text-right select-none pr-2 border-r border-[#353534]/30">
+                                    01<br/>02<br/>03<br/>04<br/>05<br/>06<br/>07<br/>08<br/>09
+                                </div>
+<div class="whitespace-pre overflow-x-auto custom-scrollbar">
+<span class="text-[#84f5e8]">SELECT</span>
+    g.region_name,
+    <span class="text-[#84f5e8]">SUM</span>(s.amount) <span class="text-[#84f5e8]">AS</span> total_revenue
+<span class="text-[#84f5e8]">FROM</span> sales_data s
+<span class="text-[#84f5e8]">JOIN</span> geography g <span class="text-[#84f5e8]">ON</span> s.geo_id = g.id
+<span class="text-[#84f5e8]">GROUP BY</span> 1
+<span class="text-[#84f5e8]">HAVING</span> total_revenue &gt; 10000
+<span class="text-[#84f5e8]">ORDER BY</span> 2 <span class="text-[#84f5e8]">DESC</span>;</div>
+</div>
+</div>
+<!-- Live Preview Panel -->
+<div class="bg-[#1c1b1b] border-t border-[#454652]/15">
+<div class="px-4 py-2 flex items-center justify-between">
+<span class="text-[10px] font-bold text-[#e5e2e1] uppercase">Reference Output Preview</span>
+<button class="flex items-center gap-2 text-[10px] font-bold text-[#66d9cc] bg-[#1ea296]/10 px-3 py-1 rounded border border-[#1ea296]/20 hover:bg-[#1ea296]/20 transition-all">
+<span class="material-symbols-outlined text-[14px]">play_arrow</span>
+                                    RUN TEST
+                                </button>
+</div>
+<div class="max-h-64 overflow-auto custom-scrollbar">
+<table class="w-full text-left font-mono text-xs border-collapse">
+<thead>
+<tr class="bg-[#2a2a2a] text-[#8f909e]">
+<th class="px-4 py-2 border-r border-[#454652]/15">region_name</th>
+<th class="px-4 py-2">total_revenue</th>
+</tr>
+</thead>
+<tbody class="text-[#e5e2e1]">
+<tr class="border-b border-[#454652]/10 bg-[#131313]">
+<td class="px-4 py-2 border-r border-[#454652]/15">North America</td>
+<td class="px-4 py-2 text-[#44d8f1]">$42,950.00</td>
+</tr>
+<tr class="border-b border-[#454652]/10 bg-[#1c1b1b]">
+<td class="px-4 py-2 border-r border-[#454652]/15">Western Europe</td>
+<td class="px-4 py-2 text-[#44d8f1]">$38,200.00</td>
+</tr>
+<tr class="border-b border-[#454652]/10 bg-[#131313]">
+<td class="px-4 py-2 border-r border-[#454652]/15">East Asia</td>
+<td class="px-4 py-2 text-[#44d8f1]">$12,400.00</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Status Indicator -->
+<div class="flex items-center gap-4 bg-[#201f1f] p-4 rounded-lg border border-[#44d8f1]/10">
+<div class="relative">
+<div class="w-3 h-3 bg-[#44d8f1] rounded-full animate-pulse"></div>
+<div class="absolute -inset-1 bg-[#44d8f1]/30 rounded-full blur-sm"></div>
+</div>
+<div class="flex-1">
+<span class="text-xs font-semibold text-[#44d8f1] uppercase tracking-widest">Environment Ready</span>
+<p class="text-[#8f909e] text-[10px]">Reference solution validated against Alpha Lab DB v2.4</p>
+</div>
+<div class="text-[#8f909e] text-[10px] font-mono">
+                            Latency: 42ms
+                        </div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Contextual FAB Suppression (No FAB on focused editor screen) -->
+</body></html>

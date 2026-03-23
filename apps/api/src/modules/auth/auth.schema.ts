@@ -1,0 +1,30 @@
+import { z } from 'zod';
+
+export const RegisterBodySchema = z.object({
+  email: z.string().email(),
+  username: z
+    .string()
+    .min(3)
+    .max(50)
+    .regex(/^[a-zA-Z0-9_-]+$/, 'Only alphanumeric, _ and - allowed'),
+  password: z.string().min(8).max(100),
+  displayName: z.string().max(100).optional(),
+});
+
+export const LoginBodySchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+export const RefreshBodySchema = z.object({
+  refreshToken: z.string().min(1),
+});
+
+export const LogoutBodySchema = z.object({
+  refreshToken: z.string().min(1),
+});
+
+export type RegisterBody = z.infer<typeof RegisterBodySchema>;
+export type LoginBody = z.infer<typeof LoginBodySchema>;
+export type RefreshBody = z.infer<typeof RefreshBodySchema>;
+export type LogoutBody = z.infer<typeof LogoutBodySchema>;

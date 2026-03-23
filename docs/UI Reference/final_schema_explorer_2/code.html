@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Schema Explorer | The Architectural Lab</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary-fixed": "#dee0ff",
+                        "surface-bright": "#393939",
+                        "secondary": "#66d9cc",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-primary-fixed-variant": "#2f3f92",
+                        "on-primary": "#15267b",
+                        "inverse-on-surface": "#313030",
+                        "on-surface": "#e5e2e1",
+                        "surface-tint": "#bac3ff",
+                        "on-tertiary-container": "#55e4fd",
+                        "on-primary-fixed": "#00105b",
+                        "primary": "#bac3ff",
+                        "surface-container-high": "#2a2a2a",
+                        "on-background": "#e5e2e1",
+                        "tertiary-fixed-dim": "#44d8f1",
+                        "on-secondary-fixed": "#00201d",
+                        "background": "#131313",
+                        "on-error-container": "#ffdad6",
+                        "primary-container": "#4453a7",
+                        "surface-container": "#201f1f",
+                        "tertiary": "#44d8f1",
+                        "on-tertiary-fixed": "#001f25",
+                        "on-secondary-container": "#00302b",
+                        "on-tertiary-fixed-variant": "#004e59",
+                        "error": "#ffb4ab",
+                        "surface-dim": "#131313",
+                        "tertiary-fixed": "#a1efff",
+                        "outline": "#8f909e",
+                        "on-error": "#690005",
+                        "primary-fixed-dim": "#bac3ff",
+                        "tertiary-container": "#006471",
+                        "error-container": "#93000a",
+                        "secondary-container": "#1ea296",
+                        "on-tertiary": "#00363e",
+                        "on-secondary": "#003732",
+                        "surface": "#131313",
+                        "surface-container-highest": "#353534",
+                        "on-secondary-fixed-variant": "#005049",
+                        "surface-container-low": "#1c1b1b",
+                        "on-surface-variant": "#c5c5d4",
+                        "secondary-fixed-dim": "#66d9cc",
+                        "surface-variant": "#353534",
+                        "outline-variant": "#454652",
+                        "secondary-fixed": "#84f5e8",
+                        "on-primary-container": "#c9cfff",
+                        "inverse-surface": "#e5e2e1",
+                        "inverse-primary": "#4858ab"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            font-size: 18px;
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #131313; }
+        ::-webkit-scrollbar-thumb { background: #353534; }
+        ::-webkit-scrollbar-thumb:hover { background: #454652; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body overflow-hidden">
+<!-- TopNavBar -->
+<header class="bg-[#131313] dark:bg-[#131313] font-['Space_Grotesk'] tracking-tight border-b border-[#454652]/15 flex justify-between items-center w-full px-6 h-16 fixed top-0 z-50">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold text-[#e5e2e1] uppercase tracking-widest">The Architectural Lab</span>
+<nav class="hidden md:flex gap-6">
+<a class="text-[#8f909e] hover:text-[#e5e2e1] transition-colors duration-200" href="#">Catalog</a>
+<a class="text-[#8f909e] hover:text-[#e5e2e1] transition-colors duration-200" href="#">Playground</a>
+<a class="text-[#8f909e] hover:text-[#e5e2e1] transition-colors duration-200" href="#">History</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="bg-surface-container border-none text-sm px-10 py-2 w-64 rounded-lg focus:ring-1 focus:ring-primary outline-none" placeholder="Global search..." type="text"/>
+</div>
+<button class="material-symbols-outlined text-outline hover:text-on-surface transition-colors">settings</button>
+<button class="material-symbols-outlined text-outline hover:text-on-surface transition-colors">account_circle</button>
+</div>
+</header>
+<!-- SideNavBar (Shared Component) -->
+<aside class="flex flex-col items-center py-4 w-20 fixed left-0 top-0 h-full z-40 bg-[#1c1b1b] dark:bg-[#1c1b1b] mt-16">
+<div class="flex flex-col gap-6 w-full items-center">
+<button class="w-12 h-12 flex flex-col items-center justify-center gap-1 text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 rounded-lg transition-all duration-150">
+<span class="material-symbols-outlined">folder_open</span>
+<span class="text-[10px] font-['Inter']">Explorer</span>
+</button>
+<button class="w-12 h-12 flex flex-col items-center justify-center gap-1 text-[#bac3ff] bg-[#353534] border-l-2 border-[#bac3ff] transition-all duration-150">
+<span class="material-symbols-outlined">database</span>
+<span class="text-[10px] font-['Inter']">Schema</span>
+</button>
+<button class="w-12 h-12 flex flex-col items-center justify-center gap-1 text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 rounded-lg transition-all duration-150">
+<span class="material-symbols-outlined">terminal</span>
+<span class="text-[10px] font-['Inter']">Queries</span>
+</button>
+<button class="w-12 h-12 flex flex-col items-center justify-center gap-1 text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 rounded-lg transition-all duration-150">
+<span class="material-symbols-outlined">code</span>
+<span class="text-[10px] font-['Inter']">Snippets</span>
+</button>
+</div>
+<div class="mt-auto flex flex-col gap-6 w-full items-center pb-20">
+<button class="w-12 h-12 flex flex-col items-center justify-center gap-1 text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 rounded-lg transition-all">
+<span class="material-symbols-outlined">help_outline</span>
+<span class="text-[10px] font-['Inter']">Help</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant/30">
+<img class="w-full h-full object-cover" data-alt="User profile avatar for SQL lab account" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQc6wejfLDAt4RH9qXa-f7pMRWfUJR007hM6lG3fWrnfxt81ciEkc-quaIrlTQqVrw_m-FEElEbe2ThVUrIoD0LGMMb0O8IrbLsqrbSOmH1rDDQa70l0VKsbeoF1vCoKNpFB-6vNoyiz3q0reDLEhUuwVsOD6drZvUd87ncf3DFNa9m9cGgccIkLtqrnNOJBeWpJuT9y7p_qjGBYPINhiXqFrOL6CRLkafscjo1M31-GoWgaoqBh8_K2PAEtZrNNm0GR7FvbMZcrAD"/>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-20 mt-16 flex h-[calc(100vh-64px)] overflow-hidden">
+<!-- Schema Explorer Panel -->
+<section class="w-80 bg-surface-container-low border-r border-outline-variant/10 flex flex-col">
+<div class="p-4 border-b border-outline-variant/10">
+<div class="flex items-center justify-between mb-4">
+<h2 class="font-headline font-bold text-sm tracking-wide text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-sm">storage</span>
+                        SCHEMA EXPLORER
+                    </h2>
+<span class="px-2 py-0.5 bg-tertiary-container/30 text-tertiary text-[10px] rounded uppercase font-bold tracking-tighter">v4.2</span>
+</div>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-outline text-sm">filter_alt</span>
+<input class="w-full bg-surface-container-lowest border-none text-[12px] pl-8 pr-4 py-2 rounded focus:ring-1 focus:ring-primary/40 outline-none text-on-surface-variant" placeholder="Filter e-commerce_global..." type="text"/>
+</div>
+</div>
+<!-- Scrollable Tree View -->
+<div class="flex-1 overflow-y-auto p-2">
+<!-- Database Root -->
+<div class="flex items-center gap-2 px-2 py-1.5 hover:bg-surface-container-highest/50 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors text-sm">arrow_drop_down</span>
+<span class="material-symbols-outlined text-secondary text-sm" style="font-variation-settings: 'FILL' 1;">database</span>
+<span class="text-xs font-medium truncate">E-Commerce_Global_V4</span>
+</div>
+<!-- Section: Tables -->
+<div class="ml-4 mt-1">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-surface-container-highest/30 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline group-hover:text-primary text-sm">arrow_drop_down</span>
+<span class="material-symbols-outlined text-outline text-sm">table_chart</span>
+<span class="text-[11px] font-semibold text-outline-variant tracking-wider uppercase">Tables</span>
+<span class="ml-auto text-[10px] text-outline/50">12</span>
+</div>
+<!-- Table: users -->
+<div class="ml-4 mt-1">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-surface-container-highest/40 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline text-sm">arrow_drop_down</span>
+<span class="text-[11px] font-mono text-on-surface-variant">users</span>
+</div>
+<!-- Columns -->
+<div class="ml-4 mt-0.5 space-y-0.5">
+<div class="flex items-center gap-2 px-2 py-0.5 hover:text-on-surface group cursor-default">
+<span class="material-symbols-outlined text-[14px] text-tertiary" style="font-variation-settings: 'FILL' 1;">key</span>
+<span class="text-[11px] font-mono text-on-surface-variant group-hover:text-primary">user_id</span>
+<span class="text-[10px] text-outline/60 font-mono ml-auto">uuid</span>
+</div>
+<div class="flex items-center gap-2 px-2 py-0.5 hover:text-on-surface group cursor-default">
+<span class="material-symbols-outlined text-[14px] text-outline/30">notes</span>
+<span class="text-[11px] font-mono text-on-surface-variant group-hover:text-primary">email</span>
+<span class="text-[10px] text-outline/60 font-mono ml-auto">varchar</span>
+</div>
+<div class="flex items-center gap-2 px-2 py-0.5 hover:text-on-surface group cursor-default">
+<span class="material-symbols-outlined text-[14px] text-outline/30">calendar_today</span>
+<span class="text-[11px] font-mono text-on-surface-variant group-hover:text-primary">created_at</span>
+<span class="text-[10px] text-outline/60 font-mono ml-auto">timestamptz</span>
+</div>
+</div>
+</div>
+<!-- Table: orders (Compact View) -->
+<div class="ml-4 mt-1">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-surface-container-highest/40 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline text-sm">arrow_right</span>
+<span class="text-[11px] font-mono text-on-surface-variant">orders</span>
+<span class="ml-auto material-symbols-outlined text-[14px] text-outline/20">link</span>
+</div>
+</div>
+</div>
+<!-- Section: Views -->
+<div class="ml-4 mt-2">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-surface-container-highest/30 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline group-hover:text-primary text-sm">arrow_right</span>
+<span class="material-symbols-outlined text-outline text-sm">visibility</span>
+<span class="text-[11px] font-semibold text-outline-variant tracking-wider uppercase">Views</span>
+<span class="ml-auto text-[10px] text-outline/50">4</span>
+</div>
+</div>
+<!-- Section: Indexes -->
+<div class="ml-4 mt-2">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-surface-container-highest/30 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline group-hover:text-primary text-sm">arrow_drop_down</span>
+<span class="material-symbols-outlined text-outline text-sm">bolt</span>
+<span class="text-[11px] font-semibold text-outline-variant tracking-wider uppercase">Indexes</span>
+</div>
+<div class="ml-4 mt-1">
+<div class="flex items-center gap-2 px-2 py-1 hover:text-on-surface group cursor-pointer">
+<span class="material-symbols-outlined text-[14px] text-secondary">info</span>
+<span class="text-[11px] font-mono text-on-surface-variant">idx_orders_customer</span>
+</div>
+</div>
+</div>
+<!-- Section: Functions -->
+<div class="ml-4 mt-2">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-surface-container-highest/30 rounded cursor-pointer group">
+<span class="material-symbols-outlined text-outline group-hover:text-primary text-sm">arrow_right</span>
+<span class="material-symbols-outlined text-outline text-sm">functions</span>
+<span class="text-[11px] font-semibold text-outline-variant tracking-wider uppercase">Functions</span>
+<span class="ml-auto text-[10px] text-outline/50">18</span>
+</div>
+</div>
+</div>
+<!-- Provisioning Footer -->
+<div class="p-4 bg-surface-container-highest/20 mt-auto">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_rgba(102,217,204,0.5)] animate-pulse"></div>
+<span class="text-[10px] font-medium text-secondary uppercase tracking-widest">Engine Ready</span>
+</div>
+<div class="mt-2 text-[10px] text-outline/60 leading-tight">
+                    Session connected to cluster: <span class="text-on-surface">us-east-prod-01</span>
+</div>
+</div>
+</section>
+<!-- Main Query & Result Workpad -->
+<section class="flex-1 flex flex-col bg-surface relative">
+<!-- Editor Pane (IDE) -->
+<div class="h-1/2 bg-surface-container-lowest p-6 flex flex-col">
+<div class="flex items-center justify-between mb-4">
+<div class="flex gap-4">
+<button class="bg-primary hover:opacity-90 text-on-primary-fixed px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 shadow-lg transition-all">
+<span class="material-symbols-outlined text-sm">play_arrow</span>
+                            RUN QUERY
+                        </button>
+<button class="bg-surface-container-highest border border-outline/10 text-on-surface px-4 py-1.5 rounded-md text-xs font-medium hover:bg-surface-bright transition-all">
+                            EXPLAIN PLAN
+                        </button>
+</div>
+<div class="flex gap-2">
+<span class="text-[10px] text-outline font-mono">Lines: 12</span>
+<span class="text-[10px] text-outline font-mono">Format: SQL</span>
+</div>
+</div>
+<div class="flex-1 font-mono text-sm leading-relaxed overflow-hidden">
+<div class="flex gap-4">
+<div class="text-outline/30 text-right select-none pr-2 border-r border-outline-variant/10">
+                            1<br/>2<br/>3<br/>4<br/>5<br/>6
+                        </div>
+<div class="flex-1">
+<span class="text-primary-container">SELECT</span> <span class="text-on-surface">u.email, o.total_amount, o.status</span><br/>
+<span class="text-primary-container">FROM</span> <span class="text-on-surface">users u</span><br/>
+<span class="text-primary-container">JOIN</span> <span class="text-on-surface">orders o </span><span class="text-primary-container">ON</span><span class="text-on-surface"> u.user_id = o.user_id</span><br/>
+<span class="text-primary-container">WHERE</span> <span class="text-on-surface">o.created_at &gt; </span><span class="text-secondary">'2023-10-01'</span><br/>
+<span class="text-primary-container">ORDER BY</span> <span class="text-on-surface">o.total_amount </span><span class="text-primary-container">DESC</span><br/>
+<span class="text-primary-container">LIMIT</span> <span class="text-secondary">50</span><span class="text-on-surface">;</span>
+<span class="inline-block w-2 h-4 bg-primary animate-pulse align-middle ml-1"></span>
+</div>
+</div>
+</div>
+</div>
+<!-- Draggable Gutter -->
+<div class="h-1 bg-surface-bright cursor-row-resize hover:bg-primary transition-colors"></div>
+<!-- Results Pane -->
+<div class="flex-1 bg-surface-container flex flex-col">
+<div class="px-6 py-3 flex items-center justify-between bg-surface-container-high">
+<div class="flex items-center gap-6">
+<span class="text-xs font-bold tracking-widest text-outline uppercase">Query Results</span>
+<div class="flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+<span class="text-[10px] font-mono text-on-surface/80">Success (142ms)</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="p-1 hover:bg-surface-bright rounded"><span class="material-symbols-outlined text-sm text-outline">download</span></button>
+<button class="p-1 hover:bg-surface-bright rounded"><span class="material-symbols-outlined text-sm text-outline">fullscreen</span></button>
+</div>
+</div>
+<!-- Data Table -->
+<div class="flex-1 overflow-auto">
+<table class="w-full text-left border-collapse">
+<thead class="sticky top-0 bg-surface-container-high shadow-md z-10">
+<tr>
+<th class="px-6 py-3 text-[10px] font-bold text-outline uppercase tracking-wider">Email</th>
+<th class="px-6 py-3 text-[10px] font-bold text-outline uppercase tracking-wider">Total Amount</th>
+<th class="px-6 py-3 text-[10px] font-bold text-outline uppercase tracking-wider">Status</th>
+<th class="px-6 py-3 text-[10px] font-bold text-outline uppercase tracking-wider">Created At</th>
+</tr>
+</thead>
+<tbody class="text-[12px] font-mono">
+<tr class="bg-surface hover:bg-surface-container-highest transition-colors">
+<td class="px-6 py-4 text-on-surface">alex.rivera@example.com</td>
+<td class="px-6 py-4 text-tertiary font-bold">$1,240.50</td>
+<td class="px-6 py-4"><span class="bg-secondary/10 text-secondary px-2 py-0.5 rounded-full text-[10px]">COMPLETED</span></td>
+<td class="px-6 py-4 text-outline/70">2023-11-20 14:22</td>
+</tr>
+<tr class="bg-surface-container-low hover:bg-surface-container-highest transition-colors">
+<td class="px-6 py-4 text-on-surface">m.chen_dev@tech.io</td>
+<td class="px-6 py-4 text-tertiary font-bold">$892.00</td>
+<td class="px-6 py-4"><span class="bg-secondary/10 text-secondary px-2 py-0.5 rounded-full text-[10px]">COMPLETED</span></td>
+<td class="px-6 py-4 text-outline/70">2023-11-20 15:05</td>
+</tr>
+<tr class="bg-surface hover:bg-surface-container-highest transition-colors">
+<td class="px-6 py-4 text-on-surface">sarah_j@freelance.net</td>
+<td class="px-6 py-4 text-tertiary font-bold">$2,105.15</td>
+<td class="px-6 py-4"><span class="bg-primary/10 text-primary px-2 py-0.5 rounded-full text-[10px]">PROCESSING</span></td>
+<td class="px-6 py-4 text-outline/70">2023-11-21 09:12</td>
+</tr>
+<tr class="bg-surface-container-low hover:bg-surface-container-highest transition-colors">
+<td class="px-6 py-4 text-on-surface">liam.smith@corp.com</td>
+<td class="px-6 py-4 text-tertiary font-bold">$45.99</td>
+<td class="px-6 py-4"><span class="bg-error/10 text-error px-2 py-0.5 rounded-full text-[10px]">FAILED</span></td>
+<td class="px-6 py-4 text-outline/70">2023-11-21 10:45</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<!-- Contextual Detail Panel (Asymmetric Editorial Style) -->
+<section class="hidden xl:flex w-64 bg-surface-container-lowest border-l border-outline-variant/10 flex-col p-6">
+<h3 class="font-headline font-medium text-xs text-outline tracking-widest uppercase mb-8">Metadata Insights</h3>
+<div class="mb-8">
+<span class="text-[10px] text-tertiary font-bold uppercase block mb-1">Table Context</span>
+<h4 class="text-xl font-headline font-bold text-on-surface mb-2 tracking-tight">users</h4>
+<p class="text-[12px] text-outline leading-relaxed">Stores core account information and authentication credentials for all global storefronts.</p>
+</div>
+<div class="space-y-6">
+<div class="bg-surface-container-high/40 p-4 rounded-xl border border-outline-variant/5">
+<div class="flex justify-between items-center mb-2">
+<span class="text-[10px] text-outline uppercase font-semibold">Row Count</span>
+<span class="material-symbols-outlined text-sm text-secondary">analytics</span>
+</div>
+<span class="text-2xl font-headline font-bold text-on-surface">1.24M</span>
+</div>
+<div class="bg-surface-container-high/40 p-4 rounded-xl border border-outline-variant/5">
+<div class="flex justify-between items-center mb-2">
+<span class="text-[10px] text-outline uppercase font-semibold">Storage</span>
+<span class="material-symbols-outlined text-sm text-primary">cloud_done</span>
+</div>
+<span class="text-2xl font-headline font-bold text-on-surface">842MB</span>
+</div>
+</div>
+<div class="mt-auto pt-8 border-t border-outline-variant/10">
+<span class="text-[10px] text-outline uppercase block mb-3">Relations Map</span>
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-2 group cursor-pointer">
+<div class="w-1 h-1 rounded-full bg-outline group-hover:bg-primary transition-colors"></div>
+<span class="text-[11px] font-mono text-outline group-hover:text-on-surface transition-colors">user_profiles</span>
+<span class="text-[10px] text-outline/30 ml-auto">1:1</span>
+</div>
+<div class="flex items-center gap-2 group cursor-pointer">
+<div class="w-1 h-1 rounded-full bg-outline group-hover:bg-primary transition-colors"></div>
+<span class="text-[11px] font-mono text-outline group-hover:text-on-surface transition-colors">transactions</span>
+<span class="text-[10px] text-outline/30 ml-auto">1:N</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Floating Command Palette CTA -->
+<button class="fixed bottom-6 right-6 flex items-center gap-3 bg-gradient-to-br from-primary to-primary-container text-on-primary-fixed px-5 py-3 rounded-xl shadow-[0px_20px_40px_rgba(0,0,0,0.4)] hover:scale-105 active:scale-95 transition-all z-50">
+<span class="material-symbols-outlined">add_box</span>
+<span class="text-sm font-bold tracking-tight">NEW QUERY</span>
+</button>
+</body></html>

@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>System Health | The Architectural Lab</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-container-highest": "#353534",
+                        "surface-bright": "#393939",
+                        "surface-dim": "#131313",
+                        "surface-container-low": "#1c1b1b",
+                        "on-secondary-fixed": "#00201d",
+                        "on-surface-variant": "#c5c5d4",
+                        "on-primary-fixed": "#00105b",
+                        "on-primary": "#15267b",
+                        "surface-container": "#201f1f",
+                        "surface-container-lowest": "#0e0e0e",
+                        "secondary-container": "#1ea296",
+                        "tertiary-fixed-dim": "#44d8f1",
+                        "on-tertiary-container": "#55e4fd",
+                        "on-primary-container": "#c9cfff",
+                        "tertiary-fixed": "#a1efff",
+                        "surface-tint": "#bac3ff",
+                        "primary-fixed": "#dee0ff",
+                        "on-secondary-fixed-variant": "#005049",
+                        "on-error-container": "#ffdad6",
+                        "inverse-on-surface": "#313030",
+                        "on-secondary": "#003732",
+                        "on-primary-fixed-variant": "#2f3f92",
+                        "primary": "#bac3ff",
+                        "error-container": "#93000a",
+                        "on-background": "#e5e2e1",
+                        "primary-container": "#4453a7",
+                        "on-tertiary-fixed": "#001f25",
+                        "on-error": "#690005",
+                        "inverse-surface": "#e5e2e1",
+                        "background": "#131313",
+                        "tertiary-container": "#006471",
+                        "surface-container-high": "#2a2a2a",
+                        "secondary-fixed": "#84f5e8",
+                        "surface-variant": "#353534",
+                        "error": "#ffb4ab",
+                        "surface": "#131313",
+                        "primary-fixed-dim": "#bac3ff",
+                        "outline": "#8f909e",
+                        "on-tertiary-fixed-variant": "#004e59",
+                        "on-tertiary": "#00363e",
+                        "secondary": "#66d9cc",
+                        "tertiary": "#44d8f1",
+                        "secondary-fixed-dim": "#66d9cc",
+                        "inverse-primary": "#4858ab",
+                        "outline-variant": "#454652",
+                        "on-secondary-container": "#00302b",
+                        "on-surface": "#e5e2e1"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .bg-grid-subtle {
+            background-image: radial-gradient(#454652 0.5px, transparent 0.5px);
+            background-size: 24px 24px;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary/30">
+<!-- SideNavBar Shell -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-[#1c1b1b] dark:bg-neutral-900 font-['Space_Grotesk'] text-sm tracking-tight flex flex-col py-6 px-4 z-50">
+<div class="mb-10 px-2 flex items-center gap-3">
+<div class="w-8 h-8 bg-primary rounded-sm flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary-fixed text-lg" data-icon="architecture">architecture</span>
+</div>
+<div>
+<h1 class="text-xl font-bold tracking-tighter text-[#bac3ff] dark:text-indigo-300">Admin Engine</h1>
+<p class="text-[10px] text-outline uppercase tracking-widest opacity-70">Unified Infrastructure</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1"><!-- Overview -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-[#8f909e] dark:text-neutral-500 hover:text-[#e5e2e1] hover:bg-[#353534]/50" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Overview</span>
+</a>
+<!-- User Management -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-[#8f909e] dark:text-neutral-500 hover:text-[#e5e2e1] hover:bg-[#353534]/50" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span>User Management</span>
+</a>
+<!-- Content Moderation -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-[#8f909e] dark:text-neutral-500 hover:text-[#e5e2e1] hover:bg-[#353534]/50" href="#">
+<span class="material-symbols-outlined" data-icon="verified_user">verified_user</span>
+<span>Content Moderation</span>
+</a>
+<!-- Schema Management -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-[#8f909e] dark:text-neutral-500 hover:text-[#e5e2e1] hover:bg-[#353534]/50" href="#">
+<span class="material-symbols-outlined" data-icon="schema">schema</span>
+<span>Schema Management</span>
+</a>
+<!-- Lesson Management -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-[#8f909e] dark:text-neutral-500 hover:text-[#e5e2e1] hover:bg-[#353534]/50" href="#">
+<span class="material-symbols-outlined" data-icon="menu_book">menu_book</span>
+<span>Lesson Management</span>
+</a>
+<!-- System Health (Active) -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-[#bac3ff] bg-[#353534] dark:bg-neutral-800 border-r-2 border-[#bac3ff] font-bold" href="#">
+<span class="material-symbols-outlined" data-icon="dns" style="font-variation-settings: 'FILL' 1;">dns</span>
+<span>System Health</span>
+</a></nav>
+<div class="mt-auto space-y-1 border-t border-outline-variant/10 pt-6">
+<button class="w-full mb-6 bg-primary-container text-on-primary-container py-2.5 px-4 rounded font-bold flex items-center justify-center gap-2 active:opacity-80 active:scale-[0.99] transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="rocket_launch">rocket_launch</span>
+                Deploy Update
+            </button>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+<span>Support</span>
+</a>
+</div>
+</aside>
+<!-- TopAppBar Shell -->
+<header class="fixed top-0 right-0 left-64 z-40 flex justify-between items-center px-8 h-16 bg-[#131313]/80 backdrop-blur-xl dark:bg-black/80 border-b border-[#454652]/15 shadow-2xl shadow-black/40">
+<div class="flex items-center gap-4">
+<span class="text-lg font-black tracking-widest uppercase text-[#e5e2e1] font-headline">Architectural Lab</span>
+<div class="h-4 w-px bg-outline-variant/30"></div>
+<div class="flex items-center gap-2 text-xs font-mono text-tertiary">
+<span class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span>
+                SYSTEM_STABLE // 100%
+            </div>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative group">
+<span class="absolute inset-y-0 left-3 flex items-center text-outline/50">
+<span class="material-symbols-outlined text-sm" data-icon="search">search</span>
+</span>
+<input class="bg-surface-container-lowest border-none ring-1 ring-outline-variant/20 focus:ring-tertiary/50 rounded-lg pl-9 pr-4 py-1.5 text-xs w-64 transition-all" placeholder="Search system nodes..." type="text"/>
+</div>
+<div class="flex items-center gap-3">
+<button class="text-[#8f909e] hover:text-[#44d8f1] transition-all">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="text-[#8f909e] hover:text-[#44d8f1] transition-all">
+<span class="material-symbols-outlined" data-icon="dark_mode">dark_mode</span>
+</button>
+<button class="text-[#8f909e] hover:text-[#44d8f1] transition-all">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-surface-container-high border border-outline-variant/20 overflow-hidden ml-2">
+<img alt="Super Admin Avatar" class="w-full h-full object-cover" data-alt="Close up of a professional futuristic avatar profile" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVGwmAwVDbcE4Lmlc7XhQgX4CYKTNw9RHaNPop9wk9yOKPsMU8wCNTurKIQNtRSOw4i-leeTHKcXhXA5bfx5jJ-g5zdIT6ofJW9ily9Dy135rA97ouUmj7Z7AMiOGKLZZ_FAJ0LTTD7XLT_DT4dSE17L0rldLgr-iHoAvOqWytGG9igTacopTRxiWuJMiQJ9Xr0EhAMAwd7iOzEtKVhmuTd8oYmLGvUci0V14LN11nkaRioPbNqoah6q9zAI7ARgic9cc5v_EAhTSS"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-64 pt-20 p-8 min-h-screen bg-surface bg-grid-subtle">
+<!-- Dashboard Header -->
+<div class="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+<div class="max-w-2xl">
+<h2 class="font-headline text-4xl font-bold tracking-tight text-on-surface mb-2">Infrastructure Monitor</h2>
+<p class="text-outline font-light leading-relaxed">System-wide resource allocation and sandbox performance metrics across global computational clusters.</p>
+</div>
+<div class="flex gap-2">
+<div class="bg-surface-container-low px-4 py-2 border border-outline-variant/10 rounded-lg flex items-center gap-3">
+<span class="text-[10px] uppercase tracking-widest text-outline">Refresh Rate</span>
+<span class="text-tertiary font-mono">150ms</span>
+</div>
+<div class="bg-surface-container-low px-4 py-2 border border-outline-variant/10 rounded-lg flex items-center gap-3">
+<span class="text-[10px] uppercase tracking-widest text-outline">Session ID</span>
+<span class="text-primary font-mono text-xs">LAB-992-X</span>
+</div>
+</div>
+</div>
+<!-- Bento Grid: Real-time Charts -->
+<div class="grid grid-cols-12 gap-6 mb-8">
+<!-- CPU Load: Primary Focal Point -->
+<div class="col-span-12 lg:col-span-8 bg-surface-container-low border border-outline-variant/5 rounded-xl p-6 relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4 opacity-10">
+<span class="material-symbols-outlined text-8xl" data-icon="memory">memory</span>
+</div>
+<div class="flex items-center justify-between mb-8 relative z-10">
+<div>
+<h3 class="text-sm uppercase tracking-widest text-outline font-medium mb-1">CPU Load</h3>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-headline font-bold text-on-surface tracking-tighter">42.8<span class="text-lg opacity-50 ml-1">%</span></span>
+<span class="text-secondary text-xs flex items-center gap-1 font-mono">
+<span class="material-symbols-outlined text-xs" data-icon="trending_down">trending_down</span>
+                                -2.4%
+                            </span>
+</div>
+</div>
+<div class="flex gap-1">
+<div class="w-1 h-8 bg-surface-container-highest rounded-full"></div>
+<div class="w-1 h-12 bg-surface-container-highest rounded-full"></div>
+<div class="w-1 h-6 bg-surface-container-highest rounded-full"></div>
+<div class="w-1 h-10 bg-primary/40 rounded-full"></div>
+<div class="w-1 h-14 bg-primary rounded-full"></div>
+</div>
+</div>
+<!-- Mock Chart Area -->
+<div class="h-48 w-full bg-surface-container-lowest rounded-lg border border-outline-variant/10 relative overflow-hidden">
+<svg class="absolute bottom-0 w-full h-full preserve-3d" viewbox="0 0 1000 200">
+<path class="opacity-30" d="M0,150 Q50,140 100,160 T200,120 T300,140 T400,100 T500,130 T600,90 T700,110 T800,70 T900,100 T1000,80 L1000,200 L0,200 Z" fill="url(#grad1)"></path>
+<path d="M0,150 Q50,140 100,160 T200,120 T300,140 T400,100 T500,130 T600,90 T700,110 T800,70 T900,100 T1000,80" fill="none" stroke="#bac3ff" stroke-width="2"></path>
+<defs>
+<lineargradient id="grad1" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" style="stop-color:#bac3ff;stop-opacity:1"></stop>
+<stop offset="100%" style="stop-color:#bac3ff;stop-opacity:0"></stop>
+</lineargradient>
+</defs>
+</svg>
+<!-- Grid Lines Overlay -->
+<div class="absolute inset-0 flex flex-col justify-between p-4 pointer-events-none opacity-20">
+<div class="w-full border-t border-dashed border-outline"></div>
+<div class="w-full border-t border-dashed border-outline"></div>
+<div class="w-full border-t border-dashed border-outline"></div>
+</div>
+</div>
+</div>
+<!-- Memory Utilization -->
+<div class="col-span-12 md:col-span-6 lg:col-span-4 bg-surface-container-low border border-outline-variant/5 rounded-xl p-6">
+<div class="flex items-center justify-between mb-6">
+<h3 class="text-sm uppercase tracking-widest text-outline font-medium">Memory</h3>
+<span class="material-symbols-outlined text-outline" data-icon="settings_input_component">settings_input_component</span>
+</div>
+<div class="flex flex-col items-center justify-center py-4">
+<div class="relative w-32 h-32 mb-6">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-container-highest" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-width="8"></circle>
+<circle class="text-tertiary" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-dasharray="364.4" stroke-dashoffset="100" stroke-width="8"></circle>
+</svg>
+<div class="absolute inset-0 flex flex-col items-center justify-center">
+<span class="text-2xl font-bold font-headline">72%</span>
+<span class="text-[10px] text-outline">USED</span>
+</div>
+</div>
+<div class="w-full space-y-3">
+<div class="flex justify-between text-xs">
+<span class="text-outline">Reserved</span>
+<span class="font-mono">12.4 GB</span>
+</div>
+<div class="flex justify-between text-xs">
+<span class="text-outline">Available</span>
+<span class="font-mono">4.2 GB</span>
+</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-[72%]"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Sandbox Density -->
+<div class="col-span-12 md:col-span-6 lg:col-span-4 bg-surface-container-low border border-outline-variant/5 rounded-xl p-6">
+<h3 class="text-sm uppercase tracking-widest text-outline font-medium mb-4">Sandbox Density</h3>
+<div class="space-y-4">
+<div class="p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/5 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-secondary"></div>
+<span class="text-xs">SQL Playground</span>
+</div>
+<span class="font-mono text-xs">1,240 inst.</span>
+</div>
+<div class="p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/5 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="text-xs">NoSQL Nodes</span>
+</div>
+<span class="font-mono text-xs">842 inst.</span>
+</div>
+<div class="p-3 bg-surface-container-lowest rounded-lg border border-outline-variant/5 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-tertiary"></div>
+<span class="text-xs">Analytics VMS</span>
+</div>
+<span class="font-mono text-xs">310 inst.</span>
+</div>
+<div class="pt-4 mt-4 border-t border-outline-variant/10">
+<div class="flex justify-between items-center text-xs mb-2">
+<span class="text-outline">Total Concurrent Sessions</span>
+<span class="text-on-surface font-bold">2,392</span>
+</div>
+<div class="flex h-2 w-full gap-0.5 rounded-full overflow-hidden">
+<div class="h-full bg-secondary w-[50%]"></div>
+<div class="h-full bg-primary w-[35%]"></div>
+<div class="h-full bg-tertiary w-[15%]"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Active Clusters: Data Table -->
+<div class="col-span-12 lg:col-span-8 bg-surface-container-low border border-outline-variant/5 rounded-xl overflow-hidden flex flex-col">
+<div class="p-6 border-b border-outline-variant/10 flex items-center justify-between">
+<h3 class="text-sm uppercase tracking-widest text-outline font-medium">Active Clusters</h3>
+<button class="text-xs text-primary font-bold hover:underline">View Map View</button>
+</div>
+<div class="flex-1 overflow-auto">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-high/50 text-[10px] uppercase tracking-widest text-outline font-bold">
+<tr>
+<th class="px-6 py-4">Cluster ID</th>
+<th class="px-6 py-4">Region</th>
+<th class="px-6 py-4">Utilization</th>
+<th class="px-6 py-4">Health</th>
+<th class="px-6 py-4 text-right">Uptime</th>
+</tr>
+</thead>
+<tbody class="text-xs font-mono">
+<tr class="border-b border-outline-variant/5 hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-6 py-4 text-on-surface">LAB-US-EAST-01</td>
+<td class="px-6 py-4 text-outline">Virginia, USA</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="w-2/3 h-full bg-secondary"></div>
+</div>
+<span>68%</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                                        Healthy
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-outline">284d 14h</td>
+</tr>
+<tr class="bg-surface-container-lowest/30 border-b border-outline-variant/5 hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-6 py-4 text-on-surface">LAB-EU-WEST-02</td>
+<td class="px-6 py-4 text-outline">London, UK</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="w-1/4 h-full bg-secondary"></div>
+</div>
+<span>24%</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                                        Healthy
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-outline">42d 06h</td>
+</tr>
+<tr class="border-b border-outline-variant/5 hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-6 py-4 text-on-surface">LAB-AP-SE-04</td>
+<td class="px-6 py-4 text-outline">Singapore</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="w-[92%] h-full bg-error"></div>
+</div>
+<span class="text-error">92%</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-error/10 text-error">
+<span class="w-1.5 h-1.5 rounded-full bg-error animate-pulse"></span>
+                                        Degraded
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-outline">12d 22h</td>
+</tr>
+<tr class="bg-surface-container-lowest/30 border-b border-outline-variant/5 hover:bg-surface-container-highest/20 transition-colors">
+<td class="px-6 py-4 text-on-surface">LAB-US-WEST-01</td>
+<td class="px-6 py-4 text-outline">Oregon, USA</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="w-1/2 h-full bg-secondary"></div>
+</div>
+<span>50%</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+                                        Healthy
+                                    </span>
+</td>
+<td class="px-6 py-4 text-right text-outline">156d 01h</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Resource Alerts Panel -->
+<div class="col-span-12 md:col-span-12 lg:col-span-4 bg-surface-container-high border border-outline-variant/20 rounded-xl p-6 shadow-2xl shadow-black/40 flex flex-col">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-error" data-icon="report_problem">report_problem</span>
+<h3 class="text-sm uppercase tracking-widest text-on-surface font-bold">Resource Alerts</h3>
+</div>
+<div class="space-y-4 flex-1">
+<div class="p-4 bg-error-container/20 border-l-4 border-error rounded-r-lg">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-bold text-error uppercase tracking-widest">Critical Alert</span>
+<span class="text-[10px] font-mono text-outline">14:02:12</span>
+</div>
+<h4 class="text-xs font-bold text-on-surface mb-1">Node AP-SE-04 Near Capacity</h4>
+<p class="text-[10px] leading-tight text-outline">Sandbox density exceeded 90% threshold. Automated provisioning of fallback cluster pending.</p>
+<div class="mt-3 flex gap-2">
+<button class="px-3 py-1 bg-error-container text-on-error-container text-[10px] font-bold rounded">Rebalance</button>
+<button class="px-3 py-1 text-outline text-[10px] font-bold hover:text-on-surface">Dismiss</button>
+</div>
+</div>
+<div class="p-4 bg-surface-container-highest rounded-lg border border-outline-variant/10">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-bold text-tertiary uppercase tracking-widest">Warning</span>
+<span class="text-[10px] font-mono text-outline">13:45:00</span>
+</div>
+<h4 class="text-xs font-bold text-on-surface mb-1">Latency Spike in EU-WEST-02</h4>
+<p class="text-[10px] leading-tight text-outline">Minor latency increase detected in query execution times (avg +45ms).</p>
+</div>
+<div class="p-4 bg-surface-container-highest rounded-lg border border-outline-variant/10 opacity-60">
+<div class="flex justify-between items-start mb-1">
+<span class="text-[10px] font-bold text-outline uppercase tracking-widest">System Info</span>
+<span class="text-[10px] font-mono text-outline">12:30:45</span>
+</div>
+<h4 class="text-xs font-bold text-on-surface mb-1">Backup Routine Completed</h4>
+<p class="text-[10px] leading-tight text-outline">Global state snapshot successfully archived to S3 storage.</p>
+</div>
+</div>
+<button class="mt-6 w-full py-2 border border-outline-variant/20 rounded text-[10px] font-bold uppercase tracking-widest text-outline hover:bg-surface-container-highest transition-colors">
+                    View Alert History
+                </button>
+</div>
+</div>
+<!-- Terminal Output / Logs Snippet -->
+<div class="bg-surface-container-lowest border border-outline-variant/15 rounded-xl p-4 font-mono text-[11px] leading-relaxed relative group">
+<div class="absolute top-4 right-4 flex gap-2">
+<div class="w-2.5 h-2.5 rounded-full bg-surface-container-highest"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-surface-container-highest"></div>
+<div class="w-2.5 h-2.5 rounded-full bg-surface-container-highest"></div>
+</div>
+<div class="text-outline/40 mb-2">// STREAMING KERNEL EVENTS</div>
+<div class="space-y-1">
+<div class="flex gap-4"><span class="text-primary">[OK]</span><span class="text-on-surface">Cluster handshake verified: LAB-US-EAST-01</span></div>
+<div class="flex gap-4"><span class="text-tertiary">[INFO]</span><span class="text-on-surface">Allocating 4096MB heap to sandbox-worker-992</span></div>
+<div class="flex gap-4"><span class="text-secondary">[SUCCESS]</span><span class="text-on-surface">DB Schema sync complete (0.002s)</span></div>
+<div class="flex gap-4"><span class="text-error">[WARN]</span><span class="text-error">High I/O wait detected on node AP-SE-04 (sda1)</span></div>
+<div class="flex gap-4"><span class="text-primary">[OK]</span><span class="text-on-surface">Heartbeat received from 12 global regions</span></div>
+<div class="animate-pulse inline-block w-2 h-4 bg-primary ml-1 align-middle"></div>
+</div>
+</div>
+</main>
+</body></html>
