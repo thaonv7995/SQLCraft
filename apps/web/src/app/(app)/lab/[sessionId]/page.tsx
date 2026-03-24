@@ -73,7 +73,13 @@ function DatasetSizeSelector() {
 
 // ─── SQL Editor (CodeMirror 6) ────────────────────────────────────────────────
 
-function SqlEditorPanel() {
+function SqlEditorPanel({
+  onFormat,
+  onCopy,
+}: {
+  onFormat: () => void;
+  onCopy: () => void;
+}) {
   const { currentQuery, setQuery } = useLabStore();
   const params = useParams<{ sessionId?: string | string[] }>();
   const sessionId = sessionIdFromParams(params);
@@ -90,6 +96,8 @@ function SqlEditorPanel() {
       value={currentQuery}
       onChange={setQuery}
       onExecute={handleExecute}
+      onFormat={onFormat}
+      onCopy={onCopy}
       placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
       testId="lab-sql-editor"
     />
@@ -728,14 +736,14 @@ export default function LabPage() {
                 Explain
               </Button>
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 disabled={!currentQuery.trim()}
-                onClick={handleFormatSql}
-                title="Format SQL locally (no network)"
-                leftIcon={<span className="material-symbols-outlined text-[18px]">format_align_left</span>}
+                onClick={handleClearEditor}
+                title="Clear editor and results"
+                leftIcon={<span className="material-symbols-outlined text-[18px]">delete_sweep</span>}
               >
-                Format
+                Clear
               </Button>
               {session?.challengeVersionId ? (
                 <Button
@@ -848,7 +856,7 @@ export default function LabPage() {
               </kbd>
             </div>
           </div>
-          <SqlEditorPanel />
+          <SqlEditorPanel onFormat={handleFormatSql} onCopy={handleCopyQuery} />
         </div>
 
         {/* Resize handle */}
