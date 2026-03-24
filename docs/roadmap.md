@@ -19,14 +19,16 @@
 - timeout/allowlist
 - result preview
 - sandbox reset
-- query history
+- query history and query replay
 
 ## Phase 3: Performance Learning
 - EXPLAIN / EXPLAIN ANALYZE
 - plan viewer
 - metrics enrichment
-- challenge evaluation
+- challenge evaluation with correctness + performance scoring
+- side-by-side query compare
 - index labs
+- schema diff and reset-to-base workflow
 - dataset scale tiers
 
 ## Phase 4: Hardening

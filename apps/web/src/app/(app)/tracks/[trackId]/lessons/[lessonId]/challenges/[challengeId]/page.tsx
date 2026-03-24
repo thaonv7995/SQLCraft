@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 import { Badge, DifficultyBadge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { challengesApi, lessonsApi, sessionsApi } from '@/lib/api';
+import { challengesApi, lessonsApi, sessionsApi, type ChallengeVersionDetail } from '@/lib/api';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import { cn, formatMinutes, formatRelativeTime, truncateSql } from '@/lib/utils';
 
@@ -49,6 +49,156 @@ function AttemptStatusBadge({ status }: { status: string }) {
   }
 
   return <StatusBadge status={status} />;
+}
+
+function buildScoreWeights(
+  totalPoints: number,
+  includePerformance: boolean,
+  includeIndex: boolean,
+) {
+  if (!includePerformance && !includeIndex) {
+    return {
+      correctness: totalPoints,
+      performance: 0,
+      index: 0,
+    };
+  }
+
+  const correctness = Math.round(totalPoints * 0.5);
+
+  if (includePerformance && includeIndex) {
+    const performance = Math.round(totalPoints * 0.35);
+    return {
+      correctness,
+      performance,
+      index: Math.max(0, totalPoints - correctness - performance),
+    };
+  }
+
+  const remainder = Math.max(0, totalPoints - correctness);
+  return {
+    correctness,
+    performance: includePerformance ? remainder : 0,
+    index: includeIndex ? remainder : 0,
+  };
+}
+
+function resolveScoring(detail: ChallengeVersionDetail) {
+  const config =
+    detail.validatorConfig && typeof detail.validatorConfig === 'object'
+      ? detail.validatorConfig
+      : {};
+  const baselineDurationMs =
+    typeof config.baselineDurationMs === 'number' ? config.baselineDurationMs : null;
+  const requiresIndexOptimization = config.requiresIndexOptimization === true;
+  const totalPoints = Math.max(0, detail.points ?? 100);
+
+  return {
+    totalPoints,
+    baselineDurationMs,
+    requiresIndexOptimization,
+    weights: buildScoreWeights(
+      totalPoints,
+      baselineDurationMs !== null,
+      requiresIndexOptimization,
+    ),
+  };
+}
+
+function ScoreRuleCard({
+  label,
+  points,
+  description,
+}: {
+  label: string;
+  points: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-xl bg-surface-container-high p-4">
+      <p className="font-medium text-on-surface">{label}</p>
+      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-outline">{points}</p>
+      <p className="mt-2 text-sm leading-6 text-on-surface-variant">{description}</p>
+    </div>
+  );
+}
+
+function AttemptScoreBreakdown({
+  evaluation,
+}: {
+  evaluation: {
+    score?: number;
+    correctnessScore?: number;
+    performanceScore?: number;
+    indexScore?: number;
+    pointsPossible?: number;
+    baselineDurationMs?: number | null;
+    latestDurationMs?: number | null;
+    usedIndexing?: boolean;
+  } | null | undefined;
+}) {
+  if (!evaluation) {
+    return null;
+  }
+
+  const items = [
+    {
+      label: 'Correctness',
+      value: evaluation.correctnessScore,
+    },
+    {
+      label: 'Performance',
+      value: evaluation.performanceScore,
+    },
+    {
+      label: 'Index',
+      value: evaluation.indexScore,
+    },
+  ].filter((item) => typeof item.value === 'number');
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
+        {items.map((item) => (
+          <span
+            key={item.label}
+            className="rounded-full bg-surface-container-high px-2 py-1"
+          >
+            {item.label} {item.value}
+          </span>
+        ))}
+        {typeof evaluation.score === 'number' && typeof evaluation.pointsPossible === 'number' ? (
+          <span className="rounded-full bg-surface-container-high px-2 py-1 font-semibold text-on-surface">
+            Total {evaluation.score}/{evaluation.pointsPossible}
+          </span>
+        ) : null}
+      </div>
+
+      {(evaluation.baselineDurationMs != null || evaluation.latestDurationMs != null || evaluation.usedIndexing != null) ? (
+        <div className="flex flex-wrap gap-2 text-[11px] text-outline">
+          {evaluation.baselineDurationMs != null ? (
+            <span className="rounded-full border border-outline-variant/20 px-2 py-1">
+              Baseline {evaluation.baselineDurationMs} ms
+            </span>
+          ) : null}
+          {evaluation.latestDurationMs != null ? (
+            <span className="rounded-full border border-outline-variant/20 px-2 py-1">
+              Latest {evaluation.latestDurationMs} ms
+            </span>
+          ) : null}
+          {evaluation.usedIndexing != null ? (
+            <span className="rounded-full border border-outline-variant/20 px-2 py-1">
+              {evaluation.usedIndexing ? 'Index detected' : 'No index detected'}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function ChallengePage() {
@@ -254,6 +404,7 @@ export default function ChallengePage() {
       : latestAttempt?.status === 'failed'
         ? 'Latest attempt did not satisfy the validator yet.'
         : null);
+  const scoring = resolveScoring(challengeVersion);
 
   return (
     <div className="page-shell-narrow page-stack">
@@ -422,29 +573,41 @@ export default function ChallengePage() {
             <CardHeader>
               <CardTitle>Scoring & Evaluation</CardTitle>
               <CardDescription>
-                Current validator behavior exposed from the live backend, not placeholder copy.
+                This view mirrors the live evaluator: correctness, performance baseline, and index detection.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-on-surface-variant">
-              <div className="rounded-xl bg-surface-container-high p-4">
-                <p className="font-medium text-on-surface">100 points</p>
-                <p className="mt-1">
-                  Query executes successfully and satisfies the challenge validator.
-                </p>
-              </div>
-              {challengeVersion.validatorType === 'result_set' ? (
-                <div className="rounded-xl bg-surface-container-high p-4">
-                  <p className="font-medium text-on-surface">30 points partial credit</p>
-                  <p className="mt-1">
-                    Result-set validators keep partial credit when execution succeeds but required
-                    columns are missing.
-                  </p>
-                </div>
+              <ScoreRuleCard
+                label="Correctness"
+                points={`${scoring.weights.correctness} pts`}
+                description="Awarded when the result set matches the validator. If correctness fails, the attempt scores 0 regardless of later optimizations."
+              />
+
+              {scoring.baselineDurationMs != null ? (
+                <ScoreRuleCard
+                  label="Performance"
+                  points={`Up to ${scoring.weights.performance} pts`}
+                  description={`Performance is measured against a ${scoring.baselineDurationMs} ms baseline from the challenge author. Faster or equal plans keep the full performance budget; slower runs scale down proportionally.`}
+                />
               ) : null}
-              <div className="rounded-xl bg-surface-container-high p-4">
-                <p className="font-medium text-on-surface">0 points</p>
-                <p className="mt-1">
-                  Failed execution or invalid result. The backend returns evaluation feedback with the failure reason.
+
+              {scoring.requiresIndexOptimization ? (
+                <ScoreRuleCard
+                  label="Index Optimization"
+                  points={`Up to ${scoring.weights.index} pts`}
+                  description="You only get these points when the session history shows index work and EXPLAIN ANALYZE confirms the winning plan actually uses an index."
+                />
+              ) : null}
+
+              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                  Total available
+                </p>
+                <p className="mt-2 text-lg font-semibold text-on-surface">
+                  {scoring.totalPoints} pts
+                </p>
+                <p className="mt-1 text-sm leading-6 text-on-surface-variant">
+                  Safe optimization workflows in the lab include keeping query history, comparing query variants, creating or dropping indexes, inspecting schema drift, and resetting the sandbox back to base.
                 </p>
               </div>
 
@@ -454,6 +617,7 @@ export default function ChallengePage() {
                     Latest evaluator feedback
                   </p>
                   <p className="mt-2 text-sm leading-6 text-on-surface-variant">{latestFeedback}</p>
+                  <AttemptScoreBreakdown evaluation={latestAttempt?.evaluation} />
                 </div>
               ) : null}
             </CardContent>
@@ -512,9 +676,12 @@ export default function ChallengePage() {
                     </div>
 
                     {attempt.evaluation?.feedbackText ? (
-                      <p className="mt-3 text-sm leading-6 text-on-surface-variant">
-                        {attempt.evaluation.feedbackText}
-                      </p>
+                      <>
+                        <p className="mt-3 text-sm leading-6 text-on-surface-variant">
+                          {attempt.evaluation.feedbackText}
+                        </p>
+                        <AttemptScoreBreakdown evaluation={attempt.evaluation} />
+                      </>
                     ) : null}
                   </div>
                 ))

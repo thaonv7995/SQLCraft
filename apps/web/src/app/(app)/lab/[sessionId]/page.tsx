@@ -6,7 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
 import toast from 'react-hot-toast';
-import { useExecuteQuery, useExplainQuery, useSessionStatus, useSessionSchema } from '@/hooks/use-query-execution';
+import {
+  useExecuteQuery,
+  useExplainQuery,
+  useSessionStatus,
+  useSessionSchema,
+  useSessionSchemaDiff,
+} from '@/hooks/use-query-execution';
 import { formatSqlInBrowser } from '@/lib/format-sql';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,7 +26,16 @@ import {
   TableEmpty,
 } from '@/components/ui/table';
 import { cn, formatDuration, formatRows, formatRelativeTime, getExplainPlanMode, truncateSql } from '@/lib/utils';
-import { challengesApi, lessonsApi, sandboxesApi, type DatasetScale, type QueryResultColumn } from '@/lib/api';
+import {
+  challengesApi,
+  lessonsApi,
+  queryApi,
+  sandboxesApi,
+  type DatasetScale,
+  type QueryExecution,
+  type QueryResultColumn,
+  type SessionSchemaDiffResponse,
+} from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
@@ -34,6 +49,41 @@ function sessionIdFromParams(params: { sessionId?: string | string[] }): string 
     return decodeURIComponent(raw[0]);
   }
   return '';
+}
+
+const COMPARE_TERMINAL_STATUSES = new Set<QueryExecution['status']>(['success', 'error']);
+const COMPARE_POLL_INTERVAL_MS = 600;
+const COMPARE_POLL_TIMEOUT_MS = 35_000;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function runQueryUntilSettled(payload: {
+  sessionId: string;
+  sql: string;
+}): Promise<QueryExecution> {
+  const accepted = await queryApi.execute(payload);
+
+  if (COMPARE_TERMINAL_STATUSES.has(accepted.status)) {
+    return accepted;
+  }
+
+  const deadline = Date.now() + COMPARE_POLL_TIMEOUT_MS;
+
+  while (true) {
+    const execution = await queryApi.poll(accepted.id);
+
+    if (COMPARE_TERMINAL_STATUSES.has(execution.status)) {
+      return execution;
+    }
+
+    if (Date.now() > deadline) {
+      throw new Error(`Comparison timed out after ${COMPARE_POLL_TIMEOUT_MS / 1000}s`);
+    }
+
+    await sleep(COMPARE_POLL_INTERVAL_MS);
+  }
 }
 
 // ─── Dataset Scale Selector ───────────────────────────────────────────────────
@@ -423,6 +473,489 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
   );
 }
 
+function CompareExecutionCard({
+  label,
+  query,
+  execution,
+}: {
+  label: string;
+  query: string;
+  execution: QueryExecution | null;
+}) {
+  const previewRows = execution?.result?.rows.slice(0, 5) ?? [];
+  const previewColumns = execution?.result?.columns ?? [];
+
+  return (
+    <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+            {label}
+          </p>
+          <p className="mt-1 text-xs text-on-surface-variant">
+            {query.trim() ? truncateSql(query, 120) : 'No query yet'}
+          </p>
+        </div>
+        {execution ? <StatusBadge status={execution.status} /> : null}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
+        {execution?.durationMs != null ? (
+          <span className="rounded-full bg-surface-container-high px-2 py-1">
+            {execution.durationMs} ms
+          </span>
+        ) : null}
+        {execution?.rowCount != null ? (
+          <span className="rounded-full bg-surface-container-high px-2 py-1">
+            {execution.rowCount} rows
+          </span>
+        ) : null}
+        {execution?.executionPlan?.actualTime != null ? (
+          <span className="rounded-full bg-surface-container-high px-2 py-1">
+            plan {Math.round(execution.executionPlan.actualTime)} ms
+          </span>
+        ) : null}
+        {execution?.executionPlan?.totalCost != null ? (
+          <span className="rounded-full bg-surface-container-high px-2 py-1">
+            cost {Math.round(execution.executionPlan.totalCost)}
+          </span>
+        ) : null}
+      </div>
+
+      {execution?.errorMessage ? (
+        <div className="mt-3 rounded-xl border border-error/20 bg-error/10 px-3 py-3 text-xs text-error">
+          {execution.errorMessage}
+        </div>
+      ) : null}
+
+      {!execution ? (
+        <div className="mt-3 rounded-xl border border-dashed border-outline-variant/20 px-3 py-4 text-xs text-on-surface-variant">
+          Run the comparison to capture duration, row count, and plan metrics for this variant.
+        </div>
+      ) : null}
+
+      {execution?.result ? (
+        <div className="mt-3 overflow-hidden rounded-xl border border-outline-variant/10">
+          <div className="overflow-auto">
+            <Table stickyHeader>
+              <TableHeader>
+                <TableRow>
+                  {previewColumns.map((column) => (
+                    <TableHead key={column.name}>{column.name}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewRows.length === 0 ? (
+                  <TableEmpty
+                    message="Query returned no rows"
+                    colSpan={Math.max(1, previewColumns.length)}
+                  />
+                ) : (
+                  previewRows.map((row, index) => (
+                    <TableRow key={`${label}-${index}`}>
+                      {previewColumns.map((column) => (
+                        <TableCell key={column.name} className="font-mono text-xs">
+                          {row[column.name] == null ? (
+                            <span className="text-outline italic">NULL</span>
+                          ) : (
+                            String(row[column.name])
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {execution.result.totalRows > previewRows.length ? (
+            <div className="border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 text-[11px] text-outline">
+              Previewing {previewRows.length} of {execution.result.totalRows} rows
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SideBySideComparePanel({
+  sessionId,
+  primaryQuery,
+}: {
+  sessionId: string;
+  primaryQuery: string;
+}) {
+  const queryClient = useQueryClient();
+  const [secondaryQuery, setSecondaryQuery] = useState('');
+  const [primaryExecution, setPrimaryExecution] = useState<QueryExecution | null>(null);
+  const [secondaryExecution, setSecondaryExecution] = useState<QueryExecution | null>(null);
+
+  const compareMutation = useMutation({
+    mutationFn: async () => {
+      const [primary, secondary] = await Promise.all([
+        runQueryUntilSettled({ sessionId, sql: primaryQuery }),
+        runQueryUntilSettled({ sessionId, sql: secondaryQuery }),
+      ]);
+
+      return { primary, secondary };
+    },
+    onSuccess: ({ primary, secondary }) => {
+      setPrimaryExecution(primary);
+      setSecondaryExecution(secondary);
+      useLabStore.setState((state) => ({
+        queryHistory: [secondary, primary, ...state.queryHistory].slice(0, 100),
+      }));
+      queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
+
+      if (primary.status === 'success' && secondary.status === 'success') {
+        const faster =
+          (primary.durationMs ?? Number.POSITIVE_INFINITY) <=
+          (secondary.durationMs ?? Number.POSITIVE_INFINITY)
+            ? 'Primary'
+            : 'Compare';
+        toast.success(`${faster} query finished faster in this run.`);
+      } else {
+        toast.error('At least one comparison query failed. Inspect both panes for details.');
+      }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to compare queries');
+    },
+  });
+
+  return (
+    <div className="flex-1 overflow-auto p-4">
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-on-surface">
+                Run two variants against the same sandbox state
+              </p>
+              <p className="max-w-3xl text-sm leading-6 text-on-surface-variant">
+                The primary query comes from the main editor on the left. Add a second variant here,
+                then run both together to compare latency, row count, and plan metrics side-by-side.
+                Index changes such as <code>CREATE INDEX</code> or <code>DROP INDEX</code> will show up in
+                the Schema Diff tab and can be reverted by resetting the sandbox back to base.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!primaryQuery.trim()}
+                onClick={() => setSecondaryQuery(primaryQuery)}
+              >
+                Copy current query
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={compareMutation.isPending}
+                disabled={!primaryQuery.trim() || !secondaryQuery.trim()}
+                onClick={() => compareMutation.mutate()}
+              >
+                Run Side-by-side
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <CompareExecutionCard
+            label="Primary · Main editor query"
+            query={primaryQuery}
+            execution={primaryExecution}
+          />
+
+          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                  Compare · Secondary query
+                </p>
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  Keep this variant isolated so you can test index-aware rewrites directly.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={!secondaryQuery.trim()}
+                onClick={() => setSecondaryQuery('')}
+              >
+                Clear
+              </Button>
+            </div>
+
+            <div className="mt-3 h-56 overflow-hidden rounded-xl border border-outline-variant/10">
+              <SqlEditor
+                value={secondaryQuery}
+                onChange={setSecondaryQuery}
+                placeholder="-- Variant B: rewrite, add hints via indexes, or compare plan choices"
+              />
+            </div>
+
+            <div className="mt-4">
+              <CompareExecutionCard
+                label="Compare · Secondary result"
+                query={secondaryQuery}
+                execution={secondaryExecution}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SchemaDiffEntry({
+  tone,
+  title,
+  subtitle,
+  definition,
+  previousDefinition,
+}: {
+  tone: 'added' | 'removed' | 'changed';
+  title: string;
+  subtitle?: string | null;
+  definition?: string | null;
+  previousDefinition?: string | null;
+}) {
+  const toneClass =
+    tone === 'added'
+      ? 'border-secondary/20 bg-secondary/10'
+      : tone === 'removed'
+        ? 'border-error/20 bg-error/10'
+        : 'border-tertiary/20 bg-tertiary/10';
+  const label =
+    tone === 'added' ? 'Added' : tone === 'removed' ? 'Removed' : 'Changed';
+
+  return (
+    <div className={cn('rounded-xl border px-3 py-3', toneClass)}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-on-surface">{title}</p>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-outline">
+          {label}
+        </span>
+      </div>
+      {subtitle ? (
+        <p className="mt-1 text-xs text-on-surface-variant">{subtitle}</p>
+      ) : null}
+      {previousDefinition ? (
+        <div className="mt-3 space-y-2 text-[11px]">
+          <div>
+            <p className="mb-1 uppercase tracking-[0.16em] text-outline">Base</p>
+            <pre className="overflow-x-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-outline">
+              {previousDefinition}
+            </pre>
+          </div>
+          <div>
+            <p className="mb-1 uppercase tracking-[0.16em] text-outline">Current</p>
+            <pre className="overflow-x-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-on-surface-variant">
+              {definition}
+            </pre>
+          </div>
+        </div>
+      ) : definition ? (
+        <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-[11px] text-on-surface-variant">
+          {definition}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
+function SchemaDiffPanel({
+  sessionId,
+  onReset,
+  isResetting,
+}: {
+  sessionId: string;
+  onReset: () => void;
+  isResetting: boolean;
+}) {
+  const { data: diff, isLoading, isError, error } = useSessionSchemaDiff(sessionId);
+
+  const renderSection = (
+    title: string,
+    icon: string,
+    section:
+      | SessionSchemaDiffResponse['indexes']
+      | SessionSchemaDiffResponse['views']
+      | SessionSchemaDiffResponse['materializedViews']
+      | SessionSchemaDiffResponse['functions']
+      | SessionSchemaDiffResponse['partitions'],
+    describe: (item: any) => { title: string; subtitle?: string | null; definition?: string | null },
+    describeChanged?: (item: any) => { title: string; subtitle?: string | null; definition?: string | null },
+  ) => {
+    const changeCount = section.added.length + section.removed.length + section.changed.length;
+
+    if (changeCount === 0) {
+      return null;
+    }
+
+    return (
+      <div key={title} className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="material-symbols-outlined text-base text-tertiary">{icon}</span>
+          <div>
+            <p className="text-sm font-medium text-on-surface">{title}</p>
+            <p className="text-[11px] text-outline">
+              {changeCount} change{changeCount === 1 ? '' : 's'}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {section.added.map((item) => {
+            const formatted = describe(item);
+            return (
+              <SchemaDiffEntry
+                key={`added-${formatted.title}`}
+                tone="added"
+                title={formatted.title}
+                subtitle={formatted.subtitle}
+                definition={formatted.definition}
+              />
+            );
+          })}
+          {section.removed.map((item) => {
+            const formatted = describe(item);
+            return (
+              <SchemaDiffEntry
+                key={`removed-${formatted.title}`}
+                tone="removed"
+                title={formatted.title}
+                subtitle={formatted.subtitle}
+                definition={formatted.definition}
+              />
+            );
+          })}
+          {section.changed.map((item) => {
+            const currentFormatted = (describeChanged ?? describe)(item.current);
+            const baseFormatted = describe(item.base);
+            return (
+              <SchemaDiffEntry
+                key={`changed-${currentFormatted.title}`}
+                tone="changed"
+                title={currentFormatted.title}
+                subtitle={currentFormatted.subtitle}
+                definition={currentFormatted.definition}
+                previousDefinition={baseFormatted.definition}
+              />
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  if (isLoading) {
+    return <SchemaPanelSkeleton />;
+  }
+
+  if (isError || !diff) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="max-w-sm text-center space-y-2">
+          <span className="material-symbols-outlined text-3xl text-outline block">difference</span>
+          <p className="text-sm text-on-surface-variant">
+            {error instanceof Error ? error.message : 'Unable to load schema diff'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-auto p-4">
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-on-surface">Sandbox schema drift</p>
+              <p className="max-w-3xl text-sm leading-6 text-on-surface-variant">
+                This compares the live sandbox against the published base schema template. Use it
+                to see indexes, views, materialized views, functions, and partitions that were
+                added, removed, or changed while optimizing the lesson.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={isResetting}
+              onClick={onReset}
+            >
+              Reset sandbox về base
+            </Button>
+          </div>
+        </div>
+
+        {!diff.hasChanges ? (
+          <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-low px-4 py-8 text-center text-sm text-on-surface-variant">
+            No drift detected. The sandbox still matches the published base definition.
+          </div>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-2">
+            {renderSection(
+              'Indexes',
+              'database',
+              diff.indexes,
+              (item) => ({
+                title: item.name,
+                subtitle: `Table ${item.tableName}`,
+                definition: item.definition,
+              }),
+            )}
+            {renderSection(
+              'Views',
+              'preview',
+              diff.views,
+              (item) => ({
+                title: item.name,
+                definition: item.definition,
+              }),
+            )}
+            {renderSection(
+              'Materialized Views',
+              'inventory_2',
+              diff.materializedViews,
+              (item) => ({
+                title: item.name,
+                definition: item.definition,
+              }),
+            )}
+            {renderSection(
+              'Functions',
+              'code_blocks',
+              diff.functions,
+              (item) => ({
+                title: `${item.name}(${item.signature})`,
+                subtitle: item.language ? `Language ${item.language}` : null,
+                definition: item.definition,
+              }),
+            )}
+            {renderSection(
+              'Partitions',
+              'splitscreen',
+              diff.partitions,
+              (item) => ({
+                title: item.name,
+                subtitle: `${item.parentTable}${item.strategy ? ` · ${item.strategy}` : ''}`,
+                definition: item.definition ?? null,
+              }),
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Session Expired / Ended Overlay ─────────────────────────────────────────
 
 function LabSessionExpired({ status }: { status: string }) {
@@ -468,8 +1001,10 @@ function LabSessionExpired({ status }: { status: string }) {
 const TABS = [
   { id: 'results', label: 'Results', icon: 'table_rows' },
   { id: 'plan', label: 'Execution Plan', icon: 'account_tree' },
+  { id: 'compare', label: 'Compare', icon: 'compare_arrows' },
   { id: 'history', label: 'History', icon: 'history' },
   { id: 'schema', label: 'Schema', icon: 'schema' },
+  { id: 'schemaDiff', label: 'Schema Diff', icon: 'difference' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -669,6 +1204,41 @@ export default function LabPage() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['session-status', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['session-schema', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema-diff', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
+    },
+  });
+  const resetSandboxMutation = useMutation({
+    mutationFn: async () => {
+      return sandboxesApi.reset(sessionId, selectedScale ?? undefined);
+    },
+    onMutate: () => {
+      const previousSession = useLabStore.getState().session;
+      useLabStore.getState().resetResults();
+      useLabStore.setState({ queryHistory: [] });
+
+      if (previousSession) {
+        useLabStore.getState().setSession({
+          ...previousSession,
+          status: 'provisioning',
+        });
+      }
+
+      return { previousSession };
+    },
+    onSuccess: () => {
+      toast.success('Sandbox reset started from the base template.');
+    },
+    onError: (err, _payload, context) => {
+      if (context?.previousSession) {
+        useLabStore.getState().setSession(context.previousSession);
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to reset sandbox');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['session-status', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema-diff', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
     },
   });
@@ -794,6 +1364,7 @@ export default function LabPage() {
                   !currentQuery.trim() ||
                   isExecuting ||
                   scaleSwitchMutation.isPending ||
+                  resetSandboxMutation.isPending ||
                   session?.status !== 'active'
                 }
                 onClick={() => executeQuery({ sessionId, sql: currentQuery })}
@@ -814,6 +1385,7 @@ export default function LabPage() {
                   !explainPlanMode ||
                   isExplaining ||
                   scaleSwitchMutation.isPending ||
+                  resetSandboxMutation.isPending ||
                   session?.status !== 'active'
                 }
                 onClick={() => explainQuery({ sessionId, sql: currentQuery })}
@@ -845,6 +1417,7 @@ export default function LabPage() {
                     !latestSuccessfulExecution ||
                     session?.status === 'provisioning' ||
                     scaleSwitchMutation.isPending ||
+                    resetSandboxMutation.isPending ||
                     submitAttemptMutation.isPending
                   }
                   onClick={() => submitAttemptMutation.mutate()}
@@ -1016,8 +1589,18 @@ export default function LabPage() {
           <div className="flex-1 overflow-hidden flex flex-col">
             {activeTab === 'results' && <ResultsPanel />}
             {activeTab === 'plan' && <ExecutionPlanPanel />}
+            {activeTab === 'compare' && (
+              <SideBySideComparePanel sessionId={sessionId} primaryQuery={currentQuery} />
+            )}
             {activeTab === 'history' && <QueryHistoryPanel />}
             {activeTab === 'schema' && <SchemaPanel sessionId={sessionId} />}
+            {activeTab === 'schemaDiff' && (
+              <SchemaDiffPanel
+                sessionId={sessionId}
+                onReset={() => resetSandboxMutation.mutate()}
+                isResetting={resetSandboxMutation.isPending}
+              />
+            )}
           </div>
         </div>
       </div>

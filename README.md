@@ -8,10 +8,11 @@ SQLCraft is an open-source, interactive SQL learning platform that takes you bey
 
 - **Interactive SQL Lab** — Write and run SQL directly in the browser. View tabular results, query duration, scanned rows, and visual `EXPLAIN ANALYZE` execution plans to spot bottlenecks.
 - **Progressive Dataset Scaling** — Practice with the same schema across multiple data scales (Tiny: 100 rows ➔ Small: 100K ➔ Medium: 5M ➔ Large: 10M-100M+ rows) to see real performance implications.
-- **Query Optimization Labs** — Compare entirely different queries for the same problem. Create and drop indexes safely, then verify improvements through real execution plans and challenge scoring baselines.
+- **Session Query History** — Every execution is stored within the active learning session so learners can reopen prior SQL, compare before/after runs, and reuse the strongest execution for challenge submission.
+- **Query Optimization Labs** — Run side-by-side query comparisons, create and drop indexes safely, inspect schema drift against the published base schema, and reset the sandbox back to base after experiments.
 - **User Sandbox Isolation** — Every learning session provisions a dedicated, ephemeral PostgreSQL container attached to the internal Docker network. Cleanup is automatic on session end and TTL expiry.
-- **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically for both **correctness** and **performance/cost**, using full result-set comparison plus EXPLAIN-backed index checks where configured.
-- **Admin & Contributor Tools** — Built-in tools for async dataset generation, tracking query history, and a contributor workflow that captures reference solutions, expected columns, and optimization baselines for community-created challenges.
+- **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically with weighted **correctness**, **performance**, and **index optimization** scoring where configured, using full result-set comparison plus EXPLAIN-backed index checks.
+- **Admin & Contributor Tools** — Built-in tools for async dataset generation and a contributor workflow that captures reference solutions, expected columns, and optimization baselines for community-created challenges.
 
 ## Tech Stack
 

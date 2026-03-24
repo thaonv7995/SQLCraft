@@ -57,6 +57,7 @@ export interface ChallengeVersionDetail {
   hintText: string | null;
   expectedResultColumns: string[];
   validatorType: string;
+  validatorConfig: Record<string, unknown> | null;
   publishedAt: Date | null;
   createdAt: Date;
 }
@@ -160,6 +161,10 @@ function normalizeChallengeVersionDetail(
     description: normalizeDescription(row.description),
     hintText: row.hintText ?? null,
     expectedResultColumns: normalizeExpectedResultColumns(row.expectedResultColumns),
+    validatorConfig:
+      row.validatorConfig && typeof row.validatorConfig === 'object'
+        ? (row.validatorConfig as Record<string, unknown>)
+        : null,
   };
 }
 

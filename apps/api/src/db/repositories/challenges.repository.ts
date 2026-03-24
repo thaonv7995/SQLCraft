@@ -28,6 +28,7 @@ export interface PublishedChallengeVersionDetailRow {
   hintText: string | null;
   expectedResultColumns: unknown;
   validatorType: string;
+  validatorConfig: unknown;
   publishedAt: Date | null;
   createdAt: Date;
 }
@@ -197,6 +198,7 @@ export class ChallengesRepository {
         hintText: schema.challengeVersions.hintText,
         expectedResultColumns: schema.challengeVersions.expectedResultColumns,
         validatorType: schema.challengeVersions.validatorType,
+        validatorConfig: schema.challengeVersions.validatorConfig,
         publishedAt: schema.challengeVersions.publishedAt,
         createdAt: schema.challengeVersions.createdAt,
       })

@@ -3,6 +3,17 @@ import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/reposito
 import type { DatasetTemplateRow } from '../../db/repositories/sessions.repository';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import {
+  diffSandboxSchema,
+  fetchSandboxSchemaSnapshot,
+  parseBaseSchemaSnapshot,
+  type SandboxSchemaDiffSection,
+  type SandboxSchemaFunction,
+  type SandboxSchemaIndex,
+  type SandboxSchemaMaterializedView,
+  type SandboxSchemaPartition,
+  type SandboxSchemaView,
+} from '../../services/sandbox-schema';
+import {
   getLargestDatasetScale,
   isDatasetScaleAllowed,
   normalizeDatasetScales,
@@ -31,6 +42,16 @@ export interface SessionSchemaTable {
 export interface SessionSchemaResult {
   schemaTemplateId: string;
   tables: SessionSchemaTable[];
+}
+
+export interface SessionSchemaDiffResult {
+  schemaTemplateId: string;
+  hasChanges: boolean;
+  indexes: SandboxSchemaDiffSection<SandboxSchemaIndex>;
+  views: SandboxSchemaDiffSection<SandboxSchemaView>;
+  materializedViews: SandboxSchemaDiffSection<SandboxSchemaMaterializedView>;
+  functions: SandboxSchemaDiffSection<SandboxSchemaFunction>;
+  partitions: SandboxSchemaDiffSection<SandboxSchemaPartition>;
 }
 
 // ─── Schema parsing helpers ───────────────────────────────────────────────────
@@ -352,6 +373,36 @@ export async function getSessionSchema(
         .filter((c): c is RawColumn => typeof c.name === 'string' && typeof c.type === 'string')
         .map(normalizeColumn),
     })),
+  };
+}
+
+export async function getSessionSchemaDiff(
+  sessionId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<SessionSchemaDiffResult> {
+  const session = await sessionsRepository.findById(sessionId);
+  if (!session) throw new NotFoundError('Session not found');
+  if (session.userId !== userId && !isAdmin) throw new ForbiddenError('Access denied to this session');
+
+  const schemaTemplate = await sessionsRepository.getSchemaTemplateBySessionId(sessionId);
+  if (!schemaTemplate) throw new NotFoundError('No schema template linked to this session');
+
+  const sandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
+  if (!sandbox?.dbName) {
+    throw new ValidationError('Sandbox must be ready before schema diff is available');
+  }
+
+  const baseSnapshot = parseBaseSchemaSnapshot(schemaTemplate.definition);
+  const currentSnapshot = await fetchSandboxSchemaSnapshot({
+    dbName: sandbox.dbName,
+    containerRef: sandbox.containerRef ?? null,
+  });
+  const diff = diffSandboxSchema(baseSnapshot, currentSnapshot);
+
+  return {
+    schemaTemplateId: schemaTemplate.id,
+    ...diff,
   };
 }
 

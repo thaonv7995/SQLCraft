@@ -61,6 +61,7 @@ Need lesson authoring workflow, versioning, and maintainable documentation.
 3. “Online SQL tools use toy data, so performance lessons feel fake.”
 4. “I want to compare two queries and see why one is faster.”
 5. “I want to experiment safely without breaking shared state.”
+6. “I want to see exactly what I changed in the schema while optimizing.”
 
 ## 7. Product Scope
 ### 7.1 In Scope for V1
@@ -71,11 +72,13 @@ Need lesson authoring workflow, versioning, and maintainable documentation.
 - query execution with restrictions
 - result preview
 - EXPLAIN / EXPLAIN ANALYZE viewer
-- query history
-- challenge attempts and evaluation
+- query history and reopening prior executions
+- side-by-side query comparison within a session
+- challenge attempts and evaluation with correctness + performance scoring
 - schema templates and dataset templates
 - progressive dataset sizes
-- reset sandbox
+- sandbox schema diff against the published base template
+- reset sandbox to the published base state
 - observability baseline
 - contributor workflow docs
 
@@ -123,10 +126,14 @@ Additional product rules:
 
 ### 9.3 Query Optimization Labs
 Users can:
-- compare two valid queries
+- compare two valid queries side-by-side
+- keep experimental runs in session query history
 - create and drop indexes within controlled boundaries
+- inspect schema drift from the published base schema, including indexes, views, materialized views, functions, and partitions
+- reset the sandbox back to the published base state after experiments
 - analyze plan changes
 - learn trade-offs between readability and performance
+- receive a score breakdown that can include correctness, performance, and index optimization
 
 ### 9.4 Lesson Engine
 Structured learning:
@@ -184,6 +191,8 @@ V1 is ready when:
 - queries can execute safely
 - results and plans are visible
 - attempts and history are persisted
+- learners can compare two executions side-by-side inside the lab
+- schema drift and reset-to-base workflows operate correctly inside the sandbox
 - idle sandboxes are cleaned up
 - core observability is enabled
 - docs are sufficient for contributor onboarding

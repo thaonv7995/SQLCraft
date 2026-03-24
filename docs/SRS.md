@@ -74,8 +74,9 @@ The system shall:
 The system shall:
 - evaluate challenge attempts based on configured validation strategy
 - support result-set validation in V1
-- support optional performance thresholds in V1 for selected challenges
+- support optional performance thresholds and index-aware scoring in V1 for selected challenges
 - store correctness score and performance score separately
+- expose index score and baseline-vs-latest timing metadata when configured
 
 ### FR-10 Dataset and Schema Templates
 The system shall:
@@ -89,6 +90,9 @@ The system shall:
 - display query history within a learning session
 - show execution status, duration, submitted time, and whether evaluation passed
 - allow reopening a prior query in the editor
+- support comparing two queries side-by-side within the same learning session
+- expose sandbox schema drift against the published base definition, including index, view, materialized view, function, and partition changes
+- allow resetting the sandbox back to the published base state
 
 ### FR-12 Content Operations
 The system shall:

@@ -63,10 +63,10 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 
 ### 8. Thực Hành Tối Ưu Hóa & Đánh Giá Chi Phí (Optimization Labs)
 - [x] Hỗ trợ lưu lịch sử truy vấn (Query History) để dễ dàng nhìn lại quá trình làm bài.
-- [ ] Tính năng chạy so sánh trực tiếp song song (Side-by-side) 2 câu truy vấn.
-- [ ] Cấp quyền an toàn cho học viên tự tạo (`CREATE INDEX`) và xóa (`DROP INDEX`) để đo lường mức độ cải thiện tốc độ trực tiếp trên dữ liệu lớn.
-- [ ] **Schema Diff View**: Hiển thị những thay đổi học viên đã thực hiện trong sandbox so với schema gốc (base schema từ template), bao gồm: indexes thêm/xóa, partitions, views, materialized views, stored procedures/functions. Kèm nút **"Reset sandbox về base"** để hoàn tác toàn bộ thay đổi và bắt đầu lại.
-- [ ] Đánh giá bài làm bằng "Performance Score" thay vì chỉ đánh giá đúng/sai.
+- [x] Tính năng chạy so sánh trực tiếp song song (Side-by-side) 2 câu truy vấn.
+- [x] Cấp quyền an toàn cho học viên tự tạo (`CREATE INDEX`) và xóa (`DROP INDEX`) để đo lường mức độ cải thiện tốc độ trực tiếp trên dữ liệu lớn.
+- [x] **Schema Diff View**: Hiển thị những thay đổi học viên đã thực hiện trong sandbox so với schema gốc (base schema từ template), bao gồm: indexes thêm/xóa, partitions, views, materialized views, stored procedures/functions. Kèm nút **"Reset sandbox về base"** để hoàn tác toàn bộ thay đổi và bắt đầu lại.
+- [x] Đánh giá bài làm bằng "Performance Score" thay vì chỉ đánh giá đúng/sai.
 
 ### 9. Công Cụ Đóng Góp Nội Dung (Contribution Tools)
 - [ ] Trình soạn thảo Markdown kết hợp SQL Validator cho User kiểm tra tính đúng đắn của đề bài trước khi gửi đóng góp.

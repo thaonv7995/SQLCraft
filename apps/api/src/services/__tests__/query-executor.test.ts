@@ -134,6 +134,11 @@ describe('validateSql', () => {
       expect(result.valid).toBe(true);
     });
 
+    it('allows CREATE INDEX for optimization workflows', () => {
+      const result = validateSql('CREATE INDEX idx_orders_status ON orders(status)');
+      expect(result.valid).toBe(true);
+    });
+
     it('allows CREATE TABLE', () => {
       const result = validateSql('CREATE TABLE temp_data (id SERIAL PRIMARY KEY, val TEXT)');
       expect(result.valid).toBe(true);

@@ -25,7 +25,7 @@
 ### Runtime
 - [ ] learning session creation
 - [ ] sandbox provisioning
-- [ ] sandbox reset
+- [x] sandbox reset
 - [ ] sandbox cleanup
 - [ ] sandbox status polling
 
@@ -33,19 +33,19 @@
 - [ ] CodeMirror SQL editor integration (syntax highlighting & autocompletion)
 - [ ] execute allowed SQL
 - [ ] result preview
-- [ ] query history
+- [x] query history
 - [ ] EXPLAIN / EXPLAIN ANALYZE visualizer tree
 - [ ] plan storage
 - [ ] timeout handling
 - [ ] blocked statement feedback
-- [ ] safe index creation/dropping (CREATE/DROP INDEX)
+- [x] safe index creation/dropping (CREATE/DROP INDEX)
 - [ ] visual schema & database explorer UI
 
 ### Evaluation
 - [ ] challenge attempts
 - [ ] result-set validation
 - [ ] correctness scoring
-- [ ] basic performance scoring for selected labs
+- [x] basic performance scoring for selected labs
 - [ ] leaderboard and competitive rankings
 
 ### Ops
@@ -60,7 +60,8 @@
 - [ ] admin lesson/challenge editor (Rich Markdown + SQL validator)
 - [ ] user contribution workflow & admin approval dashboard
 - [ ] auto-scan and parse uploaded SQL database dumps
-- [ ] query compare side-by-side
+- [x] query compare side-by-side
+- [x] schema diff view and reset sandbox to base
 - [ ] plan diff view
 - [ ] lesson search
 - [ ] tag filters

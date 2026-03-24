@@ -1,6 +1,13 @@
 import { FastifyInstance } from 'fastify';
 import type { CreateSessionBody, SessionParams } from './sessions.schema';
-import { listSessionsHandler, createSessionHandler, getSessionHandler, endSessionHandler, getSessionSchemaHandler } from './sessions.handler';
+import {
+  listSessionsHandler,
+  createSessionHandler,
+  getSessionHandler,
+  endSessionHandler,
+  getSessionSchemaHandler,
+  getSessionSchemaDiffHandler,
+} from './sessions.handler';
 
 export default async function sessionsRouter(fastify: FastifyInstance): Promise<void> {
   // GET /v1/learning-sessions
@@ -81,6 +88,27 @@ export default async function sessionsRouter(fastify: FastifyInstance): Promise<
       },
     },
     getSessionSchemaHandler,
+  );
+
+  // GET /v1/learning-sessions/:sessionId/schema-diff
+  fastify.get<{ Params: SessionParams }>(
+    '/v1/learning-sessions/:sessionId/schema-diff',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Get the runtime schema diff for a learning session sandbox',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    getSessionSchemaDiffHandler,
   );
 
   // POST /v1/learning-sessions/:sessionId/end

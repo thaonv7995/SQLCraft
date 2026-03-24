@@ -2,7 +2,14 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
 import type { CreateSessionBody, SessionParams } from './sessions.schema';
-import { createSession, getSession, endSession, listUserSessions, getSessionSchema } from './sessions.service';
+import {
+  createSession,
+  getSession,
+  endSession,
+  listUserSessions,
+  getSessionSchema,
+  getSessionSchemaDiff,
+} from './sessions.service';
 
 export async function listSessionsHandler(
   request: FastifyRequest,
@@ -40,6 +47,16 @@ export async function getSessionSchemaHandler(
   const user = request.user as JwtPayload;
   const result = await getSessionSchema(sessionId, user.sub, user.roles?.includes('admin') ?? false);
   reply.send(success(result, 'Schema retrieved'));
+}
+
+export async function getSessionSchemaDiffHandler(
+  request: FastifyRequest<{ Params: SessionParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { sessionId } = request.params;
+  const user = request.user as JwtPayload;
+  const result = await getSessionSchemaDiff(sessionId, user.sub, user.roles?.includes('admin') ?? false);
+  reply.send(success(result, 'Schema diff retrieved'));
 }
 
 export async function endSessionHandler(

@@ -62,8 +62,8 @@ Create learning session.
 Request:
 ```json
 {
-  "lesson_version_id": "uuid",
-  "challenge_version_id": "uuid"
+  "lessonVersionId": "uuid",
+  "challengeVersionId": "uuid"
 }
 ```
 
@@ -80,6 +80,40 @@ Response:
 ### GET /v1/learning-sessions/{session_id}
 Get current session state including sandbox readiness.
 
+### GET /v1/learning-sessions/{session_id}/schema-diff
+Get schema drift between the current sandbox and the published base schema.
+
+Response:
+```json
+{
+  "schemaTemplateId": "uuid",
+  "hasChanges": true,
+  "indexes": {
+    "base": [],
+    "current": [
+      {
+        "name": "orders_created_at_idx",
+        "tableName": "orders",
+        "definition": "CREATE INDEX orders_created_at_idx ON public.orders USING btree (created_at)"
+      }
+    ],
+    "added": [
+      {
+        "name": "orders_created_at_idx",
+        "tableName": "orders",
+        "definition": "CREATE INDEX orders_created_at_idx ON public.orders USING btree (created_at)"
+      }
+    ],
+    "removed": [],
+    "changed": []
+  },
+  "views": { "base": [], "current": [], "added": [], "removed": [], "changed": [] },
+  "materializedViews": { "base": [], "current": [], "added": [], "removed": [], "changed": [] },
+  "functions": { "base": [], "current": [], "added": [], "removed": [], "changed": [] },
+  "partitions": { "base": [], "current": [], "added": [], "removed": [], "changed": [] }
+}
+```
+
 ### POST /v1/learning-sessions/{session_id}/end
 End session explicitly.
 
@@ -90,39 +124,31 @@ Run query.
 Request:
 ```json
 {
-  "learning_session_id": "uuid",
-  "sql_text": "SELECT * FROM users LIMIT 10;",
-  "include_plan": true,
-  "plan_mode": "explain_analyze"
+  "learningSessionId": "uuid",
+  "sql": "SELECT * FROM users LIMIT 10;",
+  "explainPlan": true,
+  "planMode": "explain_analyze"
 }
 ```
 
 Response:
 ```json
 {
-  "execution": {
-    "id": "uuid",
-    "status": "succeeded",
-    "duration_ms": 42,
-    "rows_returned": 10,
-    "result_preview": {
-      "columns": ["id", "name"],
-      "rows": [[1, "A"]]
-    }
-  },
-  "plan": {
-    "summary": {
-      "node_type": "Limit"
-    }
-  }
+  "id": "uuid",
+  "status": "accepted",
+  "sessionId": "uuid",
+  "sql": "SELECT * FROM users LIMIT 10;",
+  "createdAt": "2026-03-24T10:00:00.000Z"
 }
 ```
 
 ### GET /v1/query-executions/{id}
-Get single execution details.
+Get single execution details, including `result` and `executionPlan` when the worker has finished.
 
 ### GET /v1/learning-sessions/{session_id}/query-executions
 List query history for session.
+
+Side-by-side comparison in V1 is implemented by issuing two `POST /v1/query-executions` requests in parallel and reading both executions from session history. There is no separate compare endpoint.
 
 ## 7. Challenge Attempts
 ### POST /v1/challenge-attempts
@@ -131,26 +157,30 @@ Submit challenge attempt.
 Request:
 ```json
 {
-  "learning_session_id": "uuid",
-  "challenge_version_id": "uuid",
-  "query_execution_id": "uuid"
+  "learningSessionId": "uuid",
+  "challengeVersionId": "uuid",
+  "queryExecutionId": "uuid"
 }
 ```
 
 Response:
 ```json
 {
-  "attempt": {
-    "id": "uuid",
-    "status": "passed",
-    "score": 95
-  },
+  "id": "uuid",
+  "attemptNo": 2,
+  "status": "passed",
+  "score": 95,
   "evaluation": {
-    "is_correct": true,
-    "correctness_score": 100,
-    "performance_score": 90,
-    "feedback_text": "Correct result. Consider adding an index to improve scan cost."
-  }
+    "isCorrect": true,
+    "correctnessScore": 100,
+    "performanceScore": 90,
+    "indexScore": 10,
+    "baselineDurationMs": 250,
+    "latestDurationMs": 140,
+    "usedIndexing": true,
+    "feedbackText": "Correct result. Consider adding an index to improve scan cost."
+  },
+  "submittedAt": "2026-03-24T10:05:00.000Z"
 }
 ```
 

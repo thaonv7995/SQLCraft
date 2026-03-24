@@ -10,6 +10,7 @@ vi.mock('../../../db/repositories', () => ({
     createSandbox: vi.fn(),
     getSandboxBySessionId: vi.fn(),
     findDetailedSandboxBySessionId: vi.fn(),
+    getSchemaTemplateBySessionId: vi.fn(),
     listPublishedDatasetTemplatesBySchema: vi.fn(),
     findDatasetTemplateById: vi.fn(),
     endSession: vi.fn(),
@@ -23,9 +24,22 @@ vi.mock('../../../lib/queue', () => ({
   enqueueDestroySandbox: vi.fn(),
 }));
 
+vi.mock('../../../services/sandbox-schema', () => ({
+  parseBaseSchemaSnapshot: vi.fn(),
+  fetchSandboxSchemaSnapshot: vi.fn(),
+  diffSandboxSchema: vi.fn(),
+}));
+
 import { sessionsRepository } from '../../../db/repositories';
 import * as queue from '../../../lib/queue';
-import { createSession, getSession, endSession, listUserSessions } from '../sessions.service';
+import * as sandboxSchema from '../../../services/sandbox-schema';
+import {
+  createSession,
+  getSession,
+  endSession,
+  getSessionSchemaDiff,
+  listUserSessions,
+} from '../sessions.service';
 import { NotFoundError, ForbiddenError } from '../../../lib/errors';
 import type { SessionRow, SandboxRow } from '../../../db/repositories';
 import type { DatasetTemplateRow } from '../../../db/repositories/sessions.repository';
@@ -253,5 +267,85 @@ describe('endSession()', () => {
   it('throws ForbiddenError when non-admin tries to end another user session', async () => {
     vi.mocked(sessionsRepository.findById).mockResolvedValue(makeSession({ userId: 'other' }));
     await expect(endSession('session-1', 'user-1', false)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describe('getSessionSchemaDiff()', () => {
+  it('returns a runtime diff against the base schema snapshot', async () => {
+    vi.mocked(sessionsRepository.findById).mockResolvedValue(makeSession({ status: 'active' }));
+    vi.mocked(sessionsRepository.getSchemaTemplateBySessionId).mockResolvedValue({
+      id: 'schema-1',
+      name: 'Ecommerce',
+      description: null,
+      version: 1,
+      definition: { tables: [{ name: 'users', columns: [] }] },
+      status: 'published',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: 'admin-1',
+    });
+    vi.mocked(sessionsRepository.findDetailedSandboxBySessionId).mockResolvedValue(
+      makeSandbox({
+        status: 'ready',
+        containerRef: 'sandbox-1',
+        dbName: 's_schema1',
+        schemaTemplateId: 'schema-1',
+      }),
+    );
+    vi.mocked(sandboxSchema.parseBaseSchemaSnapshot).mockReturnValue({
+      indexes: [],
+      views: [],
+      materializedViews: [],
+      functions: [],
+      partitions: [],
+    });
+    vi.mocked(sandboxSchema.fetchSandboxSchemaSnapshot).mockResolvedValue({
+      indexes: [{ name: 'idx_users_active', tableName: 'users', definition: 'CREATE INDEX idx_users_active ON users(active)' }],
+      views: [],
+      materializedViews: [],
+      functions: [],
+      partitions: [],
+    });
+    vi.mocked(sandboxSchema.diffSandboxSchema).mockReturnValue({
+      hasChanges: true,
+      indexes: {
+        base: [],
+        current: [{ name: 'idx_users_active', tableName: 'users', definition: 'CREATE INDEX idx_users_active ON users(active)' }],
+        added: [{ name: 'idx_users_active', tableName: 'users', definition: 'CREATE INDEX idx_users_active ON users(active)' }],
+        removed: [],
+        changed: [],
+      },
+      views: { base: [], current: [], added: [], removed: [], changed: [] },
+      materializedViews: { base: [], current: [], added: [], removed: [], changed: [] },
+      functions: { base: [], current: [], added: [], removed: [], changed: [] },
+      partitions: { base: [], current: [], added: [], removed: [], changed: [] },
+    });
+
+    const result = await getSessionSchemaDiff('session-1', 'user-1', false);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        schemaTemplateId: 'schema-1',
+        hasChanges: true,
+        indexes: expect.objectContaining({
+          added: [
+            expect.objectContaining({
+              name: 'idx_users_active',
+              tableName: 'users',
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(sandboxSchema.fetchSandboxSchemaSnapshot).toHaveBeenCalledWith({
+      dbName: 's_schema1',
+      containerRef: 'sandbox-1',
+    });
+  });
+
+  it('throws ForbiddenError when another user accesses the diff', async () => {
+    vi.mocked(sessionsRepository.findById).mockResolvedValue(makeSession({ userId: 'other-user' }));
+
+    await expect(getSessionSchemaDiff('session-1', 'user-1', false)).rejects.toThrow(ForbiddenError);
   });
 });

@@ -2,7 +2,12 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryApi, sessionsApi } from '@/lib/api';
 import { useLabStore } from '@/stores/lab';
-import type { QueryExecution, QueryExecutionRequest, SessionSchemaResponse } from '@/lib/api';
+import type {
+  QueryExecution,
+  QueryExecutionRequest,
+  SessionSchemaDiffResponse,
+  SessionSchemaResponse,
+} from '@/lib/api';
 import toast from 'react-hot-toast';
 import { toastError } from '@/lib/toast-error';
 import { formatDuration, formatRows } from '@/lib/utils';
@@ -129,6 +134,15 @@ export function useSessionSchema(sessionId: string) {
     queryFn: () => sessionsApi.getSchema(sessionId),
     enabled: !!sessionId,
     staleTime: 60_000,
+  });
+}
+
+export function useSessionSchemaDiff(sessionId: string) {
+  return useQuery<SessionSchemaDiffResponse>({
+    queryKey: ['session-schema-diff', sessionId],
+    queryFn: () => sessionsApi.getSchemaDiff(sessionId),
+    enabled: !!sessionId,
+    staleTime: 10_000,
   });
 }
 

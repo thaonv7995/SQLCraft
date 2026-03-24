@@ -66,6 +66,7 @@ describe('getChallengeVersionDetail()', () => {
       hintText: null,
       expectedResultColumns: ['id', 'email', 123] as unknown,
       validatorType: 'result_set',
+      validatorConfig: null,
       publishedAt: new Date('2026-03-24T00:00:00.000Z'),
       createdAt: new Date('2026-03-20T00:00:00.000Z'),
     });
@@ -106,6 +107,7 @@ describe('listUserAttempts()', () => {
       hintText: 'Filter by active flag',
       expectedResultColumns: ['id', 'email'],
       validatorType: 'result_set',
+      validatorConfig: null,
       publishedAt: new Date('2026-03-24T00:00:00.000Z'),
       createdAt: new Date('2026-03-20T00:00:00.000Z'),
     });
@@ -629,6 +631,7 @@ describe('getChallengeLeaderboard()', () => {
       hintText: null,
       expectedResultColumns: ['id', 'email'],
       validatorType: 'result_set',
+      validatorConfig: null,
       publishedAt: new Date('2026-03-24T00:00:00.000Z'),
       createdAt: new Date('2026-03-20T00:00:00.000Z'),
     });

@@ -182,6 +182,7 @@ export interface ChallengeVersionDetail {
   hintText: string | null;
   expectedResultColumns: string[];
   validatorType: string;
+  validatorConfig?: Record<string, unknown> | null;
   publishedAt?: string | null;
   createdAt: string;
 }
@@ -603,6 +604,52 @@ export interface SessionSchemaResponse {
   tables: SessionSchemaTable[];
 }
 
+export interface SessionSchemaIndex {
+  name: string;
+  tableName: string;
+  definition: string;
+}
+
+export interface SessionSchemaView {
+  name: string;
+  definition: string;
+}
+
+export interface SessionSchemaFunction {
+  name: string;
+  signature: string;
+  language?: string | null;
+  definition: string;
+}
+
+export interface SessionSchemaPartition {
+  name: string;
+  parentTable: string;
+  strategy?: string | null;
+  definition?: string | null;
+}
+
+export interface SessionSchemaDiffSection<T> {
+  base: T[];
+  current: T[];
+  added: T[];
+  removed: T[];
+  changed: Array<{
+    base: T;
+    current: T;
+  }>;
+}
+
+export interface SessionSchemaDiffResponse {
+  schemaTemplateId: string;
+  hasChanges: boolean;
+  indexes: SessionSchemaDiffSection<SessionSchemaIndex>;
+  views: SessionSchemaDiffSection<SessionSchemaView>;
+  materializedViews: SessionSchemaDiffSection<SessionSchemaView>;
+  functions: SessionSchemaDiffSection<SessionSchemaFunction>;
+  partitions: SessionSchemaDiffSection<SessionSchemaPartition>;
+}
+
 // ─── Databases ────────────────────────────────────────────────────────────────
 
 export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'social' | 'analytics' | 'other';
@@ -799,6 +846,10 @@ function normalizeChallengeVersionDetail(
     expectedResultColumns: Array.isArray(detail.expectedResultColumns)
       ? detail.expectedResultColumns.filter((value): value is string => typeof value === 'string')
       : [],
+    validatorConfig:
+      detail.validatorConfig && typeof detail.validatorConfig === 'object'
+        ? detail.validatorConfig
+        : null,
   };
 }
 
@@ -1047,6 +1098,9 @@ export const sessionsApi = {
 
   getSchema: (id: string) =>
     api.get<SessionSchemaResponse>(`/learning-sessions/${id}/schema`).then((r) => r.data),
+
+  getSchemaDiff: (id: string) =>
+    api.get<SessionSchemaDiffResponse>(`/learning-sessions/${id}/schema-diff`).then((r) => r.data),
 
   create: (payload: {
     lessonVersionId: string;
