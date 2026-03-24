@@ -5,29 +5,41 @@ import {
   submitAttempt,
   getAttempt,
   getChallengeVersionDetail,
+  getEditableChallenge,
   listPublishedChallenges,
   listReviewChallenges,
   listUserChallenges,
   listUserAttempts,
   getChallengeLeaderboard,
+  validateChallengeDraft,
   createChallenge,
+  createChallengeVersion,
   publishChallengeVersion,
+  reviewChallengeVersion,
 } from './challenges.service';
 import {
   ChallengeAttemptsQuerySchema,
   ChallengeLeaderboardQuerySchema,
+  ChallengeParamsSchema,
   ChallengeVersionParamsSchema,
   SubmitAttemptSchema,
   CreateChallengeSchema,
+  CreateChallengeVersionSchema,
+  ValidateChallengeDraftSchema,
+  ReviewChallengeVersionSchema,
 } from './challenges.schema';
 import type {
   ChallengeAttemptParams,
+  ChallengeParams,
   ChallengeVersionParams,
   AdminChallengeVersionParams,
   ChallengeAttemptsQuery,
   ChallengeLeaderboardQuery,
   SubmitAttemptBody,
   CreateChallengeBody,
+  CreateChallengeVersionBody,
+  ValidateChallengeDraftBody,
+  ReviewChallengeVersionBody,
 } from './challenges.schema';
 
 export async function submitAttemptHandler(
@@ -108,13 +120,62 @@ export async function createChallengeHandler(
   return reply.status(201).send(created(result, 'Challenge created successfully'));
 }
 
+export async function validateChallengeDraftHandler(
+  request: FastifyRequest<{ Body: ValidateChallengeDraftBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = ValidateChallengeDraftSchema.parse(request.body);
+  const result = await validateChallengeDraft(body);
+  return reply.send(success(result, 'Challenge draft validated successfully'));
+}
+
+export async function getEditableChallengeHandler(
+  request: FastifyRequest<{ Params: ChallengeParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeParamsSchema.parse(request.params);
+  const jwtUser = request.user as JwtPayload | undefined;
+  const userId = jwtUser?.sub ?? '';
+  const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
+  const detail = await getEditableChallenge(id, userId, isAdmin);
+  return reply.send(success(detail, 'Challenge draft retrieved successfully'));
+}
+
+export async function createChallengeVersionHandler(
+  request: FastifyRequest<{ Params: ChallengeParams; Body: CreateChallengeVersionBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeParamsSchema.parse(request.params);
+  const body = CreateChallengeVersionSchema.parse(request.body);
+  const jwtUser = request.user as JwtPayload | undefined;
+  const userId = jwtUser?.sub ?? '';
+  const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
+  const result = await createChallengeVersion(id, body, userId, isAdmin);
+  return reply.status(201).send(created(result, 'Challenge version created successfully'));
+}
+
 export async function publishChallengeVersionHandler(
   request: FastifyRequest<{ Params: AdminChallengeVersionParams }>,
   reply: FastifyReply,
 ): Promise<void> {
   const { id } = request.params;
-  const published = await publishChallengeVersion(id);
+  const reviewerId = (request.user as JwtPayload | undefined)?.sub;
+  const published = await publishChallengeVersion(id, reviewerId);
   return reply.send(success(published, MESSAGES.CONTENT_PUBLISHED));
+}
+
+export async function reviewChallengeVersionHandler(
+  request: FastifyRequest<{
+    Params: AdminChallengeVersionParams;
+    Body: ReviewChallengeVersionBody;
+  }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = request.params;
+  const body = ReviewChallengeVersionSchema.parse(request.body);
+  const reviewerId = (request.user as JwtPayload | undefined)?.sub ?? '';
+  const reviewed = await reviewChallengeVersion(id, body.decision, reviewerId, body.note);
+  return reply.send(success(reviewed, 'Challenge review decision recorded successfully'));
 }
 
 export async function listReviewChallengesHandler(

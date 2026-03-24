@@ -20,6 +20,8 @@ import {
   createLesson,
   createLessonVersion,
   publishLessonVersion,
+  listLessonVersions,
+  getLessonVersionDetail,
   createChallenge,
   publishChallengeVersion,
   listUsers,
@@ -75,6 +77,22 @@ export async function publishLessonVersionHandler(
 ): Promise<void> {
   const result = await publishLessonVersion(request.params.id);
   reply.send(success(result, MESSAGES.CONTENT_PUBLISHED));
+}
+
+export async function listLessonVersionsHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await listLessonVersions(request.params.id);
+  reply.send(success(result, 'Lesson versions retrieved successfully'));
+}
+
+export async function getLessonVersionDetailHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await getLessonVersionDetail(request.params.id);
+  reply.send(success(result, 'Lesson version detail retrieved successfully'));
 }
 
 // ─── Challenges ───────────────────────────────────────────────────────────────

@@ -29,6 +29,8 @@ import type {
   UpdateTrackResult,
   CreateLessonResult,
   CreateLessonVersionResult,
+  LessonVersionAdminDetailResult,
+  LessonVersionSummaryResult,
   PublishLessonVersionResult,
   CreateChallengeResult,
   PublishChallengeVersionResult,
@@ -92,6 +94,24 @@ export async function publishLessonVersion(
   if (!published) throw new NotFoundError('Lesson version not found');
 
   return published;
+}
+
+export async function listLessonVersions(
+  lessonId: string,
+): Promise<LessonVersionSummaryResult[]> {
+  const lessonExists = await lessonsRepository.existsById(lessonId);
+  if (!lessonExists) throw new NotFoundError('Lesson not found');
+
+  return lessonsRepository.listVersionsForLesson(lessonId);
+}
+
+export async function getLessonVersionDetail(
+  versionId: string,
+): Promise<LessonVersionAdminDetailResult> {
+  const version = await lessonsRepository.findVersionById(versionId);
+  if (!version) throw new NotFoundError('Lesson version not found');
+
+  return version;
 }
 
 // ─── Challenges ───────────────────────────────────────────────────────────────

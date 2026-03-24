@@ -3,6 +3,7 @@ import type {
   ChallengeAttemptRow,
   ChallengeAttemptWithExecutionRow,
   ChallengeCatalogRow,
+  EditableChallengeDetailRow,
   ChallengeLeaderboardAttemptRow,
   ChallengeRow,
   ChallengeVersionRow,
@@ -11,10 +12,16 @@ import type {
   ReviewChallengeRow,
   SessionExecutionSummaryRow,
 } from '../../db/repositories';
-import { ForbiddenError, NotFoundError, QueryExecutionFailedError } from '../../lib/errors';
+import { ForbiddenError, NotFoundError, QueryExecutionFailedError, ValidationError } from '../../lib/errors';
 import type { ExplainResult } from '../../services/query-executor';
-import { executeSql, getExplainPlan } from '../../services/query-executor';
-import type { CreateChallengeBody, SubmitAttemptBody } from './challenges.schema';
+import { executeSql, getExplainPlan, validateSql } from '../../services/query-executor';
+import type {
+  CreateChallengeBody,
+  CreateChallengeVersionBody,
+  ReviewChallengeVersionBody,
+  SubmitAttemptBody,
+  ValidateChallengeDraftBody,
+} from './challenges.schema';
 
 export interface AttemptEvaluation {
   isCorrect: boolean;
@@ -41,6 +48,18 @@ export interface AttemptResult {
 export interface CreateChallengeResult {
   challenge: ChallengeRow;
   version: ChallengeVersionRow;
+}
+
+export interface ChallengeDraftValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  normalized: {
+    slug: string;
+    expectedResultColumns: string[];
+    referenceSolution: string | null;
+    validatorConfig: Record<string, unknown> | null;
+  };
 }
 
 export interface ChallengeVersionDetail {
@@ -111,6 +130,9 @@ export interface ChallengeCatalogItem {
   latestVersionId: string | null;
   latestVersionNo: number | null;
   validatorType: string | null;
+  latestVersionReviewStatus: ChallengeVersionRow['reviewStatus'] | null;
+  latestVersionReviewNotes: string | null;
+  latestVersionReviewedAt: Date | null;
   updatedAt: Date;
   createdAt: Date;
 }
@@ -120,6 +142,38 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
     id: string | null;
     username: string | null;
     displayName: string | null;
+  };
+}
+
+export interface EditableChallengeDetail {
+  id: string;
+  lessonId: string;
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: ChallengeRow['difficulty'];
+  sortOrder: number;
+  points: number;
+  status: ChallengeRow['status'];
+  publishedVersionId: string | null;
+  updatedAt: Date;
+  createdAt: Date;
+  latestVersion: {
+    id: string;
+    versionNo: number;
+    problemStatement: string;
+    hintText: string | null;
+    expectedResultColumns: string[];
+    referenceSolution: string | null;
+    validatorType: string;
+    validatorConfig: Record<string, unknown> | null;
+    isPublished: boolean;
+    reviewStatus: ChallengeVersionRow['reviewStatus'];
+    reviewNotes: string | null;
+    reviewedBy: string | null;
+    reviewedAt: Date | null;
+    publishedAt: Date | null;
+    createdAt: Date;
   };
 }
 
@@ -145,12 +199,50 @@ function normalizeDescription(value: string | null | undefined): string {
   return value ?? '';
 }
 
+function normalizeNullableText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
 function normalizeExpectedResultColumns(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value.filter((column): column is string => typeof column === 'string');
+  return Array.from(
+    new Set(
+      value
+        .filter((column): column is string => typeof column === 'string')
+        .map((column) => column.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function normalizeValidatorConfig(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const config = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {};
+  const baselineCandidate = config.baselineDurationMs;
+  const baselineDurationMs =
+    typeof baselineCandidate === 'number'
+      ? baselineCandidate
+      : typeof baselineCandidate === 'string'
+        ? Number(baselineCandidate)
+        : null;
+
+  if (typeof baselineDurationMs === 'number' && Number.isFinite(baselineDurationMs)) {
+    normalized.baselineDurationMs = baselineDurationMs;
+  }
+
+  if (config.requiresIndexOptimization === true) {
+    normalized.requiresIndexOptimization = true;
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 function normalizeChallengeVersionDetail(
@@ -161,10 +253,7 @@ function normalizeChallengeVersionDetail(
     description: normalizeDescription(row.description),
     hintText: row.hintText ?? null,
     expectedResultColumns: normalizeExpectedResultColumns(row.expectedResultColumns),
-    validatorConfig:
-      row.validatorConfig && typeof row.validatorConfig === 'object'
-        ? (row.validatorConfig as Record<string, unknown>)
-        : null,
+    validatorConfig: normalizeValidatorConfig(row.validatorConfig),
   };
 }
 
@@ -192,6 +281,7 @@ function normalizeCatalogRow(row: ChallengeCatalogRow): ChallengeCatalogItem {
   return {
     ...row,
     description: normalizeDescription(row.description),
+    latestVersionReviewNotes: normalizeNullableText(row.latestVersionReviewNotes),
   };
 }
 
@@ -202,6 +292,158 @@ function normalizeReviewRow(row: ReviewChallengeRow): ChallengeReviewItem {
       id: row.createdById,
       username: row.createdByUsername,
       displayName: row.createdByDisplayName,
+    },
+  };
+}
+
+function normalizeEditableChallengeDetail(row: EditableChallengeDetailRow): EditableChallengeDetail {
+  return {
+    id: row.id,
+    lessonId: row.lessonId,
+    slug: row.slug,
+    title: row.title,
+    description: normalizeDescription(row.description),
+    difficulty: row.difficulty,
+    sortOrder: row.sortOrder,
+    points: row.points,
+    status: row.status,
+    publishedVersionId: row.publishedVersionId,
+    updatedAt: row.updatedAt,
+    createdAt: row.createdAt,
+    latestVersion: {
+      id: row.versionId,
+      versionNo: row.versionNo,
+      problemStatement: row.problemStatement,
+      hintText: row.hintText ?? null,
+      expectedResultColumns: normalizeExpectedResultColumns(row.expectedResultColumns),
+      referenceSolution: normalizeNullableText(row.referenceSolution),
+      validatorType: row.validatorType,
+      validatorConfig: normalizeValidatorConfig(row.validatorConfig),
+      isPublished: row.isPublished,
+      reviewStatus: row.reviewStatus,
+      reviewNotes: normalizeNullableText(row.reviewNotes),
+      reviewedBy: row.reviewedBy,
+      reviewedAt: row.reviewedAt,
+      publishedAt: row.publishedAt,
+      createdAt: row.versionCreatedAt,
+    },
+  };
+}
+
+interface NormalizedChallengeDraftPayload {
+  lessonId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  difficulty: ChallengeRow['difficulty'];
+  sortOrder: number;
+  points: number;
+  problemStatement: string;
+  hintText?: string;
+  expectedResultColumns: string[];
+  referenceSolution: string | null;
+  validatorType: string;
+  validatorConfig: Record<string, unknown> | null;
+}
+
+function normalizeChallengeDraftPayload(
+  data: Pick<
+    CreateChallengeBody,
+    | 'lessonId'
+    | 'slug'
+    | 'title'
+    | 'description'
+    | 'difficulty'
+    | 'sortOrder'
+    | 'points'
+    | 'problemStatement'
+    | 'hintText'
+    | 'expectedResultColumns'
+    | 'referenceSolution'
+    | 'validatorType'
+    | 'validatorConfig'
+  >,
+): NormalizedChallengeDraftPayload {
+  return {
+    lessonId: data.lessonId,
+    slug: data.slug.trim(),
+    title: data.title.trim(),
+    description: normalizeNullableText(data.description) ?? undefined,
+    difficulty: data.difficulty,
+    sortOrder: data.sortOrder,
+    points: data.points ?? 100,
+    problemStatement: data.problemStatement.trim(),
+    hintText: normalizeNullableText(data.hintText) ?? undefined,
+    expectedResultColumns: normalizeExpectedResultColumns(data.expectedResultColumns),
+    referenceSolution: normalizeNullableText(data.referenceSolution),
+    validatorType: data.validatorType,
+    validatorConfig: normalizeValidatorConfig(data.validatorConfig),
+  };
+}
+
+async function buildDraftValidation(
+  data: ValidateChallengeDraftBody,
+): Promise<ChallengeDraftValidationResult> {
+  const normalized = normalizeChallengeDraftPayload(data);
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  const lessonExists = await lessonsRepository.existsById(normalized.lessonId);
+  if (!lessonExists) {
+    errors.push('Lesson not found.');
+  }
+
+  const existingChallenge = await challengesRepository.findByLessonAndSlug(
+    normalized.lessonId,
+    normalized.slug,
+  );
+  if (existingChallenge && existingChallenge.id !== data.challengeId) {
+    errors.push('Slug already exists for this lesson.');
+  }
+
+  if (normalized.validatorType === 'result_set') {
+    if (!normalized.referenceSolution) {
+      errors.push('Reference solution is required for result_set challenges.');
+    } else {
+      const sqlValidation = validateSql(normalized.referenceSolution);
+      if (!sqlValidation.valid) {
+        errors.push(sqlValidation.reason ?? 'Reference solution is not allowed.');
+      }
+    }
+  }
+
+  if (normalized.expectedResultColumns.length === 0) {
+    warnings.push('Expected result columns are empty, so preview checks will rely on the raw result set.');
+  }
+
+  if (!normalized.description) {
+    warnings.push('Description is empty. Add a short teaching summary for reviewers.');
+  }
+
+  const baselineCandidate = normalized.validatorConfig?.baselineDurationMs;
+  const baselineDurationMs =
+    typeof baselineCandidate === 'number' ? baselineCandidate : null;
+
+  if (baselineDurationMs !== null && baselineDurationMs <= 0) {
+    errors.push('Baseline duration must be greater than 0 ms.');
+  }
+
+  if (
+    normalized.validatorConfig?.requiresIndexOptimization === true &&
+    baselineDurationMs === null
+  ) {
+    errors.push('Baseline duration is required when index optimization is enabled.');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    normalized: {
+      slug: normalized.slug,
+      expectedResultColumns: normalized.expectedResultColumns,
+      referenceSolution: normalized.referenceSolution,
+      validatorConfig: normalized.validatorConfig,
     },
   };
 }
@@ -896,24 +1138,48 @@ export async function listReviewChallenges(): Promise<ChallengeReviewItem[]> {
   return challenges.map(normalizeReviewRow);
 }
 
+export async function getEditableChallenge(
+  id: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<EditableChallengeDetail> {
+  const detail = await challengesRepository.findEditableChallengeById(id);
+
+  if (!detail) {
+    throw new NotFoundError('Challenge draft not found');
+  }
+
+  if (detail.createdBy !== userId && !isAdmin) {
+    throw new ForbiddenError('Access denied to this challenge draft');
+  }
+
+  return normalizeEditableChallengeDetail(detail);
+}
+
+export async function validateChallengeDraft(
+  data: ValidateChallengeDraftBody,
+): Promise<ChallengeDraftValidationResult> {
+  return buildDraftValidation(data);
+}
+
 export async function createChallenge(
   data: CreateChallengeBody,
   userId: string,
 ): Promise<CreateChallengeResult> {
-  const lessonExists = await lessonsRepository.existsById(data.lessonId);
-
-  if (!lessonExists) {
-    throw new NotFoundError('Lesson not found');
+  const validation = await buildDraftValidation(data);
+  if (!validation.valid) {
+    throw new ValidationError(validation.errors.join(' '));
   }
+  const normalized = normalizeChallengeDraftPayload(data);
 
   const challenge = await challengesRepository.createChallenge({
-    lessonId: data.lessonId,
-    slug: data.slug,
-    title: data.title,
-    description: data.description,
-    difficulty: data.difficulty,
-    sortOrder: data.sortOrder,
-    points: data.points ?? 100,
+    lessonId: normalized.lessonId,
+    slug: normalized.slug,
+    title: normalized.title,
+    description: normalized.description,
+    difficulty: normalized.difficulty,
+    sortOrder: normalized.sortOrder,
+    points: normalized.points,
     status: 'draft',
     createdBy: userId,
   });
@@ -921,30 +1187,123 @@ export async function createChallenge(
   const version = await challengesRepository.createVersion({
     challengeId: challenge.id,
     versionNo: 1,
-    problemStatement: data.problemStatement,
-    hintText: data.hintText,
-    expectedResultColumns: data.expectedResultColumns as unknown as Record<string, unknown>,
-    referenceSolution: data.referenceSolution,
-    validatorType: data.validatorType,
-    validatorConfig: data.validatorConfig as unknown as Record<string, unknown>,
+    problemStatement: normalized.problemStatement,
+    hintText: normalized.hintText,
+    expectedResultColumns: normalized.expectedResultColumns as unknown as Record<string, unknown>,
+    referenceSolution: normalized.referenceSolution,
+    validatorType: normalized.validatorType,
+    validatorConfig: normalized.validatorConfig as unknown as Record<string, unknown>,
     createdBy: userId,
   });
 
   return { challenge, version };
 }
 
-export async function publishChallengeVersion(versionId: string): Promise<ChallengeVersionRow> {
+export async function createChallengeVersion(
+  challengeId: string,
+  data: CreateChallengeVersionBody,
+  userId: string,
+  isAdmin: boolean,
+): Promise<CreateChallengeResult> {
+  const existing = await challengesRepository.findById(challengeId);
+
+  if (!existing) {
+    throw new NotFoundError('Challenge not found');
+  }
+
+  if (existing.createdBy !== userId && !isAdmin) {
+    throw new ForbiddenError('Access denied to this challenge draft');
+  }
+
+  if (existing.status !== 'draft') {
+    throw new ValidationError('Only draft challenges can be revised from the contributor flow.');
+  }
+
+  const validation = await buildDraftValidation({ ...data, challengeId });
+  if (!validation.valid) {
+    throw new ValidationError(validation.errors.join(' '));
+  }
+  const normalized = normalizeChallengeDraftPayload(data);
+
+  const challenge =
+    (await challengesRepository.updateChallenge(challengeId, {
+      lessonId: normalized.lessonId,
+      slug: normalized.slug,
+      title: normalized.title,
+      description: normalized.description,
+      difficulty: normalized.difficulty,
+      sortOrder: normalized.sortOrder,
+      points: normalized.points,
+    })) ?? existing;
+
+  const latestVersionNo = await challengesRepository.getLatestVersionNo(challengeId);
+  const version = await challengesRepository.createVersion({
+    challengeId,
+    versionNo: latestVersionNo + 1,
+    problemStatement: normalized.problemStatement,
+    hintText: normalized.hintText,
+    expectedResultColumns: normalized.expectedResultColumns as unknown as Record<string, unknown>,
+    referenceSolution: normalized.referenceSolution,
+    validatorType: normalized.validatorType,
+    validatorConfig: normalized.validatorConfig as unknown as Record<string, unknown>,
+    createdBy: userId,
+  });
+
+  return { challenge, version };
+}
+
+export async function publishChallengeVersion(
+  versionId: string,
+  reviewerId?: string,
+  reviewNote?: string,
+): Promise<ChallengeVersionRow> {
   const version = await challengesRepository.findVersionById(versionId);
 
   if (!version) {
     throw new NotFoundError('Challenge version not found');
   }
 
-  const published = await challengesRepository.publishVersion(versionId, version.challengeId);
+  const published = await challengesRepository.publishVersion(versionId, version.challengeId, {
+    reviewedBy: reviewerId,
+    reviewNotes: normalizeNullableText(reviewNote),
+  });
 
   if (!published) {
     throw new NotFoundError('Challenge version not found');
   }
 
   return published;
+}
+
+export async function reviewChallengeVersion(
+  versionId: string,
+  decision: ReviewChallengeVersionBody['decision'],
+  reviewerId: string,
+  reviewNote?: string,
+): Promise<ChallengeVersionRow> {
+  if (decision === 'approve') {
+    return publishChallengeVersion(versionId, reviewerId, reviewNote);
+  }
+
+  const version = await challengesRepository.findVersionById(versionId);
+  if (!version) {
+    throw new NotFoundError('Challenge version not found');
+  }
+
+  if (version.isPublished) {
+    throw new ValidationError('Published challenge versions cannot be rejected.');
+  }
+
+  const reviewed = await challengesRepository.reviewVersion(
+    versionId,
+    decision === 'reject' ? 'rejected' : 'changes_requested',
+    normalizeNullableText(reviewNote),
+    reviewerId,
+  );
+
+  if (!reviewed) {
+    throw new NotFoundError('Challenge version not found');
+  }
+
+  return reviewed;
 }

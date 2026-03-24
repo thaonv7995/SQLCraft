@@ -47,6 +47,12 @@ export const queryStatusEnum = pgEnum('query_status', [
 export const attemptStatusEnum = pgEnum('attempt_status', ['pending', 'passed', 'failed', 'error']);
 export const planModeEnum = pgEnum('plan_mode', ['explain', 'explain_analyze']);
 export const datasetSizeEnum = pgEnum('dataset_size', ['tiny', 'small', 'medium', 'large']);
+export const reviewStatusEnum = pgEnum('review_status', [
+  'pending',
+  'approved',
+  'changes_requested',
+  'rejected',
+]);
 export const jobStatusEnum = pgEnum('job_status', [
   'pending',
   'running',
@@ -211,23 +217,36 @@ export const challenges = pgTable(
   }),
 );
 
-export const challengeVersions = pgTable('challenge_versions', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  challengeId: uuid('challenge_id')
-    .notNull()
-    .references(() => challenges.id, { onDelete: 'cascade' }),
-  versionNo: integer('version_no').notNull().default(1),
-  problemStatement: text('problem_statement').notNull(),
-  hintText: text('hint_text'),
-  expectedResultColumns: jsonb('expected_result_columns'),
-  referenceSolution: text('reference_solution'),
-  validatorType: varchar('validator_type', { length: 50 }).notNull().default('result_set'),
-  validatorConfig: jsonb('validator_config'),
-  isPublished: boolean('is_published').notNull().default(false),
-  publishedAt: timestamp('published_at'),
-  createdBy: uuid('created_by').references(() => users.id),
-  createdAt: timestamp('created_at').notNull().default(sql`now()`),
-});
+export const challengeVersions = pgTable(
+  'challenge_versions',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    challengeId: uuid('challenge_id')
+      .notNull()
+      .references(() => challenges.id, { onDelete: 'cascade' }),
+    versionNo: integer('version_no').notNull().default(1),
+    problemStatement: text('problem_statement').notNull(),
+    hintText: text('hint_text'),
+    expectedResultColumns: jsonb('expected_result_columns'),
+    referenceSolution: text('reference_solution'),
+    validatorType: varchar('validator_type', { length: 50 }).notNull().default('result_set'),
+    validatorConfig: jsonb('validator_config'),
+    isPublished: boolean('is_published').notNull().default(false),
+    reviewStatus: reviewStatusEnum('review_status').notNull().default('pending'),
+    reviewNotes: text('review_notes'),
+    reviewedBy: uuid('reviewed_by').references(() => users.id),
+    reviewedAt: timestamp('reviewed_at'),
+    publishedAt: timestamp('published_at'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    challengeVersionIdx: uniqueIndex('challenge_versions_challenge_version_idx').on(
+      table.challengeId,
+      table.versionNo,
+    ),
+  }),
+);
 
 // Templates
 export const schemaTemplates = pgTable('schema_templates', {

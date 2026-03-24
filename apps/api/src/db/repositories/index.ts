@@ -39,6 +39,7 @@ export type { TrackRow, LessonSummaryRow } from './tracks.repository';
 export type {
   LessonRow,
   LessonVersionRow,
+  LessonVersionSummaryRow,
   SchemaTemplateRow,
   ChallengeSummaryRow,
 } from './lessons.repository';
@@ -58,6 +59,7 @@ export type {
   ChallengeAttemptWithExecutionRow,
   ChallengeLeaderboardAttemptRow,
   ChallengeCatalogRow,
+  EditableChallengeDetailRow,
   PublishedChallengeVersionRow,
   PublishedChallengeVersionDetailRow,
   ReviewChallengeRow,

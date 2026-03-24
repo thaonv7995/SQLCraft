@@ -3,6 +3,7 @@ import type {
   TrackRow,
   LessonRow,
   LessonVersionRow,
+  LessonVersionSummaryRow,
   ChallengeRow,
   ChallengeVersionRow,
   UserRow,
@@ -22,6 +23,10 @@ export interface CreateLessonResult extends LessonRow {}
 export interface CreateLessonVersionResult extends LessonVersionRow {}
 
 export interface PublishLessonVersionResult extends LessonVersionRow {}
+
+export interface LessonVersionSummaryResult extends LessonVersionSummaryRow {}
+
+export interface LessonVersionAdminDetailResult extends LessonVersionRow {}
 
 export interface CreateChallengeResult {
   challenge: ChallengeRow;

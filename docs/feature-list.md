@@ -69,9 +69,9 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 - [x] Đánh giá bài làm bằng "Performance Score" thay vì chỉ đánh giá đúng/sai.
 
 ### 9. Công Cụ Đóng Góp Nội Dung (Contribution Tools)
-- [ ] Trình soạn thảo Markdown kết hợp SQL Validator cho User kiểm tra tính đúng đắn của đề bài trước khi gửi đóng góp.
-- [ ] Giao diện Admin để duyệt (approve/reject) nội dung từ User.
-- [ ] Quản lý phiên bản bài học (Content Versioning) giúp cập nhật mà không làm hỏng dữ liệu học cũ.
+- [x] Trình soạn thảo Markdown kết hợp SQL Validator cho User kiểm tra tính đúng đắn của đề bài trước khi gửi đóng góp. Contributor UI hiện có `Write / Preview / Preflight`, validate `referenceSolution` trước khi submit, và cho phép mở lại draft để gửi phiên bản mới.
+- [x] Giao diện Admin để duyệt (approve/reject) nội dung từ User. Admin hiện có moderation queue cho challenge draft với các trạng thái `pending / approved / changes_requested / rejected`, kèm review note và nút `Approve & Publish`, `Request Changes`, `Reject Draft`.
+- [x] Quản lý phiên bản bài học (Content Versioning) giúp cập nhật mà không làm hỏng dữ liệu học cũ. Admin có thể tạo, xem, nạp lại vào editor, và publish các lesson version riêng biệt.
 
 ### 10. Động Lực Học Tập (Gamification)
 - [ ] Leaderboard vinh danh những người giải quyết bài toán với thời gian và chi phí truy vấn (Cost) thấp nhất.

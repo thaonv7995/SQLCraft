@@ -17,6 +17,8 @@ import {
   updateTrackHandler,
   createLessonHandler,
   createLessonVersionHandler,
+  listLessonVersionsHandler,
+  getLessonVersionDetailHandler,
   publishLessonVersionHandler,
   createChallengeHandler,
   publishChallengeVersionHandler,
@@ -127,6 +129,42 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     createLessonVersionHandler,
+  );
+
+  fastify.get<{ Params: AdminIdParams }>(
+    '/v1/admin/lessons/:id/versions',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List versions for a lesson',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    listLessonVersionsHandler,
+  );
+
+  fastify.get<{ Params: AdminIdParams }>(
+    '/v1/admin/lesson-versions/:id',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Get lesson version detail, including draft versions',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    getLessonVersionDetailHandler,
   );
 
   fastify.post<{ Params: AdminIdParams }>(

@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   },
   challengesApi: {
     listMine: vi.fn(),
+    validateDraft: vi.fn(),
     create: vi.fn(),
+    createVersion: vi.fn(),
+    getDraft: vi.fn(),
   },
 }));
 
@@ -34,10 +37,51 @@ vi.mock('@/stores/auth', () => ({
   }),
 }));
 
+vi.mock('@/components/ui/sql-editor', () => ({
+  SqlEditor: ({ value }: { value: string }) => <div data-testid="mock-sql-editor">{value}</div>,
+}));
+
 vi.mock('@/lib/api', () => ({
   tracksApi: mocks.tracksApi,
   challengesApi: mocks.challengesApi,
 }));
+
+function createEditableDraft(challengeId: string) {
+  return {
+    id: challengeId,
+    lessonId: 'lesson-1',
+    slug: 'filter-active-users',
+    title: 'Filter active users',
+    description: 'Return active users only.',
+    difficulty: 'intermediate' as const,
+    sortOrder: 1,
+    points: 200,
+    status: 'draft' as const,
+    publishedVersionId: null,
+    updatedAt: '2026-03-24T00:00:00.000Z',
+    createdAt: '2026-03-20T00:00:00.000Z',
+    latestVersion: {
+      id: 'challenge-version-1',
+      versionNo: 1,
+      problemStatement: 'Return active users quickly.',
+      hintText: 'Use the active flag.',
+      expectedResultColumns: ['id', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+        requiresIndexOptimization: true,
+      },
+      isPublished: false,
+      reviewStatus: 'pending' as const,
+      reviewNotes: 'Tighten the expected ordering.',
+      reviewedBy: null,
+      reviewedAt: null,
+      publishedAt: null,
+      createdAt: '2026-03-24T00:00:00.000Z',
+    },
+  };
+}
 
 function renderContributorPage() {
   const queryClient = new QueryClient({
@@ -116,29 +160,60 @@ describe('ContributorPage', () => {
         latestVersionId: 'challenge-version-1',
         latestVersionNo: 1,
         validatorType: 'result_set',
+        latestVersionReviewStatus: 'pending',
+        latestVersionReviewNotes: 'Tighten the expected ordering.',
+        latestVersionReviewedAt: null,
         updatedAt: '2026-03-24T00:00:00.000Z',
         createdAt: '2026-03-20T00:00:00.000Z',
       },
     ]);
 
+    mocks.challengesApi.validateDraft.mockResolvedValue({
+      valid: true,
+      errors: [],
+      warnings: [],
+      normalized: {
+        slug: 'index-active-users',
+        expectedResultColumns: ['id', 'email'],
+        referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+        validatorConfig: {
+          baselineDurationMs: 200,
+          requiresIndexOptimization: true,
+        },
+      },
+    });
+
     mocks.challengesApi.create.mockResolvedValue({
       challenge: { id: 'challenge-2' },
       version: { id: 'challenge-version-2' },
     });
+
+    mocks.challengesApi.createVersion.mockResolvedValue({
+      challenge: { id: 'challenge-1' },
+      version: { id: 'challenge-version-2' },
+    });
+
+    mocks.challengesApi.getDraft.mockImplementation(async (challengeId: string) =>
+      createEditableDraft(challengeId),
+    );
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('lists the user challenge drafts and creates a new draft from the contributor form', async () => {
+  it('creates a new draft only after running server-side preflight validation', async () => {
     const user = userEvent.setup();
 
     renderContributorPage();
 
-    expect(await screen.findByRole('heading', { name: /build challenge drafts/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: /build challenge drafts/i }),
+    ).toBeInTheDocument();
     expect(await screen.findByText('Filter active users')).toBeInTheDocument();
-    expect(await screen.findByRole('option', { name: 'SQL Fundamentals / Filtering' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('option', { name: 'SQL Fundamentals / Filtering' }),
+    ).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('Lesson'), 'lesson-1');
     await user.type(screen.getByLabelText('Title'), 'Index active users');
@@ -150,17 +225,80 @@ describe('ContributorPage', () => {
       screen.getByLabelText('Problem Statement'),
       'Return active users quickly and reward indexed solutions.',
     );
+    await user.type(
+      screen.getByLabelText('Reference Solution'),
+      'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+    );
 
     await user.click(screen.getByRole('button', { name: /create draft/i }));
+
+    await waitFor(() => {
+      expect(mocks.challengesApi.validateDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lessonId: 'lesson-1',
+          title: 'Index active users',
+          points: 200,
+          problemStatement: 'Return active users quickly and reward indexed solutions.',
+          referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+        }),
+      );
+    });
 
     await waitFor(() => {
       expect(mocks.challengesApi.create).toHaveBeenCalledWith(
         expect.objectContaining({
           lessonId: 'lesson-1',
           title: 'Index active users',
-          slug: 'index-active-users',
           points: 200,
-          problemStatement: 'Return active users quickly and reward indexed solutions.',
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(mocks.challengesApi.getDraft).toHaveBeenCalledWith('challenge-2');
+    });
+  });
+
+  it('loads an existing draft and submits a new version when the contributor edits it', async () => {
+    const user = userEvent.setup();
+
+    renderContributorPage();
+
+    expect(await screen.findByText('Filter active users')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    await waitFor(() => {
+      expect(mocks.challengesApi.getDraft).toHaveBeenCalledWith('challenge-1');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Filter active users')).toBeInTheDocument();
+    });
+
+    const problemStatement = screen.getByLabelText('Problem Statement');
+    await user.clear(problemStatement);
+    await user.type(problemStatement, 'Return active users with explicit ordering.');
+
+    await user.click(screen.getByRole('button', { name: /submit new version/i }));
+
+    await waitFor(() => {
+      expect(mocks.challengesApi.validateDraft).toHaveBeenCalledWith(
+        expect.objectContaining({
+          challengeId: 'challenge-1',
+          slug: 'filter-active-users',
+          problemStatement: 'Return active users with explicit ordering.',
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(mocks.challengesApi.createVersion).toHaveBeenCalledWith(
+        'challenge-1',
+        expect.objectContaining({
+          lessonId: 'lesson-1',
+          slug: 'filter-active-users',
+          problemStatement: 'Return active users with explicit ordering.',
         }),
       );
     });

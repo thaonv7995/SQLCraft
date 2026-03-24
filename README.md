@@ -12,7 +12,7 @@ SQLCraft is an open-source, interactive SQL learning platform that takes you bey
 - **Query Optimization Labs** — Run side-by-side query comparisons, create and drop indexes safely, inspect schema drift against the published base schema, and reset the sandbox back to base after experiments.
 - **User Sandbox Isolation** — Every learning session provisions a dedicated, ephemeral PostgreSQL container attached to the internal Docker network. Cleanup is automatic on session end and TTL expiry.
 - **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically with weighted **correctness**, **performance**, and **index optimization** scoring where configured, using full result-set comparison plus EXPLAIN-backed index checks.
-- **Admin & Contributor Tools** — Built-in tools for async dataset generation and a contributor workflow that captures reference solutions, expected columns, and optimization baselines for community-created challenges.
+- **Admin & Contributor Tools** — Built-in tools for async dataset generation plus a full content workflow: contributor draft editor with Markdown preview and SQL preflight validation, admin approve/request-changes/reject moderation, and lesson version management for safe content updates.
 
 ## Tech Stack
 
@@ -70,6 +70,14 @@ make clean        # Stop and remove all volumes
 ### Docker (dev images)
 
 `docker-compose.dev.yml` builds **api**, **web**, and **worker** from `Dockerfile.dev`. Those Dockerfiles copy **`pnpm-lock.yaml`** and run **`pnpm install --frozen-lockfile`**, so the versions inside the image match the committed lockfile. After you change any `package.json` at the repo root or in a workspace, run **`pnpm install`** at the monorepo root, commit the updated **`pnpm-lock.yaml`**, then rebuild: `docker compose -f docker-compose.dev.yml build`.
+
+To rebuild and start the full development stack in one step:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+This brings up **postgres**, **redis**, **minio**, **api**, **web**, and **worker**.
 
 ## Project Structure
 

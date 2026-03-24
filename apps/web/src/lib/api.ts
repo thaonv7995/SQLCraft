@@ -249,6 +249,9 @@ export interface ChallengeCatalogItem {
   latestVersionId?: string | null;
   latestVersionNo?: number | null;
   validatorType?: string | null;
+  latestVersionReviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected' | null;
+  latestVersionReviewNotes?: string | null;
+  latestVersionReviewedAt?: string | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -259,6 +262,77 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
     username?: string | null;
     displayName?: string | null;
   };
+}
+
+export interface EditableChallengeDetail {
+  id: string;
+  lessonId: string;
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  sortOrder: number;
+  points: number;
+  status: 'draft' | 'published' | 'archived';
+  publishedVersionId?: string | null;
+  updatedAt: string;
+  createdAt: string;
+  latestVersion: {
+    id: string;
+    versionNo: number;
+    problemStatement: string;
+    hintText?: string | null;
+    expectedResultColumns: string[];
+    referenceSolution?: string | null;
+    validatorType: string;
+    validatorConfig?: Record<string, unknown> | null;
+    isPublished: boolean;
+    reviewStatus: 'pending' | 'approved' | 'changes_requested' | 'rejected';
+    reviewNotes?: string | null;
+    reviewedBy?: string | null;
+    reviewedAt?: string | null;
+    publishedAt?: string | null;
+    createdAt: string;
+  };
+}
+
+export interface ChallengeDraftValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  normalized: {
+    slug: string;
+    expectedResultColumns: string[];
+    referenceSolution?: string | null;
+    validatorConfig?: Record<string, unknown> | null;
+  };
+}
+
+export interface LessonVersionSummary {
+  id: string;
+  lessonId: string;
+  versionNo: number;
+  title: string;
+  isPublished: boolean;
+  schemaTemplateId?: string | null;
+  datasetTemplateId?: string | null;
+  publishedAt?: string | null;
+  createdAt: string;
+}
+
+export interface AdminLessonVersionDetail {
+  id: string;
+  lessonId: string;
+  versionNo: number;
+  title: string;
+  content: string;
+  starterQuery?: string | null;
+  isPublished: boolean;
+  schemaTemplateId?: string | null;
+  datasetTemplateId?: string | null;
+  publishedAt?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
@@ -861,6 +935,9 @@ function normalizeChallengeCatalogItem(item: ChallengeCatalogItem): ChallengeCat
     latestVersionId: item.latestVersionId ?? null,
     latestVersionNo: item.latestVersionNo ?? null,
     validatorType: item.validatorType ?? null,
+    latestVersionReviewStatus: item.latestVersionReviewStatus ?? null,
+    latestVersionReviewNotes: item.latestVersionReviewNotes ?? null,
+    latestVersionReviewedAt: item.latestVersionReviewedAt ?? null,
   };
 }
 
@@ -872,6 +949,51 @@ function normalizeChallengeReviewItem(item: ChallengeReviewItem): ChallengeRevie
       username: item.createdBy?.username ?? null,
       displayName: item.createdBy?.displayName ?? item.createdBy?.username ?? null,
     },
+  };
+}
+
+function normalizeEditableChallengeDetail(detail: EditableChallengeDetail): EditableChallengeDetail {
+  return {
+    ...detail,
+    description: detail.description ?? '',
+    publishedVersionId: detail.publishedVersionId ?? null,
+    latestVersion: {
+      ...detail.latestVersion,
+      hintText: detail.latestVersion.hintText ?? null,
+      expectedResultColumns: Array.isArray(detail.latestVersion.expectedResultColumns)
+        ? detail.latestVersion.expectedResultColumns.filter((value): value is string => typeof value === 'string')
+        : [],
+      referenceSolution: detail.latestVersion.referenceSolution ?? null,
+      validatorConfig:
+        detail.latestVersion.validatorConfig && typeof detail.latestVersion.validatorConfig === 'object'
+          ? detail.latestVersion.validatorConfig
+          : null,
+      reviewNotes: detail.latestVersion.reviewNotes ?? null,
+      reviewedBy: detail.latestVersion.reviewedBy ?? null,
+      reviewedAt: detail.latestVersion.reviewedAt ?? null,
+      publishedAt: detail.latestVersion.publishedAt ?? null,
+    },
+  };
+}
+
+function normalizeLessonVersionSummary(item: LessonVersionSummary): LessonVersionSummary {
+  return {
+    ...item,
+    schemaTemplateId: item.schemaTemplateId ?? null,
+    datasetTemplateId: item.datasetTemplateId ?? null,
+    publishedAt: item.publishedAt ?? null,
+  };
+}
+
+function normalizeAdminLessonVersionDetail(detail: AdminLessonVersionDetail): AdminLessonVersionDetail {
+  return {
+    ...detail,
+    content: detail.content ?? '',
+    starterQuery: detail.starterQuery ?? null,
+    schemaTemplateId: detail.schemaTemplateId ?? null,
+    datasetTemplateId: detail.datasetTemplateId ?? null,
+    publishedAt: detail.publishedAt ?? null,
+    createdBy: detail.createdBy ?? null,
   };
 }
 
@@ -1039,6 +1161,26 @@ export const challengesApi = {
       .get<ChallengeCatalogItem[]>('/challenges/mine')
       .then((r) => r.data.map(normalizeChallengeCatalogItem)),
 
+  validateDraft: (payload: {
+    challengeId?: string;
+    lessonId: string;
+    slug: string;
+    title: string;
+    description?: string;
+    difficulty?: 'beginner' | 'intermediate' | 'advanced';
+    sortOrder?: number;
+    points?: number;
+    problemStatement: string;
+    hintText?: string;
+    expectedResultColumns?: string[];
+    referenceSolution?: string;
+    validatorType?: string;
+    validatorConfig?: Record<string, unknown>;
+  }) =>
+    api
+      .post<ChallengeDraftValidationResult>('/challenges/validate', payload)
+      .then((r) => r.data),
+
   create: (payload: {
     lessonId: string;
     slug: string;
@@ -1054,6 +1196,36 @@ export const challengesApi = {
     validatorType?: string;
     validatorConfig?: Record<string, unknown>;
   }) => api.post<{ challenge: { id: string }; version: { id: string } }>('/challenges', payload).then((r) => r.data),
+
+  createVersion: (
+    challengeId: string,
+    payload: {
+      lessonId: string;
+      slug: string;
+      title: string;
+      description?: string;
+      difficulty?: 'beginner' | 'intermediate' | 'advanced';
+      sortOrder?: number;
+      points?: number;
+      problemStatement: string;
+      hintText?: string;
+      expectedResultColumns?: string[];
+      referenceSolution?: string;
+      validatorType?: string;
+      validatorConfig?: Record<string, unknown>;
+    },
+  ) =>
+    api
+      .post<{ challenge: { id: string }; version: { id: string } }>(
+        `/challenges/${challengeId}/versions`,
+        payload,
+      )
+      .then((r) => r.data),
+
+  getDraft: (challengeId: string) =>
+    api
+      .get<EditableChallengeDetail>(`/challenges/${challengeId}/draft`)
+      .then((r) => normalizeEditableChallengeDetail(r.data)),
 
   getVersion: (id: string) =>
     api
@@ -1085,6 +1257,11 @@ export const challengesApi = {
 
   publishVersion: (versionId: string) =>
     api.post(`/admin/challenge-versions/${versionId}/publish`).then((r) => r.data),
+
+  reviewVersion: (
+    versionId: string,
+    payload: { decision: 'approve' | 'request_changes' | 'reject'; note?: string },
+  ) => api.post(`/admin/challenge-versions/${versionId}/review`, payload).then((r) => r.data),
 };
 
 // ─── Sessions API ─────────────────────────────────────────────────────────────
@@ -1265,6 +1442,30 @@ export const adminApi = {
 
   triggerMigration: () =>
     api.post('/admin/migrations/run').then((r) => r.data),
+
+  listLessonVersions: (lessonId: string) =>
+    api
+      .get<LessonVersionSummary[]>(`/admin/lessons/${lessonId}/versions`)
+      .then((r) => r.data.map(normalizeLessonVersionSummary)),
+
+  getLessonVersion: (versionId: string) =>
+    api
+      .get<AdminLessonVersionDetail>(`/admin/lesson-versions/${versionId}`)
+      .then((r) => normalizeAdminLessonVersionDetail(r.data)),
+
+  createLessonVersion: (payload: {
+    lessonId: string;
+    title: string;
+    content: string;
+    starterQuery?: string;
+    schemaTemplateId?: string;
+    datasetTemplateId?: string;
+  }) => api.post<AdminLessonVersionDetail>('/admin/lesson-versions', payload).then((r) => normalizeAdminLessonVersionDetail(r.data)),
+
+  publishLessonVersion: (versionId: string) =>
+    api.post<AdminLessonVersionDetail>(`/admin/lesson-versions/${versionId}/publish`).then((r) =>
+      normalizeAdminLessonVersionDetail(r.data),
+    ),
 };
 
 // ─── Databases API ────────────────────────────────────────────────────────────

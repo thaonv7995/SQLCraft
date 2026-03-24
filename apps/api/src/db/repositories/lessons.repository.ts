@@ -12,6 +12,19 @@ export type ChallengeSummaryRow = Pick<
   'id' | 'slug' | 'title' | 'description' | 'difficulty' | 'sortOrder' | 'publishedVersionId'
 >;
 
+export type LessonVersionSummaryRow = Pick<
+  LessonVersionRow,
+  | 'id'
+  | 'lessonId'
+  | 'versionNo'
+  | 'title'
+  | 'isPublished'
+  | 'schemaTemplateId'
+  | 'datasetTemplateId'
+  | 'publishedAt'
+  | 'createdAt'
+>;
+
 export class LessonsRepository {
   private get db() {
     return getDb();
@@ -159,6 +172,24 @@ export class LessonsRepository {
       .where(eq(schema.lessonVersions.id, versionId))
       .limit(1);
     return row ?? null;
+  }
+
+  async listVersionsForLesson(lessonId: string): Promise<LessonVersionSummaryRow[]> {
+    return this.db
+      .select({
+        id: schema.lessonVersions.id,
+        lessonId: schema.lessonVersions.lessonId,
+        versionNo: schema.lessonVersions.versionNo,
+        title: schema.lessonVersions.title,
+        isPublished: schema.lessonVersions.isPublished,
+        schemaTemplateId: schema.lessonVersions.schemaTemplateId,
+        datasetTemplateId: schema.lessonVersions.datasetTemplateId,
+        publishedAt: schema.lessonVersions.publishedAt,
+        createdAt: schema.lessonVersions.createdAt,
+      })
+      .from(schema.lessonVersions)
+      .where(eq(schema.lessonVersions.lessonId, lessonId))
+      .orderBy(desc(schema.lessonVersions.versionNo), desc(schema.lessonVersions.createdAt));
   }
 }
 

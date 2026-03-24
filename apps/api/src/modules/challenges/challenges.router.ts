@@ -3,12 +3,18 @@ import type {
   ChallengeAttemptParams,
   ChallengeAttemptsQuery,
   ChallengeLeaderboardQuery,
+  ChallengeParams,
   ChallengeVersionParams,
   CreateChallengeBody,
+  CreateChallengeVersionBody,
+  ReviewChallengeVersionBody,
   SubmitAttemptBody,
+  ValidateChallengeDraftBody,
 } from './challenges.schema';
 import {
   createChallengeHandler,
+  createChallengeVersionHandler,
+  getEditableChallengeHandler,
   submitAttemptHandler,
   getAttemptHandler,
   getChallengeVersionHandler,
@@ -17,6 +23,8 @@ import {
   listUserChallengesHandler,
   listUserAttemptsHandler,
   getChallengeLeaderboardHandler,
+  reviewChallengeVersionHandler,
+  validateChallengeDraftHandler,
 } from './challenges.handler';
 
 export default async function challengesRouter(fastify: FastifyInstance): Promise<void> {
@@ -49,7 +57,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
   fastify.post<{ Body: CreateChallengeBody }>(
     '/v1/challenges',
     {
-      onRequest: [fastify.authenticate],
+      onRequest: [fastify.authenticate, fastify.authorize(['contributor', 'admin'])],
       schema: {
         tags: ['Challenges'],
         summary: 'Create a challenge draft with an initial version',
@@ -76,6 +84,59 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
       },
     },
     createChallengeHandler,
+  );
+
+  fastify.post<{ Body: ValidateChallengeDraftBody }>(
+    '/v1/challenges/validate',
+    {
+      onRequest: [fastify.authenticate, fastify.authorize(['contributor', 'admin'])],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Validate a challenge draft before submission',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    validateChallengeDraftHandler,
+  );
+
+  fastify.get<{ Params: ChallengeParams }>(
+    '/v1/challenges/:id/draft',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Get the latest editable draft version for a challenge',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    getEditableChallengeHandler,
+  );
+
+  fastify.post<{ Params: ChallengeParams; Body: CreateChallengeVersionBody }>(
+    '/v1/challenges/:id/versions',
+    {
+      onRequest: [fastify.authenticate, fastify.authorize(['contributor', 'admin'])],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Create a new draft version for an existing challenge',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    createChallengeVersionHandler,
   );
 
   fastify.get<{ Params: ChallengeVersionParams }>(
@@ -199,5 +260,25 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
       },
     },
     listReviewChallengesHandler,
+  );
+
+  fastify.post<{ Params: ChallengeVersionParams; Body: ReviewChallengeVersionBody }>(
+    '/v1/admin/challenge-versions/:id/review',
+    {
+      onRequest: [fastify.authenticate, fastify.authorize(['admin'])],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Approve, reject, or request changes for a challenge draft version',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    reviewChallengeVersionHandler,
   );
 }

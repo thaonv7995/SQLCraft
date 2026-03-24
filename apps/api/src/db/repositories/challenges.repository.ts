@@ -10,7 +10,20 @@ export type InsertChallenge = InferInsertModel<typeof schema.challenges>;
 export type InsertChallengeVersion = InferInsertModel<typeof schema.challengeVersions>;
 export type InsertChallengeAttempt = InferInsertModel<typeof schema.challengeAttempts>;
 
-export interface PublishedChallengeVersionRow extends ChallengeVersionRow {
+export interface PublishedChallengeVersionRow {
+  id: string;
+  challengeId: string;
+  versionNo: number;
+  problemStatement: string;
+  hintText: string | null;
+  expectedResultColumns: unknown;
+  referenceSolution: string | null;
+  validatorType: string;
+  validatorConfig: unknown;
+  isPublished: boolean;
+  publishedAt: Date | null;
+  createdBy: string | null;
+  createdAt: Date;
   points: number;
 }
 
@@ -86,6 +99,9 @@ export interface ChallengeCatalogRow {
   latestVersionId: string | null;
   latestVersionNo: number | null;
   validatorType: string | null;
+  latestVersionReviewStatus: ChallengeVersionRow['reviewStatus'] | null;
+  latestVersionReviewNotes: string | null;
+  latestVersionReviewedAt: Date | null;
   updatedAt: Date;
   createdAt: Date;
 }
@@ -94,6 +110,37 @@ export interface ReviewChallengeRow extends ChallengeCatalogRow {
   createdById: string | null;
   createdByUsername: string | null;
   createdByDisplayName: string | null;
+}
+
+export interface EditableChallengeDetailRow {
+  id: string;
+  lessonId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  difficulty: ChallengeRow['difficulty'];
+  sortOrder: number;
+  points: number;
+  status: ChallengeRow['status'];
+  publishedVersionId: string | null;
+  createdBy: string | null;
+  updatedAt: Date;
+  createdAt: Date;
+  versionId: string;
+  versionNo: number;
+  problemStatement: string;
+  hintText: string | null;
+  expectedResultColumns: unknown;
+  referenceSolution: string | null;
+  validatorType: string;
+  validatorConfig: unknown;
+  isPublished: boolean;
+  reviewStatus: ChallengeVersionRow['reviewStatus'];
+  reviewNotes: string | null;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  publishedAt: Date | null;
+  versionCreatedAt: Date;
 }
 
 export class ChallengesRepository {
@@ -106,7 +153,17 @@ export class ChallengesRepository {
   ): Promise<
     Map<
       string,
-      Pick<ChallengeVersionRow, 'id' | 'challengeId' | 'versionNo' | 'validatorType'>
+      Pick<
+        ChallengeVersionRow,
+        | 'id'
+        | 'challengeId'
+        | 'versionNo'
+        | 'validatorType'
+        | 'isPublished'
+        | 'reviewStatus'
+        | 'reviewNotes'
+        | 'reviewedAt'
+      >
     >
   > {
     if (challengeIds.length === 0) {
@@ -119,6 +176,10 @@ export class ChallengesRepository {
         challengeId: schema.challengeVersions.challengeId,
         versionNo: schema.challengeVersions.versionNo,
         validatorType: schema.challengeVersions.validatorType,
+        isPublished: schema.challengeVersions.isPublished,
+        reviewStatus: schema.challengeVersions.reviewStatus,
+        reviewNotes: schema.challengeVersions.reviewNotes,
+        reviewedAt: schema.challengeVersions.reviewedAt,
       })
       .from(schema.challengeVersions)
       .where(inArray(schema.challengeVersions.challengeId, challengeIds))
@@ -126,7 +187,17 @@ export class ChallengesRepository {
 
     const latest = new Map<
       string,
-      Pick<ChallengeVersionRow, 'id' | 'challengeId' | 'versionNo' | 'validatorType'>
+      Pick<
+        ChallengeVersionRow,
+        | 'id'
+        | 'challengeId'
+        | 'versionNo'
+        | 'validatorType'
+        | 'isPublished'
+        | 'reviewStatus'
+        | 'reviewNotes'
+        | 'reviewedAt'
+      >
     >();
 
     for (const row of rows) {
@@ -180,6 +251,35 @@ export class ChallengesRepository {
       .where(eq(schema.challengeVersions.id, id))
       .limit(1);
     return row ?? null;
+  }
+
+  async findById(id: string): Promise<ChallengeRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.challenges)
+      .where(eq(schema.challenges.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findByLessonAndSlug(lessonId: string, slug: string): Promise<ChallengeRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.challenges)
+      .where(and(eq(schema.challenges.lessonId, lessonId), eq(schema.challenges.slug, slug)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async getLatestVersionNo(challengeId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ versionNo: schema.challengeVersions.versionNo })
+      .from(schema.challengeVersions)
+      .where(eq(schema.challengeVersions.challengeId, challengeId))
+      .orderBy(desc(schema.challengeVersions.versionNo))
+      .limit(1);
+
+    return row?.versionNo ?? 0;
   }
 
   async findPublishedVersionDetailById(id: string): Promise<PublishedChallengeVersionDetailRow | null> {
@@ -396,6 +496,9 @@ export class ChallengesRepository {
         latestVersionId: latestVersion?.id ?? null,
         latestVersionNo: latestVersion?.versionNo ?? null,
         validatorType: latestVersion?.validatorType ?? null,
+        latestVersionReviewStatus: latestVersion?.reviewStatus ?? null,
+        latestVersionReviewNotes: latestVersion?.reviewNotes ?? null,
+        latestVersionReviewedAt: latestVersion?.reviewedAt ?? null,
       };
     });
   }
@@ -436,6 +539,9 @@ export class ChallengesRepository {
         latestVersionId: latestVersion?.id ?? null,
         latestVersionNo: latestVersion?.versionNo ?? null,
         validatorType: latestVersion?.validatorType ?? null,
+        latestVersionReviewStatus: latestVersion?.reviewStatus ?? null,
+        latestVersionReviewNotes: latestVersion?.reviewNotes ?? null,
+        latestVersionReviewedAt: latestVersion?.reviewedAt ?? null,
       };
     });
   }
@@ -480,8 +586,16 @@ export class ChallengesRepository {
         latestVersionId: latestVersion?.id ?? null,
         latestVersionNo: latestVersion?.versionNo ?? null,
         validatorType: latestVersion?.validatorType ?? null,
+        latestVersionReviewStatus: latestVersion?.reviewStatus ?? null,
+        latestVersionReviewNotes: latestVersion?.reviewNotes ?? null,
+        latestVersionReviewedAt: latestVersion?.reviewedAt ?? null,
       };
-    });
+    }).filter(
+      (row) =>
+        row.latestVersionId !== null &&
+        row.latestVersionReviewStatus === 'pending' &&
+        row.publishedVersionId !== row.latestVersionId,
+    );
   }
 
   async createChallenge(data: Omit<InsertChallenge, 'id' | 'createdAt' | 'updatedAt'>): Promise<ChallengeRow> {
@@ -489,12 +603,52 @@ export class ChallengesRepository {
     return row;
   }
 
+  async updateChallenge(
+    id: string,
+    data: Partial<Omit<InsertChallenge, 'id' | 'createdAt' | 'createdBy'>>,
+  ): Promise<ChallengeRow | null> {
+    const [row] = await this.db
+      .update(schema.challenges)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.challenges.id, id))
+      .returning();
+
+    return row ?? null;
+  }
+
   async createVersion(data: Omit<InsertChallengeVersion, 'id' | 'createdAt'>): Promise<ChallengeVersionRow> {
     const [row] = await this.db.insert(schema.challengeVersions).values(data).returning();
     return row;
   }
 
-  async publishVersion(versionId: string, challengeId: string): Promise<ChallengeVersionRow | null> {
+  async reviewVersion(
+    versionId: string,
+    reviewStatus: ChallengeVersionRow['reviewStatus'],
+    reviewNotes: string | null,
+    reviewedBy: string,
+  ): Promise<ChallengeVersionRow | null> {
+    const [row] = await this.db
+      .update(schema.challengeVersions)
+      .set({
+        reviewStatus,
+        reviewNotes,
+        reviewedBy,
+        reviewedAt: new Date(),
+      })
+      .where(eq(schema.challengeVersions.id, versionId))
+      .returning();
+
+    return row ?? null;
+  }
+
+  async publishVersion(
+    versionId: string,
+    challengeId: string,
+    review?: {
+      reviewedBy?: string;
+      reviewNotes?: string | null;
+    },
+  ): Promise<ChallengeVersionRow | null> {
     const now = new Date();
 
     await this.db
@@ -504,7 +658,14 @@ export class ChallengesRepository {
 
     const [published] = await this.db
       .update(schema.challengeVersions)
-      .set({ isPublished: true, publishedAt: now })
+      .set({
+        isPublished: true,
+        publishedAt: now,
+        reviewStatus: 'approved',
+        reviewNotes: review?.reviewNotes ?? null,
+        reviewedBy: review?.reviewedBy ?? null,
+        reviewedAt: review?.reviewedBy ? now : null,
+      })
       .where(eq(schema.challengeVersions.id, versionId))
       .returning();
 
@@ -514,5 +675,49 @@ export class ChallengesRepository {
       .where(eq(schema.challenges.id, challengeId));
 
     return published ?? null;
+  }
+
+  async findEditableChallengeById(id: string): Promise<EditableChallengeDetailRow | null> {
+    const [row] = await this.db
+      .select({
+        id: schema.challenges.id,
+        lessonId: schema.challenges.lessonId,
+        slug: schema.challenges.slug,
+        title: schema.challenges.title,
+        description: schema.challenges.description,
+        difficulty: schema.challenges.difficulty,
+        sortOrder: schema.challenges.sortOrder,
+        points: schema.challenges.points,
+        status: schema.challenges.status,
+        publishedVersionId: schema.challenges.publishedVersionId,
+        createdBy: schema.challenges.createdBy,
+        updatedAt: schema.challenges.updatedAt,
+        createdAt: schema.challenges.createdAt,
+        versionId: schema.challengeVersions.id,
+        versionNo: schema.challengeVersions.versionNo,
+        problemStatement: schema.challengeVersions.problemStatement,
+        hintText: schema.challengeVersions.hintText,
+        expectedResultColumns: schema.challengeVersions.expectedResultColumns,
+        referenceSolution: schema.challengeVersions.referenceSolution,
+        validatorType: schema.challengeVersions.validatorType,
+        validatorConfig: schema.challengeVersions.validatorConfig,
+        isPublished: schema.challengeVersions.isPublished,
+        reviewStatus: schema.challengeVersions.reviewStatus,
+        reviewNotes: schema.challengeVersions.reviewNotes,
+        reviewedBy: schema.challengeVersions.reviewedBy,
+        reviewedAt: schema.challengeVersions.reviewedAt,
+        publishedAt: schema.challengeVersions.publishedAt,
+        versionCreatedAt: schema.challengeVersions.createdAt,
+      })
+      .from(schema.challengeVersions)
+      .innerJoin(
+        schema.challenges,
+        eq(schema.challengeVersions.challengeId, schema.challenges.id),
+      )
+      .where(eq(schema.challenges.id, id))
+      .orderBy(desc(schema.challengeVersions.versionNo), desc(schema.challengeVersions.createdAt))
+      .limit(1);
+
+    return row ?? null;
   }
 }

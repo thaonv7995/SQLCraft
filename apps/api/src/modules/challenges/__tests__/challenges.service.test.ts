@@ -4,6 +4,7 @@ vi.mock('../../../db/repositories', () => ({
   challengesRepository: {
     findPublishedVersionById: vi.fn(),
     findPublishedVersionDetailById: vi.fn(),
+    findEditableChallengeById: vi.fn(),
     findQueryExecution: vi.fn(),
     listSessionExecutions: vi.fn(),
     countAttempts: vi.fn(),
@@ -15,9 +16,14 @@ vi.mock('../../../db/repositories', () => ({
     listPublishedChallenges: vi.fn(),
     listChallengesForUser: vi.fn(),
     listChallengesForReview: vi.fn(),
+    findById: vi.fn(),
+    findByLessonAndSlug: vi.fn(),
+    getLatestVersionNo: vi.fn(),
     createChallenge: vi.fn(),
+    updateChallenge: vi.fn(),
     createVersion: vi.fn(),
     findVersionById: vi.fn(),
+    reviewVersion: vi.fn(),
     publishVersion: vi.fn(),
   },
   sandboxesRepository: {
@@ -31,23 +37,30 @@ vi.mock('../../../db/repositories', () => ({
 vi.mock('../../../services/query-executor', () => ({
   executeSql: vi.fn(),
   getExplainPlan: vi.fn(),
+  validateSql: vi.fn(),
 }));
 
-import { challengesRepository, sandboxesRepository } from '../../../db/repositories';
-import { executeSql, getExplainPlan } from '../../../services/query-executor';
+import { challengesRepository, lessonsRepository, sandboxesRepository } from '../../../db/repositories';
+import { executeSql, getExplainPlan, validateSql } from '../../../services/query-executor';
 import {
+  createChallengeVersion,
+  getEditableChallenge,
   getChallengeLeaderboard,
   getChallengeVersionDetail,
   listPublishedChallenges,
   listReviewChallenges,
   listUserChallenges,
   listUserAttempts,
+  reviewChallengeVersion,
   submitAttempt,
+  validateChallengeDraft,
 } from '../challenges.service';
-import { NotFoundError } from '../../../lib/errors';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../../lib/errors';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(validateSql).mockReturnValue({ valid: true });
+  vi.mocked(lessonsRepository.existsById).mockResolvedValue(true);
 });
 
 describe('getChallengeVersionDetail()', () => {
@@ -612,6 +625,357 @@ describe('listReviewChallenges()', () => {
         }),
       }),
     ]);
+  });
+});
+
+describe('validateChallengeDraft()', () => {
+  it('validates and normalizes a draft payload before submission', async () => {
+    vi.mocked(challengesRepository.findByLessonAndSlug).mockResolvedValue(null);
+
+    const result = await validateChallengeDraft({
+      lessonId: '11111111-1111-4111-8111-111111111111',
+      slug: 'filter-active-users',
+      title: 'Filter active users',
+      difficulty: 'intermediate',
+      sortOrder: 1,
+      points: 200,
+      description: 'Return active users only.',
+      problemStatement: 'Return active users quickly.',
+      hintText: 'Use the active flag.',
+      expectedResultColumns: ['id', 'email', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+        requiresIndexOptimization: true,
+      },
+    });
+
+    expect(result).toEqual({
+      valid: true,
+      errors: [],
+      warnings: [],
+      normalized: {
+        slug: 'filter-active-users',
+        expectedResultColumns: ['id', 'email'],
+        referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+        validatorConfig: {
+          baselineDurationMs: 200,
+          requiresIndexOptimization: true,
+        },
+      },
+    });
+    expect(validateSql).toHaveBeenCalledWith(
+      'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+    );
+  });
+
+  it('fails when index optimization is enabled without a baseline duration', async () => {
+    vi.mocked(challengesRepository.findByLessonAndSlug).mockResolvedValue(null);
+
+    const result = await validateChallengeDraft({
+      lessonId: '11111111-1111-4111-8111-111111111111',
+      slug: 'filter-active-users',
+      title: 'Filter active users',
+      difficulty: 'intermediate',
+      sortOrder: 1,
+      points: 200,
+      problemStatement: 'Return active users quickly.',
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        requiresIndexOptimization: true,
+      },
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain(
+      'Baseline duration is required when index optimization is enabled.',
+    );
+  });
+});
+
+describe('getEditableChallenge()', () => {
+  it('returns the latest editable challenge version for the owner', async () => {
+    vi.mocked(challengesRepository.findEditableChallengeById).mockResolvedValue({
+      id: 'challenge-1',
+      lessonId: 'lesson-1',
+      slug: 'filter-active-users',
+      title: 'Filter active users',
+      description: null,
+      difficulty: 'intermediate',
+      sortOrder: 1,
+      points: 200,
+      status: 'draft',
+      publishedVersionId: null,
+      createdBy: 'user-1',
+      updatedAt: new Date('2026-03-24T00:00:00.000Z'),
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      versionId: 'challenge-version-1',
+      versionNo: 2,
+      problemStatement: 'Return active users quickly.',
+      hintText: null,
+      expectedResultColumns: ['id', 'email', 123] as never,
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+        requiresIndexOptimization: true,
+      } as never,
+      isPublished: false,
+      reviewStatus: 'changes_requested',
+      reviewNotes: 'Tighten ordering.',
+      reviewedBy: 'admin-1',
+      reviewedAt: new Date('2026-03-24T01:00:00.000Z'),
+      publishedAt: null,
+      versionCreatedAt: new Date('2026-03-24T00:00:00.000Z'),
+    } as never);
+
+    const result = await getEditableChallenge('challenge-1', 'user-1', false);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        id: 'challenge-1',
+        description: '',
+        latestVersion: expect.objectContaining({
+          versionNo: 2,
+          expectedResultColumns: ['id', 'email'],
+          reviewStatus: 'changes_requested',
+          reviewNotes: 'Tighten ordering.',
+        }),
+      }),
+    );
+  });
+
+  it('rejects access when the requester does not own the draft', async () => {
+    vi.mocked(challengesRepository.findEditableChallengeById).mockResolvedValue({
+      id: 'challenge-1',
+      lessonId: 'lesson-1',
+      slug: 'filter-active-users',
+      title: 'Filter active users',
+      description: null,
+      difficulty: 'intermediate',
+      sortOrder: 1,
+      points: 200,
+      status: 'draft',
+      publishedVersionId: null,
+      createdBy: 'user-2',
+      updatedAt: new Date(),
+      createdAt: new Date(),
+      versionId: 'challenge-version-1',
+      versionNo: 1,
+      problemStatement: 'Return active users quickly.',
+      hintText: null,
+      expectedResultColumns: [],
+      referenceSolution: null,
+      validatorType: 'result_set',
+      validatorConfig: null,
+      isPublished: false,
+      reviewStatus: 'pending',
+      reviewNotes: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      publishedAt: null,
+      versionCreatedAt: new Date(),
+    } as never);
+
+    await expect(getEditableChallenge('challenge-1', 'user-1', false)).rejects.toThrow(
+      ForbiddenError,
+    );
+  });
+});
+
+describe('createChallengeVersion()', () => {
+  it('creates the next draft version and updates challenge metadata', async () => {
+    vi.mocked(challengesRepository.findById).mockResolvedValue({
+      id: 'challenge-1',
+      lessonId: 'lesson-1',
+      slug: 'filter-active-users',
+      title: 'Filter active users',
+      description: 'Return active users only.',
+      difficulty: 'intermediate',
+      sortOrder: 1,
+      points: 200,
+      status: 'draft',
+      publishedVersionId: null,
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-24T00:00:00.000Z'),
+    } as never);
+    vi.mocked(challengesRepository.findByLessonAndSlug).mockResolvedValue(null);
+    vi.mocked(challengesRepository.getLatestVersionNo).mockResolvedValue(2);
+    vi.mocked(challengesRepository.updateChallenge).mockResolvedValue({
+      id: 'challenge-1',
+      lessonId: 'lesson-1',
+      slug: 'filter-active-users',
+      title: 'Filter active users v2',
+      description: 'Return active users only.',
+      difficulty: 'advanced',
+      sortOrder: 3,
+      points: 300,
+      status: 'draft',
+      publishedVersionId: null,
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-24T00:30:00.000Z'),
+    } as never);
+    vi.mocked(challengesRepository.createVersion).mockResolvedValue({
+      id: 'challenge-version-3',
+      challengeId: 'challenge-1',
+      versionNo: 3,
+      problemStatement: 'Return active users quickly with ordering.',
+      hintText: 'Use the active flag.',
+      expectedResultColumns: ['id', 'email'] as never,
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+      } as never,
+      isPublished: false,
+      reviewStatus: 'pending',
+      reviewNotes: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      publishedAt: null,
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-24T00:31:00.000Z'),
+    } as never);
+
+    const result = await createChallengeVersion(
+      'challenge-1',
+      {
+        lessonId: '11111111-1111-4111-8111-111111111111',
+        slug: 'filter-active-users',
+        title: 'Filter active users v2',
+        difficulty: 'advanced',
+        sortOrder: 3,
+        points: 300,
+        description: 'Return active users only.',
+        problemStatement: 'Return active users quickly with ordering.',
+        hintText: 'Use the active flag.',
+        expectedResultColumns: ['id', 'email'],
+        referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+        validatorType: 'result_set',
+        validatorConfig: {
+          baselineDurationMs: 200,
+        },
+      },
+      'user-1',
+      false,
+    );
+
+    expect(challengesRepository.updateChallenge).toHaveBeenCalledWith(
+      'challenge-1',
+      expect.objectContaining({
+        title: 'Filter active users v2',
+        difficulty: 'advanced',
+        sortOrder: 3,
+        points: 300,
+      }),
+    );
+    expect(challengesRepository.createVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: 'challenge-1',
+        versionNo: 3,
+        problemStatement: 'Return active users quickly with ordering.',
+      }),
+    );
+    expect(result.version.versionNo).toBe(3);
+  });
+
+  it('rejects resubmission for published challenges', async () => {
+    vi.mocked(challengesRepository.findById).mockResolvedValue({
+      id: 'challenge-1',
+      lessonId: 'lesson-1',
+      slug: 'filter-active-users',
+      title: 'Filter active users',
+      description: 'Return active users only.',
+      difficulty: 'intermediate',
+      sortOrder: 1,
+      points: 200,
+      status: 'published',
+      publishedVersionId: 'challenge-version-2',
+      createdBy: 'user-1',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as never);
+
+    await expect(
+      createChallengeVersion(
+        'challenge-1',
+        {
+          lessonId: '11111111-1111-4111-8111-111111111111',
+          slug: 'filter-active-users',
+          title: 'Filter active users',
+          difficulty: 'intermediate',
+          sortOrder: 1,
+          points: 200,
+          problemStatement: 'Return active users quickly.',
+          referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+          validatorType: 'result_set',
+        },
+        'user-1',
+        false,
+      ),
+    ).rejects.toThrow(ValidationError);
+  });
+});
+
+describe('reviewChallengeVersion()', () => {
+  it('records a changes-requested decision without publishing', async () => {
+    vi.mocked(challengesRepository.findVersionById).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users quickly.',
+      hintText: null,
+      expectedResultColumns: [],
+      referenceSolution: null,
+      validatorType: 'result_set',
+      validatorConfig: null,
+      isPublished: false,
+      reviewStatus: 'pending',
+      reviewNotes: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      publishedAt: null,
+      createdBy: 'user-1',
+      createdAt: new Date(),
+    } as never);
+    vi.mocked(challengesRepository.reviewVersion).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users quickly.',
+      hintText: null,
+      expectedResultColumns: [],
+      referenceSolution: null,
+      validatorType: 'result_set',
+      validatorConfig: null,
+      isPublished: false,
+      reviewStatus: 'changes_requested',
+      reviewNotes: 'Please make ordering explicit.',
+      reviewedBy: 'admin-1',
+      reviewedAt: new Date(),
+      publishedAt: null,
+      createdBy: 'user-1',
+      createdAt: new Date(),
+    } as never);
+
+    const result = await reviewChallengeVersion(
+      'challenge-version-1',
+      'request_changes',
+      'admin-1',
+      'Please make ordering explicit.',
+    );
+
+    expect(challengesRepository.reviewVersion).toHaveBeenCalledWith(
+      'challenge-version-1',
+      'changes_requested',
+      'Please make ordering explicit.',
+      'admin-1',
+    );
+    expect(result.reviewStatus).toBe('changes_requested');
   });
 });
 

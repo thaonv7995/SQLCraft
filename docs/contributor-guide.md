@@ -55,6 +55,17 @@ Update docs when changing:
 - contributor workflow
 - template format
 
+## 6.1 Content Contribution Workflow
+For challenge contributions, the current workflow is:
+
+1. Open the contributor dashboard and create or reopen a draft challenge.
+2. Fill lesson metadata, markdown description, expected result columns, reference SQL, and validator config.
+3. Use the built-in `Preflight` step to validate the draft before submission.
+4. Submit a new draft or a new version of an existing draft.
+5. Wait for admin moderation. Drafts move through `pending`, `approved`, `changes_requested`, or `rejected`.
+
+For lesson updates, admins work with explicit lesson versions instead of editing published content in place.
+
 ## 7. Testing Expectations
 - unit tests for domain logic
 - integration tests for API flows
