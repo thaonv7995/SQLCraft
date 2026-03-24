@@ -46,8 +46,9 @@ export async function uploadFile(
   await client.putObject(config.STORAGE_BUCKET, objectName, buffer, buffer.length, {
     'Content-Type': contentType,
   });
-  // Return public URL
-  const url = new URL(config.STORAGE_ENDPOINT);
+  // Return public URL (use STORAGE_PUBLIC_URL if set, otherwise fall back to STORAGE_ENDPOINT)
+  const baseUrl = config.STORAGE_PUBLIC_URL ?? config.STORAGE_ENDPOINT;
+  const url = new URL(baseUrl);
   return `${url.origin}/${config.STORAGE_BUCKET}/${objectName}`;
 }
 
