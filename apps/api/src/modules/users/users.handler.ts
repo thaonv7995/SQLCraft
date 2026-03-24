@@ -1,10 +1,12 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
-import type { UpdateProfileBody, PaginationQuery } from './users.schema';
+import type { UpdateProfileBody, PaginationQuery, ChangePasswordBody } from './users.schema';
 import {
   getUserProfile,
   updateUserProfile,
+  uploadAvatar,
+  changePassword,
   getUserSessions,
   getUserQueryHistory,
 } from './users.service';
@@ -26,6 +28,34 @@ export async function updateMeHandler(
   const jwtUser = request.user as JwtPayload;
   const updated = await updateUserProfile(jwtUser.sub, request.body);
   reply.send(success(updated, MESSAGES.PROFILE_UPDATED));
+}
+
+export async function uploadAvatarHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const jwtUser = request.user as JwtPayload;
+  const file = await request.file();
+  if (!file) {
+    reply.status(400).send({ success: false, code: '2001', message: 'No file uploaded' });
+    return;
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of file.file) {
+    chunks.push(chunk);
+  }
+  const buffer = Buffer.concat(chunks);
+  const result = await uploadAvatar(jwtUser.sub, buffer, file.mimetype);
+  reply.send(success(result, 'Avatar updated successfully'));
+}
+
+export async function changePasswordHandler(
+  request: FastifyRequest<{ Body: ChangePasswordBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const jwtUser = request.user as JwtPayload;
+  await changePassword(jwtUser.sub, request.body.currentPassword, request.body.newPassword);
+  reply.send(success(null, 'Password changed successfully'));
 }
 
 export async function getMySessionsHandler(

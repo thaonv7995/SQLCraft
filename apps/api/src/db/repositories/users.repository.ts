@@ -212,6 +212,46 @@ export class UsersRepository {
     return { items, total: countRows[0]?.total ?? 0 };
   }
 
+  async getUserStats(userId: string): Promise<{
+    queriesRun: number;
+    completedChallenges: number;
+    activeSessions: number;
+    totalPoints: number;
+    currentStreak: number;
+  }> {
+    const db = this.db;
+
+    const [queriesResult, challengesResult, sessionsResult] = await Promise.all([
+      // Count queries run via sessions owned by user
+      db
+        .select({ total: count() })
+        .from(schema.queryExecutions)
+        .innerJoin(schema.learningSessions, eq(schema.queryExecutions.learningSessionId, schema.learningSessions.id))
+        .where(eq(schema.learningSessions.userId, userId)),
+
+      // Count passed challenge attempts
+      db
+        .select({ total: count() })
+        .from(schema.challengeAttempts)
+        .innerJoin(schema.learningSessions, eq(schema.challengeAttempts.learningSessionId, schema.learningSessions.id))
+        .where(and(eq(schema.learningSessions.userId, userId), eq(schema.challengeAttempts.status, 'passed'))),
+
+      // Count active learning sessions
+      db
+        .select({ total: count() })
+        .from(schema.learningSessions)
+        .where(and(eq(schema.learningSessions.userId, userId), eq(schema.learningSessions.status, 'active'))),
+    ]);
+
+    return {
+      queriesRun: queriesResult[0]?.total ?? 0,
+      completedChallenges: challengesResult[0]?.total ?? 0,
+      activeSessions: sessionsResult[0]?.total ?? 0,
+      totalPoints: 0,
+      currentStreak: 0,
+    };
+  }
+
   async clearUserRoles(userId: string): Promise<void> {
     await this.db.delete(schema.userRoles).where(eq(schema.userRoles.userId, userId));
   }

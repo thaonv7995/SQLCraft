@@ -5,6 +5,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import jwt from '@fastify/jwt';
+import multipart from '@fastify/multipart';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 
@@ -40,6 +41,9 @@ async function buildApp() {
       level: config.LOG_LEVEL,
     },
   });
+
+  // Multipart (file uploads) — 5 MB limit for avatars
+  await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 
   // CORS
   await app.register(cors, {

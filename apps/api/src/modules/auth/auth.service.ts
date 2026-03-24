@@ -179,7 +179,10 @@ export async function getMe(userId: string): Promise<UserProfile> {
     throw new UnauthorizedError('User not found');
   }
 
-  const roles = await usersRepository.getRoleNames(user.id);
+  const [roles, stats] = await Promise.all([
+    usersRepository.getRoleNames(user.id),
+    usersRepository.getUserStats(user.id),
+  ]);
 
   return {
     id: user.id,
@@ -190,6 +193,7 @@ export async function getMe(userId: string): Promise<UserProfile> {
     bio: user.bio,
     status: user.status,
     roles,
+    stats,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,

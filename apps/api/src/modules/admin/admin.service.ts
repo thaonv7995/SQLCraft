@@ -139,12 +139,10 @@ export async function listUsers(query: ListUsersQuery): Promise<ListUsersResult>
   });
   return {
     items,
-    meta: {
-      page: query.page,
-      limit: query.limit,
-      total,
-      totalPages: Math.ceil(total / query.limit),
-    },
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages: Math.ceil(total / query.limit),
   };
 }
 
