@@ -166,6 +166,61 @@ export interface LessonVersion {
   schemaTemplate: SchemaTemplateSummary | null;
 }
 
+export interface ChallengeVersionDetail {
+  id: string;
+  challengeId: string;
+  lessonId: string;
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  sortOrder: number;
+  problemStatement: string;
+  hintText: string | null;
+  expectedResultColumns: string[];
+  validatorType: string;
+  publishedAt?: string | null;
+  createdAt: string;
+}
+
+export interface ChallengeEvaluation {
+  isCorrect: boolean;
+  score?: number;
+  correctnessScore?: number;
+  performanceScore?: number;
+  feedbackText?: string;
+}
+
+export interface ChallengeAttempt {
+  id: string;
+  learningSessionId: string;
+  challengeVersionId: string;
+  queryExecutionId: string;
+  attemptNo: number;
+  status: 'pending' | 'passed' | 'failed' | 'error';
+  score: number | null;
+  evaluation: ChallengeEvaluation | null;
+  submittedAt: string;
+  queryExecution: {
+    sqlText: string;
+    status: string;
+    rowsReturned: number | null;
+    durationMs: number | null;
+  };
+}
+
+export interface ChallengeLeaderboardEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string | null;
+  bestScore: number;
+  attemptsCount: number;
+  passedAttempts: number;
+  lastSubmittedAt: string;
+}
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
 export interface LearningSession {
@@ -461,6 +516,19 @@ function normalizeLessonVersion(version: LessonVersion): LessonVersion {
   };
 }
 
+function normalizeChallengeVersionDetail(
+  detail: ChallengeVersionDetail,
+): ChallengeVersionDetail {
+  return {
+    ...detail,
+    description: detail.description ?? '',
+    hintText: detail.hintText ?? null,
+    expectedResultColumns: Array.isArray(detail.expectedResultColumns)
+      ? detail.expectedResultColumns.filter((value): value is string => typeof value === 'string')
+      : [],
+  };
+}
+
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 
 const api: AxiosInstance = axios.create({
@@ -612,6 +680,31 @@ export const lessonsApi = {
     api.patch<Lesson>(`/lessons/${id}`, payload).then((r) => r.data),
 
   delete: (id: string) => api.delete(`/lessons/${id}`).then((r) => r.data),
+};
+
+export const challengesApi = {
+  getVersion: (id: string) =>
+    api
+      .get<ChallengeVersionDetail>(`/challenge-versions/${id}`)
+      .then((r) => normalizeChallengeVersionDetail(r.data)),
+
+  submitAttempt: (payload: {
+    learningSessionId: string;
+    challengeVersionId: string;
+    queryExecutionId: string;
+  }) => api.post<ChallengeAttempt>('/challenge-attempts', payload).then((r) => r.data),
+
+  listAttempts: (challengeVersionId: string) =>
+    api
+      .get<ChallengeAttempt[]>('/challenge-attempts', { params: { challengeVersionId } })
+      .then((r) => r.data),
+
+  getLeaderboard: (challengeVersionId: string, limit = 10) =>
+    api
+      .get<ChallengeLeaderboardEntry[]>(`/challenge-versions/${challengeVersionId}/leaderboard`, {
+        params: { limit },
+      })
+      .then((r) => r.data),
 };
 
 // ─── Sessions API ─────────────────────────────────────────────────────────────

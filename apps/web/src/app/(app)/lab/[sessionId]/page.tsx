@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
 import toast from 'react-hot-toast';
 import { useExecuteQuery, useExplainQuery, useSessionStatus } from '@/hooks/use-query-execution';
@@ -19,7 +20,7 @@ import {
   TableEmpty,
 } from '@/components/ui/table';
 import { cn, formatDuration, formatRows, formatRelativeTime, truncateSql } from '@/lib/utils';
-import type { QueryResultColumn } from '@/lib/api';
+import { challengesApi, lessonsApi, type QueryResultColumn } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
 
@@ -90,6 +91,7 @@ function SqlEditorPanel() {
       onChange={setQuery}
       onExecute={handleExecute}
       placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
+      testId="lab-sql-editor"
     />
   );
 }
@@ -437,6 +439,7 @@ export default function LabPage() {
     isExecuting,
     isExplaining,
     lastExecution,
+    queryHistory,
     results,
     error,
     currentQuery,
@@ -445,6 +448,7 @@ export default function LabPage() {
 
   const { mutate: executeQuery } = useExecuteQuery();
   const { mutate: explainQuery } = useExplainQuery();
+  const queryClient = useQueryClient();
 
   const {
     data: session,
@@ -454,10 +458,90 @@ export default function LabPage() {
     refetch: refetchSession,
   } = useSessionStatus(sessionId);
   const lessonContext = useMemo(() => readLabBootstrap(sessionId), [sessionId]);
-  const entryPath = lessonContext?.challengePath ?? lessonContext?.lessonPath;
-  const entryLabel = lessonContext?.challengePath ? 'Back to challenge' : 'Back to lesson';
+  const { data: sessionLessonVersion } = useQuery({
+    queryKey: ['lab-session-lesson-version', session?.lessonVersionId],
+    queryFn: () => lessonsApi.getVersion(session!.lessonVersionId),
+    enabled: Boolean(session?.lessonVersionId),
+    staleTime: 60_000,
+  });
+  const { data: challengeAttempts = [] } = useQuery({
+    queryKey: ['challenge-attempts', session?.challengeVersionId],
+    queryFn: () => challengesApi.listAttempts(session!.challengeVersionId!),
+    enabled: Boolean(session?.challengeVersionId),
+    staleTime: 15_000,
+  });
+  const fallbackLessonPath = sessionLessonVersion?.lesson?.trackId
+    ? `/tracks/${sessionLessonVersion.lesson.trackId}/lessons/${sessionLessonVersion.lessonId}`
+    : null;
+  const fallbackChallenge = session?.challengeVersionId
+    ? sessionLessonVersion?.challenges.find(
+        (challenge) => challenge.publishedVersionId === session.challengeVersionId,
+      ) ?? null
+    : null;
+  const fallbackChallengePath =
+    fallbackLessonPath && fallbackChallenge
+      ? `${fallbackLessonPath}/challenges/${fallbackChallenge.id}`
+      : null;
+  const entryPath =
+    lessonContext?.challengePath ??
+    lessonContext?.lessonPath ??
+    fallbackChallengePath ??
+    fallbackLessonPath;
+  const entryLabel = lessonContext?.challengePath || fallbackChallengePath
+    ? 'Back to challenge'
+    : entryPath
+      ? 'Back to lesson'
+      : null;
   const modeLabel =
     lessonContext?.mode === 'challenge' || session?.challengeVersionId ? 'Challenge' : 'Lesson';
+  const lessonTitle = session?.lessonTitle ?? lessonContext?.lessonTitle ?? sessionLessonVersion?.lesson?.title;
+  const challengeTitle = lessonContext?.challengeTitle ?? fallbackChallenge?.title;
+  const latestSuccessfulExecution =
+    queryHistory.find((execution) => execution.status === 'success') ?? null;
+  const bestChallengeAttempt = challengeAttempts.reduce<(typeof challengeAttempts)[number] | null>(
+    (best, attempt) => {
+      if (!best) {
+        return attempt;
+      }
+
+      return (attempt.score ?? -1) > (best.score ?? -1) ? attempt : best;
+    },
+    null,
+  );
+  const latestChallengeAttempt = challengeAttempts[0] ?? null;
+  const submitAttemptMutation = useMutation({
+    mutationFn: async () => {
+      if (!session?.challengeVersionId) {
+        throw new Error('This lab session is not linked to a published challenge');
+      }
+
+      if (!latestSuccessfulExecution) {
+        throw new Error('Run a successful query before submitting an attempt');
+      }
+
+      return challengesApi.submitAttempt({
+        learningSessionId: sessionId,
+        challengeVersionId: session.challengeVersionId,
+        queryExecutionId: latestSuccessfulExecution.id,
+      });
+    },
+    onSuccess: (attempt) => {
+      queryClient.invalidateQueries({
+        queryKey: ['challenge-attempts', session?.challengeVersionId],
+      });
+      const feedback = attempt.evaluation?.feedbackText;
+      toast.success(
+        feedback
+          ? `Attempt scored ${attempt.score ?? 0} pts. ${feedback}`
+          : `Attempt scored ${attempt.score ?? 0} pts.`,
+        { duration: 4000 },
+      );
+      setActiveTab('history');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to submit challenge attempt');
+    },
+  });
 
   useEffect(() => {
     const bootstrap = readLabBootstrap(sessionId);
@@ -583,12 +667,33 @@ export default function LabPage() {
               >
                 Format
               </Button>
+              {session?.challengeVersionId ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={submitAttemptMutation.isPending}
+                  disabled={
+                    !latestSuccessfulExecution ||
+                    session?.status === 'provisioning' ||
+                    submitAttemptMutation.isPending
+                  }
+                  onClick={() => submitAttemptMutation.mutate()}
+                  leftIcon={<span className="material-symbols-outlined text-[18px]">flag</span>}
+                  title={
+                    latestSuccessfulExecution
+                      ? 'Submit the latest successful query execution for challenge scoring'
+                      : 'Run a successful query first'
+                  }
+                >
+                  Submit Attempt
+                </Button>
+              ) : null}
             </div>
             <DatasetSizeSelector />
           </div>
 
           <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {entryPath && (
+            {entryPath && entryLabel && (
               <Link
                 href={entryPath}
                 className="hidden items-center gap-1 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant transition-colors hover:text-on-surface md:inline-flex"
@@ -600,16 +705,26 @@ export default function LabPage() {
             <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant md:inline-flex">
               {modeLabel}
             </span>
-            {(session?.lessonTitle ?? lessonContext?.lessonTitle) && (
+            {lessonTitle && (
               <span className="hidden max-w-[14rem] truncate text-xs text-on-surface-variant md:block">
-                {session?.lessonTitle ?? lessonContext?.lessonTitle}
+                {lessonTitle}
               </span>
             )}
-            {lessonContext?.challengeTitle && (
+            {challengeTitle && (
               <span className="hidden max-w-[14rem] truncate text-xs text-outline lg:block">
-                {lessonContext.challengeTitle}
+                {challengeTitle}
               </span>
             )}
+            {session?.challengeVersionId && bestChallengeAttempt ? (
+              <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant lg:inline-flex">
+                Best {bestChallengeAttempt.score ?? 0} pts
+              </span>
+            ) : null}
+            {session?.challengeVersionId && latestChallengeAttempt?.evaluation?.feedbackText ? (
+              <span className="hidden max-w-[18rem] truncate text-[11px] text-outline xl:block">
+                {latestChallengeAttempt.evaluation.feedbackText}
+              </span>
+            ) : null}
             <div className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1">
               <span className="text-[10px] font-medium uppercase tracking-wider text-outline">Sandbox</span>
               <span

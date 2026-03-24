@@ -4,6 +4,7 @@ vi.mock('../../../db/repositories', () => ({
   sessionsRepository: {
     findPublishedLessonVersion: vi.fn(),
     findPublishedChallengeVersion: vi.fn(),
+    findByUserId: vi.fn(),
     findById: vi.fn(),
     createSession: vi.fn(),
     createSandbox: vi.fn(),
@@ -16,7 +17,7 @@ vi.mock('../../../db/repositories', () => ({
 }));
 
 import { sessionsRepository } from '../../../db/repositories';
-import { createSession, getSession, endSession } from '../sessions.service';
+import { createSession, getSession, endSession, listUserSessions } from '../sessions.service';
 import { NotFoundError, ForbiddenError } from '../../../lib/errors';
 import type { SessionRow, SandboxRow } from '../../../db/repositories';
 
@@ -64,6 +65,35 @@ const makeSandbox = (overrides = {}): SandboxRow => ({
 });
 
 beforeEach(() => { vi.clearAllMocks(); });
+
+// ─── listUserSessions ────────────────────────────────────────────────────────
+
+describe('listUserSessions()', () => {
+  it('includes challengeVersionId so lesson pages can distinguish challenge sessions', async () => {
+    vi.mocked(sessionsRepository.findByUserId).mockResolvedValue([
+      {
+        ...makeSession({
+          status: 'active',
+          challengeVersionId: 'challenge-version-1',
+        }),
+        sandboxStatus: 'ready',
+        lessonTitle: 'Intro to SELECT',
+      },
+    ]);
+
+    const result = await listUserSessions('user-1');
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'session-1',
+        lessonVersionId: 'lv-1',
+        challengeVersionId: 'challenge-version-1',
+        lessonTitle: 'Intro to SELECT',
+        sandboxStatus: 'ready',
+      }),
+    ]);
+  });
+});
 
 // ─── createSession ────────────────────────────────────────────────────────────
 

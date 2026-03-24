@@ -6,12 +6,12 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { LessonMarkdown } from '@/components/lesson/lesson-markdown';
-import { DifficultyBadge } from '@/components/ui/badge';
+import { Badge, DifficultyBadge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { lessonsApi, sessionsApi, tracksApi } from '@/lib/api';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
-import { formatMinutes } from '@/lib/utils';
+import { formatMinutes, formatRelativeTime } from '@/lib/utils';
 
 function LessonPageSkeleton() {
   return (
@@ -24,6 +24,29 @@ function LessonPageSkeleton() {
       </div>
     </div>
   );
+}
+
+function isResumableSession(status: string | null | undefined): boolean {
+  return status === 'active' || status === 'provisioning' || status === 'paused';
+}
+
+function getSchemaTableNames(definition: unknown): string[] {
+  if (!definition || typeof definition !== 'object') {
+    return [];
+  }
+
+  const maybeTables = (definition as { tables?: unknown }).tables;
+  if (!Array.isArray(maybeTables)) {
+    return [];
+  }
+
+  return maybeTables
+    .map((table) =>
+      table && typeof table === 'object' && typeof (table as { name?: unknown }).name === 'string'
+        ? (table as { name: string }).name
+        : null,
+    )
+    .filter((tableName): tableName is string => Boolean(tableName));
 }
 
 export default function LessonPage() {
@@ -60,12 +83,52 @@ export default function LessonPage() {
     staleTime: 60_000,
   });
 
+  const { data: sessions } = useQuery({
+    queryKey: ['sessions'],
+    queryFn: sessionsApi.list,
+    enabled: Boolean(lesson?.publishedVersionId),
+    staleTime: 30_000,
+  });
+
   const isLoading = trackLoading || lessonLoading || (Boolean(lesson?.publishedVersionId) && versionLoading);
   const error = lessonError ?? versionError;
 
   const lessonTitle = lessonVersion?.lesson?.title ?? lesson?.title ?? 'Lesson';
   const estimatedMinutes = lessonVersion?.lesson?.estimatedMinutes ?? lesson?.estimatedMinutes ?? 0;
   const challengeCount = lessonVersion?.challenges.length ?? 0;
+  const starterQuery = lessonVersion?.starterQuery?.trim() ?? '';
+  const starterQueryPreview = starterQuery
+    ? starterQuery.split('\n').slice(0, 8).join('\n')
+    : '';
+  const schemaTableNames = getSchemaTableNames(lessonVersion?.schemaTemplate?.definition);
+  const schemaPreviewTables = schemaTableNames.slice(0, 4);
+  const orderedTrackLessons = (track?.lessons ?? [])
+    .slice()
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
+  const lessonIndex = lesson
+    ? orderedTrackLessons.findIndex((trackLesson) => trackLesson.id === lesson.id)
+    : -1;
+  const lessonOrderLabel = lesson
+    ? lessonIndex >= 0 && orderedTrackLessons.length > 0
+      ? `Lesson ${lessonIndex + 1} of ${orderedTrackLessons.length}`
+      : lesson.sortOrder > 0
+        ? `Lesson ${lesson.sortOrder}`
+        : null
+    : null;
+  const resumableLessonSession =
+    lessonVersion && sessions
+      ? sessions.find(
+          (session) =>
+            session.lessonVersionId === lessonVersion.id &&
+            !session.challengeVersionId &&
+            isResumableSession(session.status),
+        )
+      : undefined;
+  const resumeActivityLabel = resumableLessonSession
+    ? `Resume your current sandbox from ${formatRelativeTime(
+        resumableLessonSession.lastActivityAt ?? resumableLessonSession.startedAt,
+      )}.`
+    : null;
 
   const handleStartLab = async () => {
     if (!lessonVersion) {
@@ -91,6 +154,22 @@ export default function LessonPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to start lab');
       setStartingLab(false);
     }
+  };
+
+  const handleContinueLab = () => {
+    if (!resumableLessonSession) {
+      return;
+    }
+
+    saveLabBootstrap(resumableLessonSession.id, {
+      mode: 'lesson',
+      lessonPath: `/tracks/${params.trackId}/lessons/${params.lessonId}`,
+      lessonTitle,
+      starterQuery: lessonVersion?.starterQuery ?? null,
+      starterQueryConsumed: true,
+    });
+
+    router.push(`/lab/${resumableLessonSession.id}`);
   };
 
   if (isLoading) {
@@ -148,6 +227,11 @@ export default function LessonPage() {
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
               <div className="mb-4 flex flex-wrap items-center gap-2">
+                {lessonOrderLabel ? (
+                  <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
+                    {lessonOrderLabel}
+                  </span>
+                ) : null}
                 <DifficultyBadge difficulty={lesson.difficulty} />
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
                   {formatMinutes(estimatedMinutes)}
@@ -165,15 +249,37 @@ export default function LessonPage() {
             </div>
 
             <div className="flex w-full flex-col gap-2 sm:w-auto">
-              <Button
-                variant="primary"
-                size="lg"
-                loading={startingLab}
-                onClick={handleStartLab}
-                leftIcon={<span className="material-symbols-outlined text-lg">play_arrow</span>}
-              >
-                Start Lab
-              </Button>
+              {resumableLessonSession ? (
+                <>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    onClick={handleContinueLab}
+                    leftIcon={<span className="material-symbols-outlined text-lg">play_circle</span>}
+                  >
+                    Continue Lab
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    loading={startingLab}
+                    onClick={handleStartLab}
+                    leftIcon={<span className="material-symbols-outlined text-lg">add_circle</span>}
+                  >
+                    Start New Lab
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  loading={startingLab}
+                  onClick={handleStartLab}
+                  leftIcon={<span className="material-symbols-outlined text-lg">play_arrow</span>}
+                >
+                  Start Lab
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="lg"
@@ -182,6 +288,11 @@ export default function LessonPage() {
               >
                 View all lessons
               </Button>
+              {resumeActivityLabel ? (
+                <p className="max-w-64 text-xs leading-5 text-on-surface-variant">
+                  {resumeActivityLabel}
+                </p>
+              ) : null}
             </div>
           </div>
         </CardContent>
@@ -215,7 +326,7 @@ export default function LessonPage() {
               <div className="rounded-xl bg-surface-container-high p-3">
                 <p className="font-medium text-on-surface">2. Start the lab</p>
                 <p className="mt-1 text-on-surface-variant">
-                  SQLCraft will preload the starter query from this lesson version.
+                  SQLCraft will resume your existing lesson sandbox when available, or preload the starter query into a fresh one.
                 </p>
               </div>
               <div className="rounded-xl bg-surface-container-high p-3">
@@ -224,6 +335,102 @@ export default function LessonPage() {
                   Optional challenges live here next. The layout already reserves that slot.
                 </p>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border border-outline-variant/10">
+            <CardHeader>
+              <CardTitle>Lab Prep</CardTitle>
+              <CardDescription>
+                Review what opens in the workbench before launching the sandbox.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={starterQuery ? 'ready' : 'draft'}>
+                  {starterQuery ? 'Starter query ready' : 'No starter query'}
+                </Badge>
+                {lessonVersion?.isPublished ? <StatusBadge status="published" /> : null}
+              </div>
+
+              {starterQuery ? (
+                <div className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-3">
+                  <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-outline">
+                    Query Preview
+                  </p>
+                  <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[12px] leading-6 text-on-surface-variant">
+                    {starterQueryPreview}
+                    {starterQueryPreview !== starterQuery ? '\n…' : ''}
+                  </pre>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
+                  This lesson starts with a blank editor. You can still launch the lab and write the first query from scratch.
+                </div>
+              )}
+
+              <p className="text-xs leading-5 text-on-surface-variant">
+                {resumableLessonSession
+                  ? 'Continue Lab keeps your current sandbox and editor state. Start New Lab provisions a fresh environment.'
+                  : 'Start Lab provisions a new sandbox and preloads this query into the editor once.'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-2xl border border-outline-variant/10">
+            <CardHeader>
+              <CardTitle>Schema Context</CardTitle>
+              <CardDescription>
+                Database shape bundled with this lesson version.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {lessonVersion?.schemaTemplate ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium text-on-surface">
+                      {lessonVersion.schemaTemplate.name}
+                    </p>
+                    <Badge variant="published">v{lessonVersion.schemaTemplate.version}</Badge>
+                    <StatusBadge status={lessonVersion.schemaTemplate.status} />
+                  </div>
+                  <p className="text-sm leading-6 text-on-surface-variant">
+                    {lessonVersion.schemaTemplate.description ||
+                      'This lesson uses a published schema template without an extra description yet.'}
+                  </p>
+                  <div className="rounded-xl bg-surface-container-high p-3">
+                    <p className="text-[11px] uppercase tracking-wider text-outline">
+                      Tables
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-on-surface">
+                      {schemaTableNames.length > 0
+                        ? `${schemaTableNames.length} table${schemaTableNames.length > 1 ? 's' : ''}`
+                        : 'Table count unavailable'}
+                    </p>
+                    {schemaPreviewTables.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {schemaPreviewTables.map((tableName) => (
+                          <span
+                            key={tableName}
+                            className="rounded-full bg-surface-container-lowest px-2.5 py-1 font-mono text-[11px] text-on-surface-variant"
+                          >
+                            {tableName}
+                          </span>
+                        ))}
+                        {schemaTableNames.length > schemaPreviewTables.length ? (
+                          <span className="rounded-full bg-surface-container-lowest px-2.5 py-1 text-[11px] text-outline">
+                            +{schemaTableNames.length - schemaPreviewTables.length} more
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
+                  No schema template is linked to this lesson version yet.
+                </div>
+              )}
             </CardContent>
           </Card>
 

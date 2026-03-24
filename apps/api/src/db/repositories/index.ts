@@ -51,7 +51,14 @@ export type { SessionRow, SandboxRow } from './sessions.repository';
 export type { QueryExecutionRow, QueryExecutionPlanRow } from './queries.repository';
 
 // ─── Types: Challenges ────────────────────────────────────────────────────────
-export type { ChallengeRow, ChallengeVersionRow, ChallengeAttemptRow } from './challenges.repository';
+export type {
+  ChallengeRow,
+  ChallengeVersionRow,
+  ChallengeAttemptRow,
+  ChallengeAttemptWithExecutionRow,
+  ChallengeLeaderboardAttemptRow,
+  PublishedChallengeVersionDetailRow,
+} from './challenges.repository';
 
 // ─── Types: Admin ─────────────────────────────────────────────────────────────
 export type { SystemHealthStats } from './admin.repository';

@@ -136,29 +136,29 @@ These items should be built into the Lesson Engine implementation now, even if t
 
 ### Content and API Shape
 
-- [ ] Ensure the lesson page fetches and understands the `challenges` array returned from `GET /lesson-versions/:id`, even if V1 only shows summary cards
-- [ ] Define frontend types for challenge summary payloads alongside lesson version types
-- [ ] Preserve `publishedVersionId` at the lesson-card level because it is the bridge to both lab and challenge context
+- [x] Ensure the lesson page fetches and understands the `challenges` array returned from `GET /lesson-versions/:id`, even if V1 only shows summary cards
+- [x] Define frontend types for challenge summary payloads alongside lesson version types
+- [x] Preserve `publishedVersionId` at the lesson-card level because it is the bridge to both lab and challenge context
 
 ### Routing and Navigation
 
-- [ ] Design the lesson page to include a dedicated section for `Challenges in this lesson`
-- [ ] Reserve a route pattern for challenge pages that nests naturally under lesson context, e.g. `/tracks/[trackId]/lessons/[lessonId]/challenges/[challengeId]`
-- [ ] Add a clear `Back to lesson` path from any future challenge page and from the lab
+- [x] Design the lesson page to include a dedicated section for `Challenges in this lesson`
+- [x] Reserve a route pattern for challenge pages that nests naturally under lesson context, e.g. `/tracks/[trackId]/lessons/[lessonId]/challenges/[challengeId]`
+- [x] Add a clear `Back to lesson` path from any future challenge page and from the lab
 
 ### Session Strategy
 
-- [ ] Keep lesson-driven sessions valid when `challengeVersionId` is absent
-- [ ] Make sure the session creation flow can later accept `challengeVersionId` without changing the learner lesson route structure
-- [ ] Keep query history at the session level so challenge evaluation can reuse the same executions
+- [x] Keep lesson-driven sessions valid when `challengeVersionId` is absent
+- [x] Make sure the session creation flow can later accept `challengeVersionId` without changing the learner lesson route structure
+- [x] Keep query history at the session level so challenge evaluation can reuse the same executions
 
 ### Lab Integration
 
-- [ ] Keep lab entry generic enough that it can be launched from:
+- [x] Keep lab entry generic enough that it can be launched from:
   - lesson reading
   - challenge solving
   - direct session resume
-- [ ] Avoid baking lesson-only assumptions into lab state names if challenge mode will reuse the same workbench
+- [x] Avoid baking lesson-only assumptions into lab state names if challenge mode will reuse the same workbench
 
 ## Data and Schema Decisions to Prepare Early
 
@@ -254,98 +254,98 @@ Recommended MVP behavior:
 
 ### Phase 1: Contract Cleanup
 
-- [ ] Audit and normalize the frontend `Track` and `Lesson` types in `apps/web/src/lib/api.ts` against API responses
-- [ ] Remove or replace unsupported frontend assumptions such as `estimatedHours`, `tags`, `thumbnailUrl`, and `isPublished` unless the API is extended to provide them
-- [ ] Decide whether `/v1/tracks` should truly support difficulty filtering; if yes, add backend schema/service support, otherwise remove the unused frontend query param
-- [ ] Add explicit frontend types for `LessonVersion`, `LessonVersionWithDetails`, and any nested lesson/challenge summary payloads
+- [x] Audit and normalize the frontend `Track` and `Lesson` types in `apps/web/src/lib/api.ts` against API responses
+- [x] Remove or replace unsupported frontend assumptions such as `estimatedHours`, `tags`, `thumbnailUrl`, and `isPublished` unless the API is extended to provide them
+- [x] Decide whether `/v1/tracks` should truly support difficulty filtering; if yes, add backend schema/service support, otherwise remove the unused frontend query param
+- [x] Add explicit frontend types for `LessonVersion`, `LessonVersionWithDetails`, and any nested lesson/challenge summary payloads
 
 ### Phase 2: Lesson Data Access
 
-- [ ] Extend `lessonsApi` in `apps/web/src/lib/api.ts` with `getVersion(versionId)`
-- [ ] Decide the canonical learner route:
+- [x] Extend `lessonsApi` in `apps/web/src/lib/api.ts` with `getVersion(versionId)`
+- [x] Decide the canonical learner route:
   - recommended: `/tracks/[trackId]/lessons/[lessonId]`
   - alternative: `/lesson-versions/[versionId]`
-- [ ] Add route-level fetching logic for lesson metadata plus published version details
-- [ ] Define not-found and unpublished-state behavior for lesson access
+- [x] Add route-level fetching logic for lesson metadata plus published version details
+- [x] Define not-found and unpublished-state behavior for lesson access
 
 ### Phase 3: Markdown Rendering
 
-- [ ] Add a Markdown rendering stack to `apps/web` with safe defaults
-- [ ] Support the minimum Markdown feature set:
+- [x] Add a Markdown rendering stack to `apps/web` with safe defaults
+- [x] Support the minimum Markdown feature set:
   - headings
   - paragraphs
   - ordered/unordered lists
   - inline code
   - fenced code blocks
   - blockquotes
-- [ ] Implement a reusable lesson content component, e.g. `LessonMarkdown`
-- [ ] Add SQL code block styling that visually matches the product's lab/editor aesthetic
-- [ ] Explicitly block raw HTML rendering unless a later requirement justifies it
+- [x] Implement a reusable lesson content component, e.g. `LessonMarkdown`
+- [x] Add SQL code block styling that visually matches the product's lab/editor aesthetic
+- [x] Explicitly block raw HTML rendering unless a later requirement justifies it
 
 ### Phase 4: Lesson Page UI
 
-- [ ] Build the learner lesson page shell and content layout
-- [ ] Include a lesson header with:
+- [x] Build the learner lesson page shell and content layout
+- [x] Include a lesson header with:
   - track context
   - lesson title
   - difficulty
   - estimated minutes
   - lesson order within the track
-- [ ] Include primary CTAs:
+- [x] Include primary CTAs:
   - `Start Lab`
   - `Continue Lab` when an active session exists
   - optional `Back to Track`
-- [ ] Include an optional right rail or footer area for:
+- [x] Include an optional right rail or footer area for:
   - starter query preview
   - challenge summary count
   - schema/template context
-- [ ] Ensure the page is readable on mobile and comfortable on wide desktop screens
+- [x] Ensure the page is readable on mobile and comfortable on wide desktop screens
 
 ### Phase 5: Track Detail Improvements
 
-- [ ] Change lesson cards on `/tracks/[trackId]` so the primary click target opens the lesson page instead of starting the lab immediately
-- [ ] Keep a secondary quick action for `Start Lab` only if the lesson is already available and product still wants a shortcut
-- [ ] Revisit lock, available, in-progress, completed states so they map to real backend/user state instead of placeholder-only assumptions
-- [ ] Add clearer structure cues on the track page:
+- [x] Change lesson cards on `/tracks/[trackId]` so the primary click target opens the lesson page instead of starting the lab immediately
+- [x] Decide against a secondary `Start Lab` shortcut to keep the lesson-first flow strict
+- [x] Revisit lock, available, in-progress, completed states so they map to real backend/user state instead of placeholder-only assumptions
+- [x] Add clearer structure cues on the track page:
   - lesson numbering
   - estimated time
   - completion status
 
 ### Phase 6: Lab Handoff
 
-- [ ] Update the lesson page CTA to create a session using the lesson's `publishedVersionId`
-- [ ] Preload `starterQuery` into lab state when launching from a lesson
-- [ ] Add a compact `Back to lesson` affordance in the lab header
-- [ ] Decide whether a lightweight lesson reference panel is needed in lab MVP; if added, keep it summary-only rather than full-content
-- [ ] Verify the lab still behaves correctly when a session is opened outside the lesson page
+- [x] Update the lesson page CTA to create a session using the lesson's `publishedVersionId`
+- [x] Preload `starterQuery` into lab state when launching from a lesson
+- [x] Add a compact `Back to lesson` affordance in the lab header
+- [x] Decide not to add a lesson reference panel in lab MVP; keep lesson context lightweight
+- [x] Verify the lab still behaves correctly when a session is opened outside the lesson page
 
 ### Phase 7: Content States and Error Handling
 
-- [ ] Design clear empty/error states for:
+- [x] Design clear empty/error states for:
   - missing published version
   - fetch failure
   - lesson exists but not yet published
   - session creation failure
-- [ ] Add loading skeletons for:
+- [x] Add loading skeletons for:
   - lesson page
   - track lesson navigation transitions
-- [ ] Prevent duplicate session creation from repeated CTA clicks
+- [x] Prevent duplicate session creation from repeated CTA clicks
 
 ### Phase 8: Validation
 
-- [ ] Add or update API tests for any changed track filtering or lesson payload behavior
-- [ ] Add web component/page tests for:
+- [x] Add or update API tests for any changed track filtering or lesson payload behavior
+- [x] Add web component/page tests for:
   - lesson page render
   - Markdown block rendering
   - CTA state transitions
-- [ ] Add at least one end-to-end happy-path test:
+- [x] Add at least one end-to-end happy-path test:
   - open track
   - open lesson
   - start lab
   - verify lesson title and starter query handoff
-- [ ] Re-run `pnpm test`
-- [ ] Re-run targeted checks such as `pnpm lint` and `pnpm typecheck`
-- [ ] Separate pre-existing baseline failures from feature-introduced failures in the final verification report
+- [x] Re-run `pnpm test`
+- [x] Re-run targeted checks such as `pnpm lint` and `pnpm typecheck`
+- [x] Separate pre-existing baseline failures from feature-introduced failures in the final verification report
 
 ### Phase 9: Challenge Extension Hooks
 
@@ -360,7 +360,7 @@ Recommended MVP behavior:
   - lesson mode vs challenge mode
   - back link to lesson or challenge entry point
   - optional challenge title
-- [ ] Replace placeholder challenge route with full challenge detail, evaluation, scoring, and leaderboard UI in feature 4
+- [x] Replace placeholder challenge route with full challenge detail, evaluation, scoring, and leaderboard UI in feature 4
 
 ## Suggested Implementation Order
 

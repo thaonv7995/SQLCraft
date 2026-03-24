@@ -3,11 +3,44 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { DifficultyBadge } from '@/components/ui/badge';
+import { Badge, DifficultyBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { lessonsApi, tracksApi } from '@/lib/api';
-import { formatMinutes } from '@/lib/utils';
+import { lessonsApi, sessionsApi, tracksApi } from '@/lib/api';
+import { formatMinutes, formatRelativeTime } from '@/lib/utils';
+
+function isResumableSession(status: string | null | undefined): boolean {
+  return status === 'active' || status === 'provisioning' || status === 'paused';
+}
+
+function getLessonCardStatus(args: {
+  isAvailable: boolean;
+  hasResumableSession: boolean;
+  resumableStatus?: string;
+  isCompletedByTrackProgress: boolean;
+}): { variant: 'draft' | 'provisioning' | 'active' | 'success' | 'ready'; label: string } {
+  if (!args.isAvailable) {
+    return { variant: 'draft', label: 'Draft' };
+  }
+
+  if (args.hasResumableSession) {
+    if (args.resumableStatus === 'provisioning') {
+      return { variant: 'provisioning', label: 'Provisioning lab' };
+    }
+
+    if (args.resumableStatus === 'paused') {
+      return { variant: 'active', label: 'Paused lab' };
+    }
+
+    return { variant: 'active', label: 'Active lab' };
+  }
+
+  if (args.isCompletedByTrackProgress) {
+    return { variant: 'success', label: 'Completed' };
+  }
+
+  return { variant: 'ready', label: 'Ready' };
+}
 
 function TrackPageSkeleton() {
   return (
@@ -37,7 +70,9 @@ export default function TrackDetailPage() {
     staleTime: 60_000,
   });
 
-  const lessons = track?.lessons ?? [];
+  const lessons = (track?.lessons ?? [])
+    .slice()
+    .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title));
   const { data: challengeCounts } = useQuery({
     queryKey: [
       'track-challenge-counts',
@@ -58,6 +93,11 @@ export default function TrackDetailPage() {
     },
     enabled: lessons.some((lesson) => lesson.publishedVersionId),
     staleTime: 60_000,
+  });
+  const { data: sessions } = useQuery({
+    queryKey: ['sessions'],
+    queryFn: sessionsApi.list,
+    staleTime: 30_000,
   });
 
   if (isLoading) {
@@ -94,6 +134,22 @@ export default function TrackDetailPage() {
 
   const totalMinutes = lessons.reduce((sum, lesson) => sum + (lesson.estimatedMinutes ?? 0), 0);
   const totalChallenges = Object.values(challengeCounts ?? {}).reduce((sum, count) => sum + count, 0);
+  const completedLessons = Math.min(track.userProgress?.completedLessons ?? 0, lessons.length);
+  const progressPercent =
+    lessons.length > 0 ? Math.round((completedLessons / lessons.length) * 100) : 0;
+  const publishedLessons = lessons.filter((lesson) => lesson.publishedVersionId).length;
+  const resumableLessonSessions = (sessions ?? []).filter(
+    (session) =>
+      !session.challengeVersionId &&
+      isResumableSession(session.status) &&
+      lessons.some((lesson) => lesson.publishedVersionId === session.lessonVersionId),
+  );
+  const activeLessonSessionIds = new Set(
+    resumableLessonSessions.map((session) => session.lessonVersionId),
+  );
+  const latestTrackActivity = track.userProgress?.lastAccessedAt
+    ? formatRelativeTime(track.userProgress.lastAccessedAt)
+    : null;
 
   return (
     <div className="page-shell-narrow page-stack">
@@ -112,7 +168,7 @@ export default function TrackDetailPage() {
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <DifficultyBadge difficulty={track.difficulty} />
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
-                  {track.lessonCount} lessons
+                  {lessons.length} lessons
                 </span>
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
                   {formatMinutes(totalMinutes)}
@@ -127,25 +183,57 @@ export default function TrackDetailPage() {
               <p className="mt-3 max-w-2xl text-[15px] leading-7 text-on-surface-variant">
                 {track.description || 'Open each lesson to read the guide, then launch the SQL lab with the lesson starter query.'}
               </p>
+              <div className="mt-5 max-w-xl space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant">
+                  <span>{completedLessons} of {lessons.length} lessons completed</span>
+                  <span>{progressPercent}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-surface-container-high">
+                  <div
+                    className="h-full rounded-full bg-primary transition-[width] duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-on-surface-variant">
+                  {latestTrackActivity ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">history</span>
+                      Last activity {latestTrackActivity}
+                    </span>
+                  ) : null}
+                  {resumableLessonSessions.length > 0 ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">terminal</span>
+                      {resumableLessonSessions.length} lesson lab{resumableLessonSessions.length > 1 ? 's' : ''} in progress
+                    </span>
+                  ) : null}
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 sm:min-w-72">
+            <div className="grid grid-cols-2 gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 sm:min-w-72 lg:grid-cols-4">
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-outline">Published lessons</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
-                  {lessons.filter((lesson) => lesson.publishedVersionId).length}
+                  {publishedLessons}
                 </p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-outline">Learning path</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
-                  {track.lessonCount}
+                  {lessons.length}
                 </p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-outline">Challenges</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
                   {totalChallenges}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-outline">Completed</p>
+                <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
+                  {completedLessons}
                 </p>
               </div>
             </div>
@@ -174,6 +262,20 @@ export default function TrackDetailPage() {
             {lessons.map((lesson, index) => {
               const isAvailable = Boolean(lesson.publishedVersionId);
               const challengeCount = challengeCounts?.[lesson.id] ?? 0;
+              const resumableLessonSession = lesson.publishedVersionId
+                ? resumableLessonSessions.find(
+                    (session) => session.lessonVersionId === lesson.publishedVersionId,
+                  )
+                : undefined;
+              const lessonStatus = getLessonCardStatus({
+                isAvailable,
+                hasResumableSession: Boolean(
+                  lesson.publishedVersionId &&
+                    activeLessonSessionIds.has(lesson.publishedVersionId),
+                ),
+                resumableStatus: resumableLessonSession?.status,
+                isCompletedByTrackProgress: index < completedLessons,
+              });
 
               return (
                 <Card
@@ -189,6 +291,7 @@ export default function TrackDetailPage() {
 
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={lessonStatus.variant}>{lessonStatus.label}</Badge>
                             <h3 className="text-base font-semibold text-on-surface">{lesson.title}</h3>
                             <DifficultyBadge difficulty={lesson.difficulty} />
                           </div>
@@ -210,10 +313,16 @@ export default function TrackDetailPage() {
                                 {challengeCount} optional challenge{challengeCount > 1 ? 's' : ''}
                               </span>
                             )}
+                            {resumableLessonSession?.lastActivityAt && (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="material-symbols-outlined text-sm">history</span>
+                                Active {formatRelativeTime(resumableLessonSession.lastActivityAt)}
+                              </span>
+                            )}
                             {!isAvailable && (
                               <span className="inline-flex items-center gap-1 text-outline">
                                 <span className="material-symbols-outlined text-sm">hourglass_top</span>
-                                Draft
+                                Publish required
                               </span>
                             )}
                           </div>
