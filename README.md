@@ -17,7 +17,7 @@ SQLCraft is an open-source, interactive SQL learning platform that takes you bey
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS |
+| Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS |
 | Backend API | Fastify, TypeScript, Drizzle ORM |
 | Worker | Node.js, BullMQ |
 | Database | PostgreSQL 16 |
@@ -30,7 +30,7 @@ SQLCraft is an open-source, interactive SQL learning platform that takes you bey
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js >= 20.9 (required by Next.js 16)
 - pnpm >= 9 (`npm install -g pnpm@9`)
 - Docker and Docker Compose
 
@@ -66,13 +66,17 @@ make stop         # Stop all Docker services
 make clean        # Stop and remove all volumes
 ```
 
+### Docker (dev images)
+
+`docker-compose.dev.yml` builds **api**, **web**, and **worker** from `Dockerfile.dev`. Those Dockerfiles copy **`pnpm-lock.yaml`** and run **`pnpm install --frozen-lockfile`**, so the versions inside the image match the committed lockfile. After you change any `package.json` at the repo root or in a workspace, run **`pnpm install`** at the monorepo root, commit the updated **`pnpm-lock.yaml`**, then rebuild: `docker compose -f docker-compose.dev.yml build`.
+
 ## Project Structure
 
 ```
 sqlcraft/
 ├── apps/
 │   ├── api/          # Fastify API server
-│   └── web/          # Next.js 14 frontend
+│   └── web/          # Next.js 16 frontend
 ├── services/
 │   └── worker/       # Background job worker (BullMQ)
 ├── packages/
