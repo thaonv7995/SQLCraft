@@ -82,6 +82,8 @@ export interface SqlEditorProps {
   value: string;
   onChange: (value: string) => void;
   onExecute?: () => void;
+  onFormat?: () => void;
+  onCopy?: () => void;
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
@@ -92,6 +94,8 @@ export function SqlEditor({
   value,
   onChange,
   onExecute,
+  onFormat,
+  onCopy,
   placeholder = '-- Write your SQL query here...',
   readOnly = false,
   className,
@@ -127,13 +131,16 @@ export function SqlEditor({
     return exts;
   }, [onExecute]);
 
+  const hasActions = onFormat || onCopy;
+
   return (
-    <div data-testid={testId} className={`h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
+    <div data-testid={testId} className={`relative h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
       <ReactCodeMirror
         ref={editorRef}
         value={value}
         onChange={onChange}
         extensions={extensions()}
+        theme="dark"
         readOnly={readOnly}
         placeholder={placeholder}
         basicSetup={{
@@ -158,6 +165,36 @@ export function SqlEditor({
         style={{ height: '100%' }}
         height="100%"
       />
+
+      {/* Floating action buttons — bottom-right of editor */}
+      {hasActions && (
+        <div className="absolute bottom-3 right-3 flex items-center gap-1 z-10">
+          {onFormat && (
+            <button
+              type="button"
+              onClick={onFormat}
+              disabled={!value.trim()}
+              title="Format SQL (Shift+Alt+F)"
+              className="flex items-center gap-1 rounded-md bg-[#2a2a2a]/90 border border-white/10 px-2 py-1 text-[11px] font-medium text-white/60 hover:text-white hover:bg-[#333]/90 transition-colors disabled:opacity-30 backdrop-blur-sm"
+            >
+              <span className="material-symbols-outlined text-sm">format_align_left</span>
+              Format
+            </button>
+          )}
+          {onCopy && (
+            <button
+              type="button"
+              onClick={onCopy}
+              disabled={!value.trim()}
+              title="Copy query to clipboard"
+              className="flex items-center gap-1 rounded-md bg-[#2a2a2a]/90 border border-white/10 px-2 py-1 text-[11px] font-medium text-white/60 hover:text-white hover:bg-[#333]/90 transition-colors disabled:opacity-30 backdrop-blur-sm"
+            >
+              <span className="material-symbols-outlined text-sm">content_copy</span>
+              Copy
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

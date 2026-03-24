@@ -359,6 +359,27 @@ export interface SystemJob {
   errorMessage?: string;
 }
 
+// ─── Session Schema ───────────────────────────────────────────────────────────
+
+export interface SessionSchemaColumn {
+  name: string;
+  type: string;
+  isPrimary: boolean;
+  isForeign: boolean;
+  isNullable: boolean;
+  references?: string;
+}
+
+export interface SessionSchemaTable {
+  name: string;
+  columns: SessionSchemaColumn[];
+}
+
+export interface SessionSchemaResponse {
+  schemaTemplateId: string;
+  tables: SessionSchemaTable[];
+}
+
 // ─── Databases ────────────────────────────────────────────────────────────────
 
 export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'social' | 'analytics' | 'other';
@@ -716,6 +737,9 @@ export const sessionsApi = {
   get: (id: string) =>
     api.get<LearningSession>(`/learning-sessions/${id}`).then((r) => r.data),
 
+  getSchema: (id: string) =>
+    api.get<SessionSchemaResponse>(`/learning-sessions/${id}/schema`).then((r) => r.data),
+
   create: (payload: { lessonVersionId: string; challengeVersionId?: string }) =>
     api.post<{ session: LearningSession; sandbox: { id: string; status: string } }>(
       '/learning-sessions',
@@ -732,13 +756,25 @@ export const sessionsApi = {
 
 export const queryApi = {
   execute: (payload: QueryExecutionRequest) =>
-    api.post<QueryExecution>('/query/execute', payload).then((r) => r.data),
+    api
+      .post<QueryExecution>('/query-executions', {
+        learningSessionId: payload.sessionId,
+        sql: payload.sql,
+      })
+      .then((r) => r.data),
 
   explain: (payload: QueryExecutionRequest) =>
-    api.post<QueryExecution>('/query/explain', payload).then((r) => r.data),
+    api
+      .post<QueryExecution>('/query-executions', {
+        learningSessionId: payload.sessionId,
+        sql: payload.sql,
+        explainPlan: true,
+        planMode: 'explain_analyze',
+      })
+      .then((r) => r.data),
 
-  format: (sql: string) =>
-    api.post<{ sql: string }>('/query/format', { sql }).then((r) => r.data),
+  poll: (executionId: string) =>
+    api.get<QueryExecution>(`/query-executions/${executionId}`).then((r) => r.data),
 
   history: async (sessionId?: string, params?: { page?: number; limit?: number }) => {
     const pagination = { ...params };
@@ -746,7 +782,8 @@ export const queryApi = {
     const primaryPath = sessionId
       ? `/learning-sessions/${sessionId}/query-executions`
       : '/query-executions';
-    const legacyPath = '/query/history';
+
+    const legacyPath = '/query-executions';
 
     try {
       const res = await api.get<PaginatedResponse<QueryExecution>>(primaryPath, {

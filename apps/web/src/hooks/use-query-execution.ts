@@ -2,10 +2,32 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryApi, sessionsApi } from '@/lib/api';
 import { useLabStore } from '@/stores/lab';
-import type { QueryExecution, QueryExecutionRequest } from '@/lib/api';
+import type { QueryExecution, QueryExecutionRequest, SessionSchemaResponse } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { toastError } from '@/lib/toast-error';
 import { formatDuration, formatRows } from '@/lib/utils';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const TERMINAL_STATUSES = new Set<QueryExecution['status']>(['success', 'error']);
+const POLL_INTERVAL_MS = 600;
+const POLL_TIMEOUT_MS = 35_000;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUntilDone(executionId: string): Promise<QueryExecution> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (true) {
+    const execution = await queryApi.poll(executionId);
+    if (TERMINAL_STATUSES.has(execution.status)) return execution;
+    if (Date.now() > deadline) {
+      throw new Error(`Query timed out after ${POLL_TIMEOUT_MS / 1000}s`);
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
 
 // ─── Execute Query ────────────────────────────────────────────────────────────
 
@@ -14,7 +36,14 @@ export function useExecuteQuery() {
   const setActiveTab = useLabStore((s) => s.setActiveTab);
 
   return useMutation<QueryExecution, Error, QueryExecutionRequest>({
-    mutationFn: (payload) => queryApi.execute(payload),
+    mutationFn: async (payload) => {
+      const accepted = await queryApi.execute(payload);
+      // Backend returns status 'accepted' immediately — poll until done
+      if (!TERMINAL_STATUSES.has(accepted.status)) {
+        return pollUntilDone(accepted.id);
+      }
+      return accepted;
+    },
     onMutate: () => {
       useLabStore.setState({ isExecuting: true, error: null, results: null });
     },
@@ -49,7 +78,13 @@ export function useExplainQuery() {
   const setActiveTab = useLabStore((s) => s.setActiveTab);
 
   return useMutation<QueryExecution, Error, QueryExecutionRequest>({
-    mutationFn: (payload) => queryApi.explain(payload),
+    mutationFn: async (payload) => {
+      const accepted = await queryApi.explain(payload);
+      if (!TERMINAL_STATUSES.has(accepted.status)) {
+        return pollUntilDone(accepted.id);
+      }
+      return accepted;
+    },
     onMutate: () => {
       useLabStore.setState({ isExplaining: true, error: null });
     },
@@ -82,6 +117,17 @@ export function useQueryHistory(sessionId?: string, page = 1, limit = 50) {
     queryKey: ['query-history', sessionId, page, limit],
     queryFn: () => queryApi.history(sessionId, { page, limit }),
     staleTime: 30_000,
+  });
+}
+
+// ─── Session Schema ───────────────────────────────────────────────────────────
+
+export function useSessionSchema(sessionId: string) {
+  return useQuery<SessionSchemaResponse>({
+    queryKey: ['session-schema', sessionId],
+    queryFn: () => sessionsApi.getSchema(sessionId),
+    enabled: !!sessionId,
+    staleTime: 60_000,
   });
 }
 

@@ -3,6 +3,58 @@ import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/reposito
 import { NotFoundError, ForbiddenError } from '../../lib/errors';
 import type { CreateSessionBody } from './sessions.schema';
 
+// ─── Schema types ─────────────────────────────────────────────────────────────
+
+export interface SessionSchemaColumn {
+  name: string;
+  type: string;
+  isPrimary: boolean;
+  isForeign: boolean;
+  isNullable: boolean;
+  references?: string;
+}
+
+export interface SessionSchemaTable {
+  name: string;
+  columns: SessionSchemaColumn[];
+}
+
+export interface SessionSchemaResult {
+  schemaTemplateId: string;
+  tables: SessionSchemaTable[];
+}
+
+// ─── Schema parsing helpers ───────────────────────────────────────────────────
+
+interface RawColumn { name: string; type: string }
+interface RawTable  { name: string; columns: RawColumn[] }
+
+function parseRawSchema(definition: unknown): RawTable[] {
+  if (!definition || typeof definition !== 'object') return [];
+  const tables = (definition as { tables?: unknown }).tables;
+  if (!Array.isArray(tables)) return [];
+  return tables.filter(
+    (t): t is RawTable =>
+      !!t && typeof t === 'object' &&
+      typeof (t as RawTable).name === 'string' &&
+      Array.isArray((t as RawTable).columns),
+  );
+}
+
+function normalizeColumn(col: RawColumn): SessionSchemaColumn {
+  const upper = col.type.toUpperCase();
+  const refMatch = col.type.match(/references\s+([a-z_]+)\(([^)]+)\)/i);
+  const references = refMatch ? `${refMatch[1]}.${refMatch[2]}` : undefined;
+  return {
+    name: col.name,
+    type: col.type.replace(/\s+references\s+[a-z_]+\([^)]+\)/i, '').trim(),
+    isPrimary: upper.includes('PRIMARY KEY'),
+    isForeign: !!references,
+    isNullable: !upper.includes('NOT NULL') && !upper.includes('PRIMARY KEY'),
+    references,
+  };
+}
+
 export interface CreateSessionResult {
   session: Pick<
     SessionRow,
@@ -125,6 +177,30 @@ export async function getSession(
   return {
     ...session,
     sandbox: sandbox ?? null,
+  };
+}
+
+export async function getSessionSchema(
+  sessionId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<SessionSchemaResult> {
+  const session = await sessionsRepository.findById(sessionId);
+  if (!session) throw new NotFoundError('Session not found');
+  if (session.userId !== userId && !isAdmin) throw new ForbiddenError('Access denied to this session');
+
+  const schemaTemplate = await sessionsRepository.getSchemaTemplateBySessionId(sessionId);
+  if (!schemaTemplate) throw new NotFoundError('No schema template linked to this session');
+
+  const rawTables = parseRawSchema(schemaTemplate.definition);
+  return {
+    schemaTemplateId: schemaTemplate.id,
+    tables: rawTables.map((t) => ({
+      name: t.name,
+      columns: t.columns
+        .filter((c): c is RawColumn => typeof c.name === 'string' && typeof c.type === 'string')
+        .map(normalizeColumn),
+    })),
   };
 }
 

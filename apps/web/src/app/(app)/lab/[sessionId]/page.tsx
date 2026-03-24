@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
 import toast from 'react-hot-toast';
-import { useExecuteQuery, useExplainQuery, useSessionStatus } from '@/hooks/use-query-execution';
+import { useExecuteQuery, useExplainQuery, useSessionStatus, useSessionSchema } from '@/hooks/use-query-execution';
 import { formatSqlInBrowser } from '@/lib/format-sql';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -73,7 +73,13 @@ function DatasetSizeSelector() {
 
 // ─── SQL Editor (CodeMirror 6) ────────────────────────────────────────────────
 
-function SqlEditorPanel() {
+function SqlEditorPanel({
+  onFormat,
+  onCopy,
+}: {
+  onFormat: () => void;
+  onCopy: () => void;
+}) {
   const { currentQuery, setQuery } = useLabStore();
   const params = useParams<{ sessionId?: string | string[] }>();
   const sessionId = sessionIdFromParams(params);
@@ -90,6 +96,8 @@ function SqlEditorPanel() {
       value={currentQuery}
       onChange={setQuery}
       onExecute={handleExecute}
+      onFormat={onFormat}
+      onCopy={onCopy}
       placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
       testId="lab-sql-editor"
     />
@@ -145,42 +153,56 @@ function ResultsPanel() {
   }
 
   return (
-    <div className="flex-1 overflow-auto">
-      <Table stickyHeader>
-        <TableHeader>
-          <TableRow>
-            {results.columns.map((col: QueryResultColumn) => (
-              <TableHead key={col.name}>
-                <div className="flex flex-col gap-0.5">
-                  <span>{col.name}</span>
-                  <span className="text-outline font-normal normal-case tracking-normal">
-                    {col.dataType}
-                  </span>
-                </div>
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {results.rows.length === 0 ? (
-            <TableEmpty message="Query returned no rows" colSpan={results.columns.length} />
-          ) : (
-            results.rows.map((row, i) => (
-              <TableRow key={i}>
-                {results.columns.map((col) => (
-                  <TableCell key={col.name} className="font-mono text-xs">
-                    {row[col.name] === null ? (
-                      <span className="text-outline italic">NULL</span>
-                    ) : (
-                      String(row[col.name])
-                    )}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 overflow-auto">
+        <Table stickyHeader>
+          <TableHeader>
+            <TableRow>
+              {results.columns.map((col: QueryResultColumn) => (
+                <TableHead key={col.name}>
+                  <div className="flex flex-col gap-0.5">
+                    <span>{col.name}</span>
+                    <span className="text-outline font-normal normal-case tracking-normal">
+                      {col.dataType}
+                    </span>
+                  </div>
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {results.rows.length === 0 ? (
+              <TableEmpty message="Query returned no rows" colSpan={results.columns.length} />
+            ) : (
+              results.rows.map((row, i) => (
+                <TableRow key={i}>
+                  {results.columns.map((col) => (
+                    <TableCell key={col.name} className="font-mono text-xs">
+                      {row[col.name] === null ? (
+                        <span className="text-outline italic">NULL</span>
+                      ) : (
+                        String(row[col.name])
+                      )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      {results.truncated && (
+        <div className="shrink-0 flex items-center gap-2 border-t border-outline-variant/10 bg-surface-container-low px-4 py-2">
+          <span className="material-symbols-outlined text-sm text-tertiary">info</span>
+          <span className="text-xs text-on-surface-variant">
+            Hiển thị{' '}
+            <span className="font-mono text-on-surface">{results.rows.length}</span>
+            {' '}trong{' '}
+            <span className="font-mono text-on-surface">{results.totalRows.toLocaleString()}</span>
+            {' '}dòng — kết quả bị giới hạn ở 500 dòng đầu.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -284,46 +306,48 @@ function QueryHistoryPanel() {
 
 // ─── Schema Panel ─────────────────────────────────────────────────────────────
 
-const MOCK_SCHEMA = [
-  {
-    name: 'employees',
-    columns: [
-      { name: 'id', type: 'INTEGER', primary: true },
-      { name: 'name', type: 'VARCHAR(100)', primary: false },
-      { name: 'department_id', type: 'INTEGER', primary: false },
-      { name: 'salary', type: 'DECIMAL(10,2)', primary: false },
-      { name: 'hired_at', type: 'TIMESTAMP', primary: false },
-    ],
-  },
-  {
-    name: 'departments',
-    columns: [
-      { name: 'id', type: 'INTEGER', primary: true },
-      { name: 'name', type: 'VARCHAR(50)', primary: false },
-      { name: 'budget', type: 'DECIMAL(15,2)', primary: false },
-    ],
-  },
-  {
-    name: 'orders',
-    columns: [
-      { name: 'id', type: 'INTEGER', primary: true },
-      { name: 'customer_id', type: 'INTEGER', primary: false },
-      { name: 'total', type: 'DECIMAL(10,2)', primary: false },
-      { name: 'status', type: 'VARCHAR(20)', primary: false },
-      { name: 'created_at', type: 'TIMESTAMP', primary: false },
-    ],
-  },
-];
+function SchemaPanelSkeleton() {
+  return (
+    <div className="flex-1 p-3 space-y-2">
+      <div className="h-3 w-20 rounded animate-pulse bg-surface-container mx-2 mb-4" />
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="h-9 rounded-lg animate-pulse bg-surface-container" />
+      ))}
+    </div>
+  );
+}
 
-function SchemaPanel() {
-  const [expandedTable, setExpandedTable] = useState<string | null>('employees');
+function SchemaPanel({ sessionId }: { sessionId: string }) {
+  const { data: schema, isLoading, isError } = useSessionSchema(sessionId);
+  const [expandedTable, setExpandedTable] = useState<string | null>(null);
+
+  if (isLoading) return <SchemaPanelSkeleton />;
+
+  if (isError || !schema) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="text-center space-y-2">
+          <span className="material-symbols-outlined text-3xl text-outline block">error</span>
+          <p className="text-xs text-on-surface-variant">Không tải được schema</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (schema.tables.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-4">
+        <p className="text-xs text-on-surface-variant">Không có bảng nào trong schema</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-3 space-y-1">
       <p className="text-xs font-semibold uppercase tracking-wider text-outline px-2 mb-3">
-        Tables
+        Tables ({schema.tables.length})
       </p>
-      {MOCK_SCHEMA.map((table) => {
+      {schema.tables.map((table) => {
         const isExpanded = expandedTable === table.name;
         return (
           <div key={table.name} className="rounded-lg overflow-hidden">
@@ -353,16 +377,21 @@ function SchemaPanel() {
                     <span
                       className={cn(
                         'material-symbols-outlined text-sm shrink-0',
-                        col.primary ? 'text-primary' : 'text-outline'
+                        col.isPrimary ? 'text-primary' : col.isForeign ? 'text-secondary' : 'text-outline'
                       )}
                       style={{ fontVariationSettings: "'FILL' 1" }}
                     >
-                      {col.primary ? 'key' : 'circle'}
+                      {col.isPrimary ? 'key' : col.isForeign ? 'link' : 'circle'}
                     </span>
                     <span className="text-xs font-mono text-on-surface-variant flex-1">
                       {col.name}
                     </span>
-                    <span className="text-xs font-mono text-outline">{col.type}</span>
+                    {col.references && (
+                      <span className="text-[10px] text-outline font-mono truncate max-w-[80px]" title={col.references}>
+                        → {col.references}
+                      </span>
+                    )}
+                    <span className="text-xs font-mono text-outline shrink-0">{col.type}</span>
                   </div>
                 ))}
               </div>
@@ -370,6 +399,46 @@ function SchemaPanel() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Session Expired / Ended Overlay ─────────────────────────────────────────
+
+function LabSessionExpired({ status }: { status: string }) {
+  const label =
+    status === 'expired' ? 'Phiên lab đã hết hạn' :
+    status === 'failed'  ? 'Phiên lab gặp lỗi' :
+                           'Phiên lab đã kết thúc';
+  const desc =
+    status === 'failed'
+      ? 'Sandbox không thể khởi động. Hãy thử tạo phiên mới.'
+      : 'Session này không còn hoạt động. Tạo phiên mới để tiếp tục thực hành.';
+
+  return (
+    <div className="flex-1 flex items-center justify-center bg-surface">
+      <div className="text-center space-y-4 px-4">
+        <span className="material-symbols-outlined text-5xl text-outline block">
+          {status === 'failed' ? 'error' : 'timer_off'}
+        </span>
+        <div className="space-y-1.5">
+          <h2 className="text-base font-semibold text-on-surface">{label}</h2>
+          <p className="text-sm text-on-surface-variant max-w-sm">{desc}</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+          <Link href="/explore">
+            <Button
+              variant="primary"
+              leftIcon={<span className="material-symbols-outlined text-lg">travel_explore</span>}
+            >
+              Chọn database mới
+            </Button>
+          </Link>
+          <Link href="/lab">
+            <Button variant="secondary">Về SQL Lab</Button>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
@@ -387,7 +456,7 @@ type TabId = typeof TABS[number]['id'];
 
 function LabSessionLoading() {
   return (
-    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col bg-surface">
+    <div className="flex flex-1 flex-col bg-surface">
       <div className="h-12 shrink-0 animate-pulse border-b border-outline-variant/10 bg-surface-container-low" />
       <div className="flex flex-1 gap-0 overflow-hidden">
         <div className="w-[55%] animate-pulse bg-surface-container-lowest" />
@@ -406,7 +475,7 @@ function LabSessionError({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center gap-5 bg-surface px-4">
+    <div className="flex flex-1 flex-col items-center justify-center gap-5 bg-surface px-4">
       <span className="material-symbols-outlined text-5xl text-outline">cloud_off</span>
       <div className="max-w-md text-center">
         <h1 className="font-headline text-xl font-semibold text-on-surface">Không tải được phiên lab</h1>
@@ -603,9 +672,18 @@ export default function LabPage() {
     }
   }, [currentQuery, setQuery]);
 
+  const handleCopyQuery = useCallback(() => {
+    navigator.clipboard.writeText(currentQuery).then(() => toast.success('Đã copy query'));
+  }, [currentQuery]);
+
+  const handleClearEditor = useCallback(() => {
+    setQuery('');
+    useLabStore.getState().resetResults();
+  }, [setQuery]);
+
   if (!sessionId) {
     return (
-      <div className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center gap-4 bg-surface px-4">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-surface px-4">
         <p className="text-sm text-on-surface-variant">Đường dẫn phiên không hợp lệ.</p>
         <Link href="/lab">
           <Button variant="primary">Về SQL Lab</Button>
@@ -628,7 +706,7 @@ export default function LabPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-surface">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <header className="shrink-0 border-b border-outline-variant/10 bg-surface-container-low/90">
         <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="scrollbar-none flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto">
@@ -637,7 +715,7 @@ export default function LabPage() {
                 variant="primary"
                 size="sm"
                 loading={isExecuting}
-                disabled={!currentQuery.trim() || isExecuting || session?.status === 'provisioning'}
+                disabled={!currentQuery.trim() || isExecuting || session?.status !== 'active'}
                 onClick={() => executeQuery({ sessionId, sql: currentQuery })}
                 leftIcon={
                   <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -651,21 +729,21 @@ export default function LabPage() {
                 variant="secondary"
                 size="sm"
                 loading={isExplaining}
-                disabled={!currentQuery.trim() || isExplaining || session?.status === 'provisioning'}
+                disabled={!currentQuery.trim() || isExplaining || session?.status !== 'active'}
                 onClick={() => explainQuery({ sessionId, sql: currentQuery })}
                 leftIcon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
               >
                 Explain
               </Button>
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 disabled={!currentQuery.trim()}
-                onClick={handleFormatSql}
-                title="Format SQL locally (no network)"
-                leftIcon={<span className="material-symbols-outlined text-[18px]">format_align_left</span>}
+                onClick={handleClearEditor}
+                title="Clear editor and results"
+                leftIcon={<span className="material-symbols-outlined text-[18px]">delete_sweep</span>}
               >
-                Format
+                Clear
               </Button>
               {session?.challengeVersionId ? (
                 <Button
@@ -749,7 +827,13 @@ export default function LabPage() {
         </div>
       </header>
 
+      {/* ── Session expired / failed overlay ── */}
+      {session && !['active', 'provisioning', 'paused'].includes(session.status) && (
+        <LabSessionExpired status={session.status} />
+      )}
+
       {/* ── Main split pane ── */}
+      {(!session || ['active', 'provisioning', 'paused'].includes(session.status)) && (
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left: Editor */}
         <div
@@ -772,7 +856,7 @@ export default function LabPage() {
               </kbd>
             </div>
           </div>
-          <SqlEditorPanel />
+          <SqlEditorPanel onFormat={handleFormatSql} onCopy={handleCopyQuery} />
         </div>
 
         {/* Resize handle */}
@@ -807,6 +891,25 @@ export default function LabPage() {
                 {tab.label}
               </button>
             ))}
+            {activeTab === 'results' && results && (
+              <button
+                type="button"
+                onClick={() => {
+                  const header = results.columns.map((c) => c.name).join(',');
+                  const rows = results.rows.map((row) =>
+                    results.columns.map((c) => JSON.stringify(row[c.name] ?? '')).join(','),
+                  );
+                  navigator.clipboard
+                    .writeText([header, ...rows].join('\n'))
+                    .then(() => toast.success('Đã copy kết quả (CSV)'));
+                }}
+                className="ml-auto mr-2 flex items-center gap-1 rounded px-2 py-1 text-[11px] text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
+                title="Copy results as CSV"
+              >
+                <span className="material-symbols-outlined text-sm">content_copy</span>
+                CSV
+              </button>
+            )}
           </div>
 
           {/* Tab content */}
@@ -814,10 +917,11 @@ export default function LabPage() {
             {activeTab === 'results' && <ResultsPanel />}
             {activeTab === 'plan' && <ExecutionPlanPanel />}
             {activeTab === 'history' && <QueryHistoryPanel />}
-            {activeTab === 'schema' && <SchemaPanel />}
+            {activeTab === 'schema' && <SchemaPanel sessionId={sessionId} />}
           </div>
         </div>
       </div>
+      )}
 
       {/* ── Status bar ── */}
       <div className="flex h-7 shrink-0 items-center justify-between border-t border-outline-variant/10 bg-surface-container-low px-4 text-[10px]">
