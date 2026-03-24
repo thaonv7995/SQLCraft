@@ -4,16 +4,25 @@ import { success, created, MESSAGES } from '../../lib/response';
 import {
   submitAttempt,
   getAttempt,
+  getChallengeVersionDetail,
+  listUserAttempts,
+  getChallengeLeaderboard,
   createChallenge,
   publishChallengeVersion,
 } from './challenges.service';
 import {
+  ChallengeAttemptsQuerySchema,
+  ChallengeLeaderboardQuerySchema,
+  ChallengeVersionParamsSchema,
   SubmitAttemptSchema,
   CreateChallengeSchema,
 } from './challenges.schema';
 import type {
   ChallengeAttemptParams,
+  ChallengeVersionParams,
   AdminChallengeVersionParams,
+  ChallengeAttemptsQuery,
+  ChallengeLeaderboardQuery,
   SubmitAttemptBody,
   CreateChallengeBody,
 } from './challenges.schema';
@@ -38,6 +47,35 @@ export async function getAttemptHandler(
   const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
   const attempt = await getAttempt(id, userId, isAdmin);
   return reply.send(success(attempt, MESSAGES.ATTEMPT_RETRIEVED));
+}
+
+export async function getChallengeVersionHandler(
+  request: FastifyRequest<{ Params: ChallengeVersionParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeVersionParamsSchema.parse(request.params);
+  const detail = await getChallengeVersionDetail(id);
+  return reply.send(success(detail, MESSAGES.CHALLENGE_VERSION_RETRIEVED));
+}
+
+export async function listUserAttemptsHandler(
+  request: FastifyRequest<{ Querystring: ChallengeAttemptsQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = ChallengeAttemptsQuerySchema.parse(request.query);
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? '';
+  const attempts = await listUserAttempts(query.challengeVersionId, userId);
+  return reply.send(success(attempts, MESSAGES.ATTEMPTS_RETRIEVED));
+}
+
+export async function getChallengeLeaderboardHandler(
+  request: FastifyRequest<{ Params: ChallengeVersionParams; Querystring: ChallengeLeaderboardQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeVersionParamsSchema.parse(request.params);
+  const query = ChallengeLeaderboardQuerySchema.parse(request.query);
+  const leaderboard = await getChallengeLeaderboard(id, query.limit);
+  return reply.send(success(leaderboard, MESSAGES.LEADERBOARD_RETRIEVED));
 }
 
 export async function createChallengeHandler(

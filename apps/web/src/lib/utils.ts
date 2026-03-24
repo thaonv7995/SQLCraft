@@ -16,6 +16,21 @@ export function formatRows(count: number): string {
   return count.toString();
 }
 
+export function formatMinutes(totalMinutes: number): string {
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (minutes === 0) {
+    return `${hours}h`;
+  }
+
+  return `${hours}h ${minutes}m`;
+}
+
 export function truncateSql(sql: string | null | undefined, maxLen = 80): string {
   if (sql == null || typeof sql !== 'string') {
     return '';

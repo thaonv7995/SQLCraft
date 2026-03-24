@@ -1,5 +1,12 @@
 import { challengesRepository, lessonsRepository } from '../../db/repositories';
-import type { ChallengeRow, ChallengeVersionRow, ChallengeAttemptRow } from '../../db/repositories';
+import type {
+  ChallengeRow,
+  ChallengeVersionRow,
+  ChallengeAttemptRow,
+  ChallengeAttemptWithExecutionRow,
+  ChallengeLeaderboardAttemptRow,
+  PublishedChallengeVersionDetailRow,
+} from '../../db/repositories';
 import { NotFoundError, ForbiddenError } from '../../lib/errors';
 import type { SubmitAttemptBody, CreateChallengeBody } from './challenges.schema';
 
@@ -21,6 +28,149 @@ export interface AttemptResult {
 export interface CreateChallengeResult {
   challenge: ChallengeRow;
   version: ChallengeVersionRow;
+}
+
+export interface ChallengeVersionDetail {
+  id: string;
+  challengeId: string;
+  lessonId: string;
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: ChallengeRow['difficulty'];
+  sortOrder: number;
+  problemStatement: string;
+  hintText: string | null;
+  expectedResultColumns: string[];
+  validatorType: string;
+  publishedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface ChallengeAttemptListItem {
+  id: string;
+  learningSessionId: string;
+  challengeVersionId: string;
+  queryExecutionId: string;
+  attemptNo: number;
+  status: string;
+  score: number | null;
+  evaluation: unknown;
+  submittedAt: Date;
+  queryExecution: {
+    sqlText: string;
+    status: string;
+    rowsReturned: number | null;
+    durationMs: number | null;
+  };
+}
+
+export interface ChallengeLeaderboardEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  bestScore: number;
+  attemptsCount: number;
+  passedAttempts: number;
+  lastSubmittedAt: Date;
+}
+
+function normalizeChallengeVersionDetail(
+  row: PublishedChallengeVersionDetailRow,
+): ChallengeVersionDetail {
+  return {
+    ...row,
+    description: row.description ?? '',
+    hintText: row.hintText ?? null,
+    expectedResultColumns: Array.isArray(row.expectedResultColumns)
+      ? row.expectedResultColumns.filter((value): value is string => typeof value === 'string')
+      : [],
+  };
+}
+
+function mapAttemptRow(row: ChallengeAttemptWithExecutionRow): ChallengeAttemptListItem {
+  return {
+    id: row.id,
+    learningSessionId: row.learningSessionId,
+    challengeVersionId: row.challengeVersionId,
+    queryExecutionId: row.queryExecutionId,
+    attemptNo: row.attemptNo,
+    status: row.status,
+    score: row.score,
+    evaluation: row.evaluation,
+    submittedAt: row.submittedAt,
+    queryExecution: {
+      sqlText: row.sqlText,
+      status: row.queryStatus,
+      rowsReturned: row.rowsReturned,
+      durationMs: row.durationMs,
+    },
+  };
+}
+
+function buildLeaderboard(
+  rows: ChallengeLeaderboardAttemptRow[],
+  limit: number,
+): ChallengeLeaderboardEntry[] {
+  const byUser = new Map<
+    string,
+    Omit<ChallengeLeaderboardEntry, 'rank'> & { bestSubmittedAt: Date }
+  >();
+
+  for (const row of rows) {
+    const displayName = row.displayName ?? row.username;
+    const score = row.score ?? 0;
+    const existing = byUser.get(row.userId);
+
+    if (!existing) {
+      byUser.set(row.userId, {
+        userId: row.userId,
+        username: row.username,
+        displayName,
+        avatarUrl: row.avatarUrl,
+        bestScore: score,
+        attemptsCount: 1,
+        passedAttempts: row.status === 'passed' ? 1 : 0,
+        lastSubmittedAt: row.submittedAt,
+        bestSubmittedAt: row.submittedAt,
+      });
+      continue;
+    }
+
+    existing.attemptsCount += 1;
+    existing.lastSubmittedAt =
+      existing.lastSubmittedAt > row.submittedAt ? existing.lastSubmittedAt : row.submittedAt;
+    if (row.status === 'passed') {
+      existing.passedAttempts += 1;
+    }
+    if (
+      score > existing.bestScore ||
+      (score === existing.bestScore && row.submittedAt < existing.bestSubmittedAt)
+    ) {
+      existing.bestScore = score;
+      existing.bestSubmittedAt = row.submittedAt;
+    }
+  }
+
+  return Array.from(byUser.values())
+    .sort((a, b) => {
+      if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
+      return a.bestSubmittedAt.getTime() - b.bestSubmittedAt.getTime();
+    })
+    .slice(0, limit)
+    .map((entry, index) => ({
+      rank: index + 1,
+      userId: entry.userId,
+      username: entry.username,
+      displayName: entry.displayName,
+      avatarUrl: entry.avatarUrl,
+      bestScore: entry.bestScore,
+      attemptsCount: entry.attemptsCount,
+      passedAttempts: entry.passedAttempts,
+      lastSubmittedAt: entry.lastSubmittedAt,
+    }));
 }
 
 export function evaluateAttempt(
@@ -150,6 +300,44 @@ export async function submitAttempt(
     evaluation: attempt.evaluation,
     submittedAt: attempt.submittedAt,
   };
+}
+
+export async function getChallengeVersionDetail(id: string): Promise<ChallengeVersionDetail> {
+  const detail = await challengesRepository.findPublishedVersionDetailById(id);
+
+  if (!detail) {
+    throw new NotFoundError('Challenge version not found or not published');
+  }
+
+  return normalizeChallengeVersionDetail(detail);
+}
+
+export async function listUserAttempts(
+  challengeVersionId: string,
+  userId: string,
+): Promise<ChallengeAttemptListItem[]> {
+  const detail = await challengesRepository.findPublishedVersionDetailById(challengeVersionId);
+
+  if (!detail) {
+    throw new NotFoundError('Challenge version not found or not published');
+  }
+
+  const attempts = await challengesRepository.listAttemptsForUser(userId, challengeVersionId);
+  return attempts.map(mapAttemptRow);
+}
+
+export async function getChallengeLeaderboard(
+  challengeVersionId: string,
+  limit = 10,
+): Promise<ChallengeLeaderboardEntry[]> {
+  const detail = await challengesRepository.findPublishedVersionDetailById(challengeVersionId);
+
+  if (!detail) {
+    throw new NotFoundError('Challenge version not found or not published');
+  }
+
+  const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
+  return buildLeaderboard(attempts, limit);
 }
 
 export async function getAttempt(

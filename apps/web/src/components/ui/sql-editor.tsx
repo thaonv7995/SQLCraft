@@ -85,6 +85,7 @@ export interface SqlEditorProps {
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
+  testId?: string;
 }
 
 export function SqlEditor({
@@ -94,6 +95,7 @@ export function SqlEditor({
   placeholder = '-- Write your SQL query here...',
   readOnly = false,
   className,
+  testId,
 }: SqlEditorProps) {
   const editorRef = useRef<ReactCodeMirrorRef>(null);
 
@@ -126,7 +128,7 @@ export function SqlEditor({
   }, [onExecute]);
 
   return (
-    <div className={`h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
+    <div data-testid={testId} className={`h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
       <ReactCodeMirror
         ref={editorRef}
         value={value}

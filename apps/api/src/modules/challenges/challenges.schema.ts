@@ -5,8 +5,20 @@ export const ChallengeAttemptParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+export const ChallengeVersionParamsSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export const AdminChallengeVersionParamsSchema = z.object({
   id: z.string().uuid(),
+});
+
+export const ChallengeAttemptsQuerySchema = z.object({
+  challengeVersionId: z.string().uuid(),
+});
+
+export const ChallengeLeaderboardQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
 // Body schemas
@@ -33,6 +45,9 @@ export const CreateChallengeSchema = z.object({
 
 // Inferred types
 export type ChallengeAttemptParams = z.infer<typeof ChallengeAttemptParamsSchema>;
+export type ChallengeVersionParams = z.infer<typeof ChallengeVersionParamsSchema>;
 export type AdminChallengeVersionParams = z.infer<typeof AdminChallengeVersionParamsSchema>;
+export type ChallengeAttemptsQuery = z.infer<typeof ChallengeAttemptsQuerySchema>;
+export type ChallengeLeaderboardQuery = z.infer<typeof ChallengeLeaderboardQuerySchema>;
 export type SubmitAttemptBody = z.infer<typeof SubmitAttemptSchema>;
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;

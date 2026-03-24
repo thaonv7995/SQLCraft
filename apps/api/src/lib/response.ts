@@ -56,8 +56,11 @@ export const MESSAGES = {
   SANDBOX_NOT_READY: 'Sandbox is not ready',
 
   // Challenges
+  CHALLENGE_VERSION_RETRIEVED: 'Challenge version retrieved successfully',
   ATTEMPT_SUBMITTED: 'Challenge attempt submitted',
   ATTEMPT_RETRIEVED: 'Attempt retrieved successfully',
+  ATTEMPTS_RETRIEVED: 'Challenge attempts retrieved successfully',
+  LEADERBOARD_RETRIEVED: 'Challenge leaderboard retrieved successfully',
 
   // Admin
   CONTENT_PUBLISHED: 'Content published successfully',

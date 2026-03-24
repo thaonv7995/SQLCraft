@@ -16,19 +16,22 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 - [x] Trang Hồ sơ người dùng (User Profile) cơ bản.
 
 ### 2. Quản lý Nội Dung Bài Học (Lesson Engine)
-- [ ] Hiển thị danh sách Lộ trình học (Tracks) và cấu trúc Bài học (Lessons).
-- [ ] Render nội dung bài học bằng Markdown (hỗ trợ hiển thị code block, định dạng văn bản).
+- [x] Hiển thị danh sách Lộ trình học (Tracks) và cấu trúc Bài học (Lessons).
+- [x] Render nội dung bài học bằng Markdown (hỗ trợ hiển thị code block, định dạng văn bản).
+- [x] Luồng học `lesson-first`: từ Track -> Lesson -> Start Lab, có thể nạp sẵn starter query của bài học.
 
 ### 3. Phòng Lab SQL Cơ Bản (Basic SQL Editor)
-- [ ] Trình soạn thảo SQL tích hợp (dùng CodeMirror) có syntax highlighting và tự động gợi ý mã (SQL autocompletion).
-- [ ] Chạy lệnh SQL trực tiếp trên trình duyệt.
-- [ ] Hiển thị kết quả dưới dạng bảng (Data Table) và các thông báo lỗi cơ bản (Syntax Error).
-- [ ] Giao diện xem Schema/Database để biết cấu trúc bảng hiện tại.
+- [x] Trình soạn thảo SQL tích hợp (dùng CodeMirror) có syntax highlighting và tự động gợi ý mã (SQL autocompletion).
+- [x] Chạy lệnh SQL trực tiếp trên trình duyệt.
+- [x] Hiển thị kết quả dưới dạng bảng (Data Table) và các thông báo lỗi cơ bản (Syntax Error).
+- [x] Giao diện xem Schema/Database để biết cấu trúc bảng hiện tại.
 
 ### 4. Hệ thống Thử Thách & Đánh Giá (Challenge Engine)
-- [ ] Là tính năng tùy chọn (không bắt buộc): Người dùng có thể tự do chọn các Thử thách (Challenge) để thực hành nâng cao và kiếm điểm.
-- [ ] So khớp kết quả truy vấn (Result-set Validation) của học viên với kết quả chuẩn để tự động chấm điểm đúng/sai.
+- [x] Là tính năng tùy chọn (không bắt buộc): Người dùng có thể tự do chọn các Thử thách (Challenge) để thực hành nâng cao và kiếm điểm.
+- [x] So khớp kết quả truy vấn (Result-set Validation) của học viên với kết quả chuẩn để tự động chấm điểm đúng/sai.
+- [x] Có trang Challenge nằm trong ngữ cảnh Lesson, hỗ trợ xem mô tả, lịch sử attempt, best score và leaderboard cơ bản.
 - [ ] Hỗ trợ đóng góp nội dung: Bất kỳ User nào cũng có thể tự tạo Thử thách mới. Sau khi được duyệt (Admin approve), Thử thách sẽ lập tức hiển thị công khai (public) cho cộng đồng cùng tham gia giải.
+- [ ] Các challenge nên có point và so sánh để đánh giá xem query của ai tối ưu nhất. Không chỉ sql mà cả đánh index so với base database ban đầu.
 
 ### 5. Quản trị Sandbox An Toàn (Sandbox Isolation)
 - [ ] Cấp phát một Database độc lập (PostgreSQL Container) cho từng người học trong một phiên thực hành (Session) để cô lập dữ liệu.
@@ -53,7 +56,7 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 - [ ] Worker tự động sinh (Async Dataset Generation) các bộ dữ liệu mẫu lớn như dữ liệu Ecommerce.
 
 ### 8. Thực Hành Tối Ưu Hóa & Đánh Giá Chi Phí (Optimization Labs)
-- [ ] Hỗ trợ lưu lịch sử truy vấn (Query History) để dễ dàng nhìn lại quá trình làm bài.
+- [x] Hỗ trợ lưu lịch sử truy vấn (Query History) để dễ dàng nhìn lại quá trình làm bài.
 - [ ] Tính năng chạy so sánh trực tiếp song song (Side-by-side) 2 câu truy vấn.
 - [ ] Cấp quyền an toàn cho học viên tự tạo (`CREATE INDEX`) và xóa (`DROP INDEX`) để đo lường mức độ cải thiện tốc độ trực tiếp trên dữ liệu lớn.
 - [ ] Đánh giá bài làm bằng "Performance Score" thay vì chỉ đánh giá đúng/sai.

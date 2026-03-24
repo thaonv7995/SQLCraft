@@ -25,6 +25,7 @@ export interface SessionListItem {
   id: string;
   status: string;
   lessonVersionId: string;
+  challengeVersionId: string | null;
   lessonTitle: string | null;
   sandboxStatus: string | null;
   startedAt: Date;
@@ -38,6 +39,7 @@ export async function listUserSessions(userId: string, limit = 20): Promise<Sess
     id: row.id,
     status: row.status,
     lessonVersionId: row.lessonVersionId,
+    challengeVersionId: row.challengeVersionId,
     lessonTitle: row.lessonTitle,
     sandboxStatus: row.sandboxStatus,
     startedAt: row.startedAt,

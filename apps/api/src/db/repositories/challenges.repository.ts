@@ -1,4 +1,4 @@
-import { eq, and, count } from 'drizzle-orm';
+import { eq, and, count, desc } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -9,6 +9,49 @@ export type QueryExecutionRow = InferSelectModel<typeof schema.queryExecutions>;
 export type InsertChallenge = InferInsertModel<typeof schema.challenges>;
 export type InsertChallengeVersion = InferInsertModel<typeof schema.challengeVersions>;
 export type InsertChallengeAttempt = InferInsertModel<typeof schema.challengeAttempts>;
+
+export interface PublishedChallengeVersionDetailRow {
+  id: string;
+  challengeId: string;
+  lessonId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  difficulty: ChallengeRow['difficulty'];
+  sortOrder: number;
+  problemStatement: string;
+  hintText: string | null;
+  expectedResultColumns: unknown;
+  validatorType: string;
+  publishedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface ChallengeAttemptWithExecutionRow {
+  id: string;
+  learningSessionId: string;
+  challengeVersionId: string;
+  queryExecutionId: string;
+  attemptNo: number;
+  status: ChallengeAttemptRow['status'];
+  score: number | null;
+  evaluation: unknown;
+  submittedAt: Date;
+  sqlText: string;
+  queryStatus: QueryExecutionRow['status'];
+  rowsReturned: number | null;
+  durationMs: number | null;
+}
+
+export interface ChallengeLeaderboardAttemptRow {
+  userId: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  score: number | null;
+  status: ChallengeAttemptRow['status'];
+  submittedAt: Date;
+}
 
 export class ChallengesRepository {
   private get db() {
@@ -29,6 +72,40 @@ export class ChallengesRepository {
       .select()
       .from(schema.challengeVersions)
       .where(eq(schema.challengeVersions.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findPublishedVersionDetailById(id: string): Promise<PublishedChallengeVersionDetailRow | null> {
+    const [row] = await this.db
+      .select({
+        id: schema.challengeVersions.id,
+        challengeId: schema.challengeVersions.challengeId,
+        lessonId: schema.challenges.lessonId,
+        slug: schema.challenges.slug,
+        title: schema.challenges.title,
+        description: schema.challenges.description,
+        difficulty: schema.challenges.difficulty,
+        sortOrder: schema.challenges.sortOrder,
+        problemStatement: schema.challengeVersions.problemStatement,
+        hintText: schema.challengeVersions.hintText,
+        expectedResultColumns: schema.challengeVersions.expectedResultColumns,
+        validatorType: schema.challengeVersions.validatorType,
+        publishedAt: schema.challengeVersions.publishedAt,
+        createdAt: schema.challengeVersions.createdAt,
+      })
+      .from(schema.challengeVersions)
+      .innerJoin(
+        schema.challenges,
+        eq(schema.challengeVersions.challengeId, schema.challenges.id),
+      )
+      .where(
+        and(
+          eq(schema.challengeVersions.id, id),
+          eq(schema.challengeVersions.isPublished, true),
+          eq(schema.challenges.status, 'published'),
+        ),
+      )
       .limit(1);
     return row ?? null;
   }
@@ -77,6 +154,67 @@ export class ChallengesRepository {
       .where(eq(schema.challengeAttempts.id, id))
       .limit(1);
     return row ?? null;
+  }
+
+  async listAttemptsForUser(
+    userId: string,
+    challengeVersionId: string,
+  ): Promise<ChallengeAttemptWithExecutionRow[]> {
+    return this.db
+      .select({
+        id: schema.challengeAttempts.id,
+        learningSessionId: schema.challengeAttempts.learningSessionId,
+        challengeVersionId: schema.challengeAttempts.challengeVersionId,
+        queryExecutionId: schema.challengeAttempts.queryExecutionId,
+        attemptNo: schema.challengeAttempts.attemptNo,
+        status: schema.challengeAttempts.status,
+        score: schema.challengeAttempts.score,
+        evaluation: schema.challengeAttempts.evaluation,
+        submittedAt: schema.challengeAttempts.submittedAt,
+        sqlText: schema.queryExecutions.sqlText,
+        queryStatus: schema.queryExecutions.status,
+        rowsReturned: schema.queryExecutions.rowsReturned,
+        durationMs: schema.queryExecutions.durationMs,
+      })
+      .from(schema.challengeAttempts)
+      .innerJoin(
+        schema.learningSessions,
+        eq(schema.challengeAttempts.learningSessionId, schema.learningSessions.id),
+      )
+      .innerJoin(
+        schema.queryExecutions,
+        eq(schema.challengeAttempts.queryExecutionId, schema.queryExecutions.id),
+      )
+      .where(
+        and(
+          eq(schema.learningSessions.userId, userId),
+          eq(schema.challengeAttempts.challengeVersionId, challengeVersionId),
+        ),
+      )
+      .orderBy(desc(schema.challengeAttempts.submittedAt));
+  }
+
+  async listAttemptsForChallengeVersion(
+    challengeVersionId: string,
+  ): Promise<ChallengeLeaderboardAttemptRow[]> {
+    return this.db
+      .select({
+        userId: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatarUrl: schema.users.avatarUrl,
+        score: schema.challengeAttempts.score,
+        status: schema.challengeAttempts.status,
+        submittedAt: schema.challengeAttempts.submittedAt,
+      })
+      .from(schema.challengeAttempts)
+      .innerJoin(
+        schema.learningSessions,
+        eq(schema.challengeAttempts.learningSessionId, schema.learningSessions.id),
+      )
+      .innerJoin(schema.users, eq(schema.learningSessions.userId, schema.users.id))
+      .where(eq(schema.challengeAttempts.challengeVersionId, challengeVersionId))
+      .orderBy(desc(schema.challengeAttempts.score), desc(schema.challengeAttempts.submittedAt));
   }
 
   async getSessionUserId(sessionId: string): Promise<string | null> {
