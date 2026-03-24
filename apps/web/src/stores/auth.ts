@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthTokens } from '@sqlcraft/types';
-import type { User } from '@/lib/api';
+import type { AuthTokens, User } from '@/lib/api';
 
 interface AuthState {
   user: User | null;

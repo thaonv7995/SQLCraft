@@ -88,11 +88,15 @@ export interface Track {
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   lessonCount: number;
-  estimatedHours: number;
-  tags: string[];
-  thumbnailUrl?: string;
-  isPublished: boolean;
+  coverUrl?: string | null;
+  status?: 'draft' | 'published' | 'archived';
+  sortOrder?: number;
   createdAt?: string;
+  updatedAt?: string;
+  estimatedHours?: number;
+  tags?: string[];
+  thumbnailUrl?: string;
+  isPublished?: boolean;
   userProgress?: {
     completedLessons: number;
     lastAccessedAt: string;
@@ -110,8 +114,56 @@ export interface Lesson {
   sortOrder: number;
   /** The currently published lesson version ID — pass this to create a session */
   publishedVersionId?: string | null;
-  isPublished?: boolean;
-  status?: 'locked' | 'available' | 'in_progress' | 'completed';
+  status?: 'draft' | 'published' | 'archived';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface LessonChallengeSummary {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  sortOrder: number;
+  publishedVersionId?: string | null;
+}
+
+export interface LessonVersionOutline {
+  id: string;
+  trackId: string;
+  slug: string;
+  title: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  estimatedMinutes: number;
+}
+
+export interface SchemaTemplateSummary {
+  id: string;
+  name: string;
+  description?: string | null;
+  version: number;
+  definition: unknown;
+  status: 'draft' | 'published' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LessonVersion {
+  id: string;
+  lessonId: string;
+  versionNo: number;
+  title: string;
+  content: string;
+  starterQuery?: string | null;
+  isPublished: boolean;
+  schemaTemplateId?: string | null;
+  datasetTemplateId?: string | null;
+  publishedAt?: string | null;
+  createdAt: string;
+  lesson: LessonVersionOutline | null;
+  challenges: LessonChallengeSummary[];
+  schemaTemplate: SchemaTemplateSummary | null;
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
@@ -124,6 +176,13 @@ export interface LearningSession {
   status: 'provisioning' | 'active' | 'paused' | 'ended' | 'expired' | 'failed';
   sandboxStatus?: string | null;
   lessonTitle?: string | null;
+  sandbox?: {
+    id: string;
+    status: string;
+    dbName?: string | null;
+    expiresAt?: string | null;
+    updatedAt?: string | null;
+  } | null;
   startedAt: string;
   lastActivityAt?: string | null;
   createdAt: string;
@@ -311,6 +370,16 @@ export interface AuthResult {
   tokens: AuthTokens;
 }
 
+interface PaginatedPayload<T> {
+  items: T[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 function normalizeRole(role?: string): UserRole {
   if (role === 'admin' || role === 'contributor') {
     return role;
@@ -340,6 +409,55 @@ function normalizeUser(user: UserPayload): User {
     lastLoginAt: user.lastLoginAt ?? null,
     updatedAt: user.updatedAt,
     stats: user.stats,
+  };
+}
+
+function normalizePaginatedPayload<T>(payload: PaginatedPayload<T>): PaginatedResponse<T> {
+  return {
+    items: payload.items ?? [],
+    total: payload.meta?.total ?? 0,
+    page: payload.meta?.page ?? 1,
+    limit: payload.meta?.limit ?? payload.items?.length ?? 0,
+    totalPages: payload.meta?.totalPages ?? 1,
+  };
+}
+
+function normalizeTrack(track: Track): Track {
+  const status = track.status ?? (track.isPublished ? 'published' : 'draft');
+
+  return {
+    ...track,
+    description: track.description ?? '',
+    coverUrl: track.coverUrl ?? null,
+    status,
+    thumbnailUrl: track.thumbnailUrl ?? track.coverUrl ?? undefined,
+    isPublished: track.isPublished ?? status === 'published',
+    tags: track.tags ?? [],
+  };
+}
+
+function normalizeLesson(lesson: Lesson): Lesson {
+  return {
+    ...lesson,
+    description: lesson.description ?? '',
+  };
+}
+
+function normalizeChallengeSummary(challenge: LessonChallengeSummary): LessonChallengeSummary {
+  return {
+    ...challenge,
+    description: challenge.description ?? '',
+  };
+}
+
+function normalizeLessonVersion(version: LessonVersion): LessonVersion {
+  return {
+    ...version,
+    content: version.content ?? '',
+    starterQuery: version.starterQuery ?? null,
+    challenges: Array.isArray(version.challenges)
+      ? version.challenges.map(normalizeChallengeSummary)
+      : [],
   };
 }
 
@@ -444,17 +562,30 @@ export const authApi = {
 export const tracksApi = {
   list: (params?: { difficulty?: string; page?: number; limit?: number }) =>
     api
-      .get<PaginatedResponse<Track>>('/tracks', { params })
-      .then((r) => r.data),
+      .get<PaginatedPayload<Track>>('/tracks', {
+        params: { page: params?.page, limit: params?.limit },
+      })
+      .then((r) => normalizePaginatedPayload(r.data))
+      .then((page) => ({
+        ...page,
+        items: page.items.map(normalizeTrack).filter((track) =>
+          params?.difficulty ? track.difficulty === params.difficulty : true
+        ),
+      })),
 
   get: (idOrSlug: string) =>
-    api.get<Track & { lessons?: Lesson[] }>(`/tracks/${idOrSlug}`).then((r) => r.data),
+    api
+      .get<Track & { lessons?: Lesson[] }>(`/tracks/${idOrSlug}`)
+      .then((r) => ({
+        ...normalizeTrack(r.data),
+        lessons: Array.isArray(r.data.lessons) ? r.data.lessons.map(normalizeLesson) : [],
+      })),
 
   /** Convenience: get track then extract its embedded lessons list */
   getLessons: (trackId: string) =>
     api
       .get<Track & { lessons?: Lesson[] }>(`/tracks/${trackId}`)
-      .then((r) => r.data.lessons ?? []),
+      .then((r) => (r.data.lessons ?? []).map(normalizeLesson)),
 
   create: (payload: Partial<Track>) =>
     api.post<Track>('/tracks', payload).then((r) => r.data),
@@ -468,7 +599,11 @@ export const tracksApi = {
 // ─── Lessons API ──────────────────────────────────────────────────────────────
 
 export const lessonsApi = {
-  get: (id: string) => api.get<Lesson>(`/lessons/${id}`).then((r) => r.data),
+  get: (id: string) =>
+    api.get<Lesson>(`/lessons/${id}`).then((r) => normalizeLesson(r.data)),
+
+  getVersion: (id: string) =>
+    api.get<LessonVersion>(`/lesson-versions/${id}`).then((r) => normalizeLessonVersion(r.data)),
 
   create: (payload: Partial<Lesson>) =>
     api.post<Lesson>('/lessons', payload).then((r) => r.data),
@@ -525,7 +660,7 @@ export const queryApi = {
         params: pagination,
       });
       return normalizeQueryHistoryPage(res.data);
-    } catch (error) {
+    } catch {
       // Backward compatibility for older API servers.
       const res = await api.get<PaginatedResponse<QueryExecution>>(legacyPath, {
         params: { sessionId, ...pagination },

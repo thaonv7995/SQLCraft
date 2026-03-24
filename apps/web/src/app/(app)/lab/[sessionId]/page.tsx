@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLabStore } from '@/stores/lab';
 import toast from 'react-hot-toast';
 import { useExecuteQuery, useExplainQuery, useSessionStatus } from '@/hooks/use-query-execution';
@@ -21,6 +21,7 @@ import {
 import { cn, formatDuration, formatRows, formatRelativeTime, truncateSql } from '@/lib/utils';
 import type { QueryResultColumn } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
+import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
 
 function sessionIdFromParams(params: { sessionId?: string | string[] }): string {
   const raw = params.sessionId;
@@ -452,6 +453,18 @@ export default function LabPage() {
     error: sessionFetchError,
     refetch: refetchSession,
   } = useSessionStatus(sessionId);
+  const lessonContext = useMemo(() => readLabBootstrap(sessionId), [sessionId]);
+
+  useEffect(() => {
+    const bootstrap = readLabBootstrap(sessionId);
+
+    if (!bootstrap || bootstrap.starterQueryConsumed || !bootstrap.starterQuery?.trim()) {
+      return;
+    }
+
+    setQuery(bootstrap.starterQuery);
+    markLabBootstrapConsumed(sessionId);
+  }, [sessionId, setQuery]);
 
   // Global keyboard shortcut: Ctrl+Enter to execute (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
@@ -571,9 +584,18 @@ export default function LabPage() {
           </div>
 
           <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {session?.lessonTitle && (
+            {lessonContext?.lessonPath && (
+              <Link
+                href={lessonContext.lessonPath}
+                className="hidden items-center gap-1 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant transition-colors hover:text-on-surface md:inline-flex"
+              >
+                <span className="material-symbols-outlined text-sm">arrow_back</span>
+                Back to lesson
+              </Link>
+            )}
+            {(session?.lessonTitle ?? lessonContext?.lessonTitle) && (
               <span className="hidden max-w-[14rem] truncate text-xs text-on-surface-variant md:block">
-                {session.lessonTitle}
+                {session?.lessonTitle ?? lessonContext?.lessonTitle}
               </span>
             )}
             <div className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1">
