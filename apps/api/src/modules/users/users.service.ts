@@ -1,8 +1,10 @@
 import { desc, eq } from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
 import { usersRepository } from '../../db/repositories/users.repository';
 import { queriesRepository } from '../../db/repositories/queries.repository';
 import { getDb, schema } from '../../db/index';
-import { NotFoundError } from '../../lib/errors';
+import { NotFoundError, ValidationError } from '../../lib/errors';
+import { uploadFile, getPresignedUrl } from '../../lib/storage';
 import type {
   UserProfileResponse,
   UserProfileUpdateResponse,
@@ -18,17 +20,25 @@ export async function getUserProfile(userId: string): Promise<UserProfileRespons
     throw new NotFoundError('User not found');
   }
 
-  const roles = await usersRepository.getRoleNames(userId);
+  const [roles, stats] = await Promise.all([
+    usersRepository.getRoleNames(userId),
+    usersRepository.getUserStats(userId),
+  ]);
+
+  const avatarUrl = user.avatarUrl
+    ? await getPresignedUrl(user.avatarUrl)
+    : null;
 
   return {
     id: user.id,
     email: user.email,
     username: user.username,
     displayName: user.displayName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl,
     bio: user.bio,
     status: user.status,
     roles,
+    stats,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -49,16 +59,58 @@ export async function updateUserProfile(
     throw new NotFoundError('User not found');
   }
 
+  const avatarUrl = updated.avatarUrl
+    ? await getPresignedUrl(updated.avatarUrl)
+    : null;
+
   return {
     id: updated.id,
     email: updated.email,
     username: updated.username,
     displayName: updated.displayName,
-    avatarUrl: updated.avatarUrl,
+    avatarUrl,
     bio: updated.bio,
     status: updated.status,
     updatedAt: updated.updatedAt,
   };
+}
+
+export async function uploadAvatar(
+  userId: string,
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ avatarUrl: string }> {
+  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (!allowed.includes(mimeType)) {
+    throw new ValidationError('Avatar must be a JPEG, PNG, WebP, or GIF image');
+  }
+
+  const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const objectName = `avatars/${userId}.${ext}`;
+  await uploadFile(objectName, buffer, mimeType);
+
+  // Store the object name in DB (not a URL); presign on every read
+  const updated = await usersRepository.update(userId, { avatarUrl: objectName });
+  if (!updated) throw new NotFoundError('User not found');
+
+  const avatarUrl = await getPresignedUrl(objectName);
+  return { avatarUrl };
+}
+
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const user = await usersRepository.findById(userId);
+  if (!user) throw new NotFoundError('User not found');
+  if (!user.passwordHash) throw new ValidationError('Account does not use password authentication');
+
+  const match = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!match) throw new ValidationError('Current password is incorrect');
+
+  const newHash = await bcrypt.hash(newPassword, 12);
+  await usersRepository.update(userId, { passwordHash: newHash });
 }
 
 export async function getUserSessions(

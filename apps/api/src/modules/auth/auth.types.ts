@@ -14,9 +14,18 @@ export interface UserPublic {
   createdAt: Date;
 }
 
+export interface UserStats {
+  queriesRun: number;
+  completedChallenges: number;
+  activeSessions: number;
+  totalPoints: number;
+  currentStreak: number;
+}
+
 export interface UserProfile extends UserPublic {
   bio: string | null;
   roles: string[];
+  stats: UserStats;
   lastLoginAt: Date | null;
   updatedAt: Date;
 }

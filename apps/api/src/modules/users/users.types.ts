@@ -1,3 +1,11 @@
+export interface UserStats {
+  queriesRun: number;
+  completedChallenges: number;
+  activeSessions: number;
+  totalPoints: number;
+  currentStreak: number;
+}
+
 export interface UserProfileResponse {
   id: string;
   email: string;
@@ -7,6 +15,7 @@ export interface UserProfileResponse {
   bio: string | null;
   status: string;
   roles: string[];
+  stats: UserStats;
   lastLoginAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

@@ -9,6 +9,7 @@ import {
   UnauthorizedError,
 } from '../../lib/errors';
 import { config } from '../../lib/config';
+import { getPresignedUrl } from '../../lib/storage';
 import type { AuthTokens, AuthResult, TokenUser, UserProfile } from './auth.types';
 
 const ACCESS_TOKEN_TTL = config.JWT_EXPIRES_IN;
@@ -121,13 +122,15 @@ export async function loginUser(
   const roles = await usersRepository.getRoleNames(user.id);
   const tokens = await generateTokens(fastify, user, roles);
 
+  const avatarUrl = user.avatarUrl ? await getPresignedUrl(user.avatarUrl) : null;
+
   return {
     user: {
       id: user.id,
       email: user.email,
       username: user.username,
       displayName: user.displayName,
-      avatarUrl: user.avatarUrl,
+      avatarUrl,
       status: user.status,
       createdAt: user.createdAt,
     },
@@ -179,17 +182,22 @@ export async function getMe(userId: string): Promise<UserProfile> {
     throw new UnauthorizedError('User not found');
   }
 
-  const roles = await usersRepository.getRoleNames(user.id);
+  const [roles, stats, avatarUrl] = await Promise.all([
+    usersRepository.getRoleNames(user.id),
+    usersRepository.getUserStats(user.id),
+    user.avatarUrl ? getPresignedUrl(user.avatarUrl) : Promise.resolve(null),
+  ]);
 
   return {
     id: user.id,
     email: user.email,
     username: user.username,
     displayName: user.displayName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl,
     bio: user.bio,
     status: user.status,
     roles,
+    stats,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,

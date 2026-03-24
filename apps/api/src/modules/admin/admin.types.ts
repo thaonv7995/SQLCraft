@@ -18,13 +18,19 @@ export interface CreateChallengeResult {
 export interface PublishChallengeVersionResult extends ChallengeVersionRow {}
 
 export interface ListUsersResult {
-  items: Pick<UserRow, 'id' | 'email' | 'username' | 'displayName' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'>[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
+  items: (Pick<UserRow, 'id' | 'email' | 'username' | 'displayName' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'> & { roles: string[] })[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface UpdateUserRoleResult {
+  id: string;
+  email: string;
+  username: string | null;
+  roles: string[];
+  updatedAt: Date | null;
 }
 
 export interface UpdateUserStatusResult {

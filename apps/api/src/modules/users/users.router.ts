@@ -1,8 +1,10 @@
 import { FastifyInstance } from 'fastify';
-import type { UpdateProfileBody, PaginationQuery } from './users.schema';
+import type { UpdateProfileBody, PaginationQuery, ChangePasswordBody } from './users.schema';
 import {
   getMeHandler,
   updateMeHandler,
+  uploadAvatarHandler,
+  changePasswordHandler,
   getMySessionsHandler,
   getMyQueryHistoryHandler,
 } from './users.handler';
@@ -40,6 +42,41 @@ export default async function usersRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     updateMeHandler,
+  );
+
+  fastify.post(
+    '/v1/users/me/avatar',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Upload user avatar (multipart/form-data)',
+        security: [{ bearerAuth: [] }],
+        consumes: ['multipart/form-data'],
+      },
+    },
+    uploadAvatarHandler,
+  );
+
+  fastify.post<{ Body: ChangePasswordBody }>(
+    '/v1/users/me/change-password',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Change current user password',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['currentPassword', 'newPassword'],
+          properties: {
+            currentPassword: { type: 'string' },
+            newPassword: { type: 'string', minLength: 8 },
+          },
+        },
+      },
+    },
+    changePasswordHandler,
   );
 
   fastify.get<{ Querystring: PaginationQuery }>(

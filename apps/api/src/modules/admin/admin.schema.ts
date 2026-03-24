@@ -65,10 +65,16 @@ export const ListUsersQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
   status: z.enum(['active', 'disabled', 'invited']).optional(),
+  search: z.string().optional(),
+  role: z.enum(['learner', 'contributor', 'admin']).optional(),
 });
 
 export const UpdateUserStatusSchema = z.object({
   status: z.enum(['active', 'disabled', 'invited']),
+});
+
+export const UpdateUserRoleSchema = z.object({
+  role: z.enum(['learner', 'contributor', 'admin']),
 });
 
 // ─── Params ───────────────────────────────────────────────────────────────────
@@ -86,4 +92,5 @@ export type CreateLessonVersionBody = z.infer<typeof CreateLessonVersionSchema>;
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
 export type UpdateUserStatusBody = z.infer<typeof UpdateUserStatusSchema>;
+export type UpdateUserRoleBody = z.infer<typeof UpdateUserRoleSchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;

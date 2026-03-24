@@ -20,10 +20,12 @@ const EnvSchema = z.object({
   REFRESH_TOKEN_EXPIRES_DAYS: z.coerce.number().int().positive().default(30),
 
   // ── Object Storage ───────────────────────────────────────────────────────
-  STORAGE_ENDPOINT:   z.string().url(),
-  STORAGE_ACCESS_KEY: z.string().min(1),
-  STORAGE_SECRET_KEY: z.string().min(1),
-  STORAGE_BUCKET:     z.string().default('sqlcraft'),
+  STORAGE_ENDPOINT:     z.string().url(),
+  STORAGE_PUBLIC_URL:   z.string().url().optional(),
+  STORAGE_ACCESS_KEY:   z.string().min(1),
+  STORAGE_SECRET_KEY:   z.string().min(1),
+  STORAGE_BUCKET:       z.string().default('sqlcraft'),
+  STORAGE_PRESIGN_TTL:  z.coerce.number().int().positive().default(86400), // 24h
 
   // ── Sandbox ──────────────────────────────────────────────────────────────
   SANDBOX_DB_HOST:     z.string(),

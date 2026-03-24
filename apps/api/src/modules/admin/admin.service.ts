@@ -14,6 +14,7 @@ import type {
   CreateChallengeBody,
   ListUsersQuery,
   UpdateUserStatusBody,
+  UpdateUserRoleBody,
 } from './admin.schema';
 import type {
   CreateTrackResult,
@@ -25,6 +26,7 @@ import type {
   PublishChallengeVersionResult,
   ListUsersResult,
   UpdateUserStatusResult,
+  UpdateUserRoleResult,
   SystemHealthResult,
 } from './admin.types';
 
@@ -130,15 +132,17 @@ export async function publishChallengeVersion(
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export async function listUsers(query: ListUsersQuery): Promise<ListUsersResult> {
-  const { items, total } = await usersRepository.listUsers(query.page, query.limit, query.status);
+  const { items, total } = await usersRepository.listUsers(query.page, query.limit, {
+    status: query.status,
+    search: query.search,
+    role: query.role,
+  });
   return {
     items,
-    meta: {
-      page: query.page,
-      limit: query.limit,
-      total,
-      totalPages: Math.ceil(total / query.limit),
-    },
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages: Math.ceil(total / query.limit),
   };
 }
 
@@ -149,6 +153,17 @@ export async function updateUserStatus(
   const updated = await usersRepository.updateStatus(id, body.status);
   if (!updated) throw new NotFoundError('User not found');
   return updated;
+}
+
+export async function updateUserRole(
+  id: string,
+  body: UpdateUserRoleBody,
+): Promise<UpdateUserRoleResult> {
+  const user = await usersRepository.findById(id);
+  if (!user) throw new NotFoundError('User not found');
+  await usersRepository.setUserRole(id, body.role);
+  const roles = await usersRepository.getRoleNames(id);
+  return { id: user.id, email: user.email, username: user.username, roles, updatedAt: user.updatedAt };
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────

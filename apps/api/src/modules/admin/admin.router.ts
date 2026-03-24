@@ -7,6 +7,7 @@ import type {
   CreateChallengeBody,
   ListUsersQuery,
   UpdateUserStatusBody,
+  UpdateUserRoleBody,
   AdminIdParams,
 } from './admin.schema';
 import {
@@ -19,6 +20,7 @@ import {
   publishChallengeVersionHandler,
   listUsersHandler,
   updateUserStatusHandler,
+  updateUserRoleHandler,
   systemHealthHandler,
 } from './admin.handler';
 
@@ -206,6 +208,8 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             page: { type: 'integer', minimum: 1, default: 1 },
             limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
             status: { type: 'string', enum: ['active', 'disabled', 'invited'] },
+            search: { type: 'string' },
+            role: { type: 'string', enum: ['learner', 'contributor', 'admin'] },
           },
         },
       },
@@ -236,6 +240,31 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     updateUserStatusHandler,
+  );
+
+  fastify.patch<{ Params: AdminIdParams; Body: UpdateUserRoleBody }>(
+    '/v1/admin/users/:id/role',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Update user role',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          required: ['role'],
+          properties: {
+            role: { type: 'string', enum: ['learner', 'contributor', 'admin'] },
+          },
+        },
+      },
+    },
+    updateUserRoleHandler,
   );
 
   // ─── System ───────────────────────────────────────────────────────────────────

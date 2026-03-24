@@ -537,20 +537,54 @@ export const queryApi = {
 
 // ─── Users API ────────────────────────────────────────────────────────────────
 
+export interface UpdateProfilePayload {
+  displayName?: string;
+  bio?: string;
+  avatarUrl?: string | null;
+}
+
 export const usersApi = {
+  // Admin-only: list all users
   list: (params?: { search?: string; role?: string; status?: string; page?: number }) =>
     api
-      .get<PaginatedResponse<User>>('/users', { params })
-      .then((r) => r.data),
+      .get<PaginatedResponse<UserPayload & { roles: string[] }>>('/admin/users', { params })
+      .then((r) => ({
+        ...r.data,
+        items: r.data.items.map((u) => normalizeUser(u)),
+      })) as Promise<PaginatedResponse<User>>,
 
   get: (id: string) => api.get<User>(`/users/${id}`).then((r) => r.data),
 
+  // Admin-only: update a user's role
   updateRole: (id: string, role: string) =>
-    api.patch<User>(`/users/${id}/role`, { role }).then((r) => r.data),
+    api.patch<User>(`/admin/users/${id}/role`, { role }).then((r) => r.data),
 
-  disable: (id: string) => api.post(`/users/${id}/disable`).then((r) => r.data),
+  // Admin-only: disable a user
+  disable: (id: string) =>
+    api.patch(`/admin/users/${id}/status`, { status: 'disabled' }).then((r) => r.data),
 
-  enable: (id: string) => api.post(`/users/${id}/enable`).then((r) => r.data),
+  // Admin-only: enable a user
+  enable: (id: string) =>
+    api.patch(`/admin/users/${id}/status`, { status: 'active' }).then((r) => r.data),
+
+  // Current user: update own profile
+  updateMe: (data: UpdateProfilePayload) =>
+    api.patch<UserPayload>('/users/me', data).then((r) => normalizeUser(r.data)),
+
+  // Current user: change password
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post('/users/me/change-password', { currentPassword, newPassword }).then((r) => r.data),
+
+  // Current user: upload avatar
+  uploadAvatar: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api
+      .post<{ avatarUrl: string }>('/users/me/avatar', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
