@@ -37,14 +37,37 @@ export interface AuthTokens {
   expiresIn: number;
 }
 
+export type UserRole = 'student' | 'contributor' | 'admin';
+
+interface UserPayload {
+  id: string;
+  username: string;
+  email: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  role?: string;
+  roles?: string[];
+  status?: string;
+  bio?: string | null;
+  createdAt: string;
+  lastLoginAt?: string | null;
+  updatedAt?: string;
+  stats?: UserStats;
+}
+
 export interface User {
   id: string;
   username: string;
   email: string;
   displayName: string;
-  avatarUrl?: string;
-  role: 'student' | 'contributor' | 'admin';
+  avatarUrl?: string | null;
+  role: UserRole;
+  roles?: string[];
+  status?: string;
+  bio?: string | null;
   createdAt: string;
+  lastLoginAt?: string | null;
+  updatedAt?: string;
   stats?: UserStats;
 }
 
@@ -229,6 +252,43 @@ export interface LeaderboardEntry {
   streak: number;
 }
 
+export interface AuthResult {
+  user: User;
+  tokens: AuthTokens;
+}
+
+function normalizeRole(role?: string): UserRole {
+  if (role === 'admin' || role === 'contributor') {
+    return role;
+  }
+  return 'student';
+}
+
+function normalizeUser(user: UserPayload): User {
+  const roles = user.roles ?? (user.role ? [user.role] : []);
+  const primaryRole = roles.includes('admin')
+    ? 'admin'
+    : roles.includes('contributor')
+      ? 'contributor'
+      : roles[0];
+
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    displayName: user.displayName ?? user.username,
+    avatarUrl: user.avatarUrl ?? null,
+    role: normalizeRole(primaryRole),
+    roles,
+    status: user.status,
+    bio: user.bio ?? null,
+    createdAt: user.createdAt,
+    lastLoginAt: user.lastLoginAt ?? null,
+    updatedAt: user.updatedAt,
+    stats: user.stats,
+  };
+}
+
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 
 const api: AxiosInstance = axios.create({
@@ -287,17 +347,32 @@ api.interceptors.response.use(
 
 export const authApi = {
   login: (payload: LoginPayload) =>
-    api.post<AuthTokens>('/auth/login', payload).then((r) => r.data),
+    api
+      .post<{ user: UserPayload; tokens: AuthTokens }>('/auth/login', payload)
+      .then((r) => ({
+        ...r.data,
+        user: normalizeUser(r.data.user),
+      }) satisfies AuthResult),
 
   register: (payload: RegisterPayload) =>
-    api.post<{ user: User; tokens: AuthTokens }>('/auth/register', payload).then((r) => r.data),
+    api
+      .post<{ user: UserPayload; tokens: AuthTokens }>('/auth/register', payload)
+      .then((r) => ({
+        ...r.data,
+        user: normalizeUser(r.data.user),
+      }) satisfies AuthResult),
 
   logout: () => api.post('/auth/logout').then((r) => r.data),
 
   refreshToken: (refreshToken: string) =>
     api.post<AuthTokens>('/auth/refresh', { refreshToken }).then((r) => r.data),
 
-  me: () => api.get<User>('/auth/me').then((r) => r.data),
+  me: (accessToken?: string) =>
+    api
+      .get<UserPayload>('/auth/me', {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      })
+      .then((r) => normalizeUser(r.data)),
 };
 
 // ─── Tracks API ───────────────────────────────────────────────────────────────

@@ -60,7 +60,8 @@ export default function RegisterPage() {
         password: data.password,
         displayName: data.displayName,
       });
-      setAuth(user, tokens);
+      const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
+      setAuth(hydratedUser, tokens);
       toast.success('Account created! Welcome to SQLCraft.');
       router.push('/dashboard');
     } catch (err) {

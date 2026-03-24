@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import * as schema from './schema/index';
 
@@ -39,22 +39,22 @@ async function seed() {
 
   // 2. Create admin user
   console.log('Creating admin user...');
+  const adminPasswordHash = await bcrypt.hash('admin123', 12);
   let adminUser = (
     await db
       .select()
       .from(schema.users)
-      .where(eq(schema.users.email, 'admin@sqlcraft.dev'))
+      .where(or(eq(schema.users.email, 'admin@sqlcraft.dev'), eq(schema.users.username, 'admin')))
       .limit(1)
   )[0];
 
   if (!adminUser) {
-    const passwordHash = await bcrypt.hash('admin123', 12);
     const [u] = await db
       .insert(schema.users)
       .values({
         email: 'admin@sqlcraft.dev',
         username: 'admin',
-        passwordHash,
+        passwordHash: adminPasswordHash,
         displayName: 'SQLCraft Admin',
         status: 'active',
         provider: 'email',
@@ -62,6 +62,22 @@ async function seed() {
       .returning();
     adminUser = u;
     console.log('  Created admin user: admin@sqlcraft.dev / admin123');
+  } else {
+    const [u] = await db
+      .update(schema.users)
+      .set({
+        email: 'admin@sqlcraft.dev',
+        username: 'admin',
+        passwordHash: adminPasswordHash,
+        displayName: 'SQLCraft Admin',
+        status: 'active',
+        provider: 'email',
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, adminUser.id))
+      .returning();
+    adminUser = u;
+    console.log('  Updated admin user: admin@sqlcraft.dev / admin123');
   }
 
   // Assign admin role
@@ -78,7 +94,63 @@ async function seed() {
     });
   }
 
-  // 3. Create schema template for ecommerce
+  // 3. Create learner test user
+  console.log('Creating learner test user...');
+  const learnerPasswordHash = await bcrypt.hash('user12345', 12);
+  let learnerUser = (
+    await db
+      .select()
+      .from(schema.users)
+      .where(or(eq(schema.users.email, 'user@sqlcraft.dev'), eq(schema.users.username, 'testuser')))
+      .limit(1)
+  )[0];
+
+  if (!learnerUser) {
+    const [u] = await db
+      .insert(schema.users)
+      .values({
+        email: 'user@sqlcraft.dev',
+        username: 'testuser',
+        passwordHash: learnerPasswordHash,
+        displayName: 'SQLCraft User',
+        status: 'active',
+        provider: 'email',
+      })
+      .returning();
+    learnerUser = u;
+    console.log('  Created learner user: user@sqlcraft.dev / user12345');
+  } else {
+    const [u] = await db
+      .update(schema.users)
+      .set({
+        email: 'user@sqlcraft.dev',
+        username: 'testuser',
+        passwordHash: learnerPasswordHash,
+        displayName: 'SQLCraft User',
+        status: 'active',
+        provider: 'email',
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, learnerUser.id))
+      .returning();
+    learnerUser = u;
+    console.log('  Updated learner user: user@sqlcraft.dev / user12345');
+  }
+
+  const existingLearnerRole = await db
+    .select()
+    .from(schema.userRoles)
+    .where(eq(schema.userRoles.userId, learnerUser.id))
+    .limit(1);
+
+  if (existingLearnerRole.length === 0) {
+    await db.insert(schema.userRoles).values({
+      userId: learnerUser.id,
+      roleId: learnerRole.id,
+    });
+  }
+
+  // 4. Create schema template for ecommerce
   console.log('Creating ecommerce schema template...');
   let ecommerceSchema = (
     await db
@@ -160,7 +232,7 @@ async function seed() {
     console.log('  Created ecommerce schema template');
   }
 
-  // 4. Create dataset templates
+  // 5. Create dataset templates
   console.log('Creating dataset templates...');
   const datasetSizes: Array<{
     size: 'tiny' | 'small' | 'medium';
@@ -195,7 +267,7 @@ async function seed() {
     }
   }
 
-  // 5. Create tracks
+  // 6. Create tracks
   console.log('Creating tracks...');
 
   let fundamentalsTrack = (

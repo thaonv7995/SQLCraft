@@ -15,7 +15,7 @@ const NAV_LINKS = [
   { href: '/docs', label: 'Documentation' },
 ];
 
-function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl?: string }) {
+function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl?: string | null }) {
   const [open, setOpen] = useState(false);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const initials = generateInitials(displayName);

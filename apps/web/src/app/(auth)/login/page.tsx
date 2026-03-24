@@ -34,9 +34,9 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginFormData): Promise<void> => {
     try {
-      const tokens = await authApi.login(data);
-      const me = await authApi.me();
-      setAuth(me, tokens);
+      const { user, tokens } = await authApi.login(data);
+      const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
+      setAuth(hydratedUser, tokens);
       toast.success('Welcome back!');
       router.push('/dashboard');
     } catch (err) {
