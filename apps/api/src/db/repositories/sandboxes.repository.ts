@@ -51,13 +51,6 @@ export class SandboxesRepository {
       .where(eq(schema.sandboxInstances.id, id));
   }
 
-  async enqueueJob(type: string, payload: Record<string, unknown>): Promise<void> {
-    await this.db.insert(schema.systemJobs).values({
-      type,
-      status: 'pending',
-      payload,
-    });
-  }
 }
 
 export const sandboxesRepository = new SandboxesRepository();

@@ -1,7 +1,29 @@
 import 'dotenv/config';
-import { Worker, type Job } from 'bullmq';
+import { Worker, Queue, type Job } from 'bullmq';
 import IORedis from 'ioredis';
+import { Pool } from 'pg';
 import pino from 'pino';
+import {
+  mainDb,
+  fetchSchemaTemplate,
+  fetchSandbox,
+  updateSandboxReady,
+  updateSandboxStatus,
+  updateSessionStatus,
+  updateQueryExecutionRunning,
+  updateQueryExecutionSuccess,
+  updateQueryExecutionFailed,
+  insertQueryExecutionPlan,
+  fetchExpiredSandboxes,
+} from './db';
+import {
+  executeSql,
+  getExplainPlan,
+  shapeResults,
+  validateSql,
+  QueryBlockedError,
+  QueryTimeoutError,
+} from './query-executor';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -11,127 +33,374 @@ const logger = pino({
       : undefined,
 });
 
-// ---- Redis connection ----
+// ─── Config ───────────────────────────────────────────────────────────────────
+
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const connection = new IORedis(redisUrl, {
-  maxRetriesPerRequest: null,
-});
+const sandboxHost = process.env.SANDBOX_DB_HOST ?? 'localhost';
+const sandboxPort = process.env.SANDBOX_DB_PORT ?? '5433';
+const sandboxUser = process.env.SANDBOX_DB_USER ?? 'sandbox';
+const sandboxPassword = process.env.SANDBOX_DB_PASSWORD ?? 'sandbox';
+const sandboxAdminUrl = `postgresql://${sandboxUser}:${sandboxPassword}@${sandboxHost}:${sandboxPort}/postgres`;
 
+// Session TTL: 2 hours
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
+// Expiry scanner interval: 5 minutes
+const EXPIRY_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 
+// ─── Redis connection ─────────────────────────────────────────────────────────
+
+const connection = new IORedis(redisUrl, { maxRetriesPerRequest: null });
 connection.on('connect', () => logger.info({ redisUrl }, 'Redis connected'));
 connection.on('error', (err) => logger.error({ err }, 'Redis connection error'));
 
-// ---- Queue names ----
+// ─── Queue names ──────────────────────────────────────────────────────────────
+
 const QUEUES = {
   SANDBOX_PROVISIONING: 'sandbox-provisioning',
   SANDBOX_CLEANUP: 'sandbox-cleanup',
-  DATASET_GENERATION: 'dataset-generation',
-  CHALLENGE_EVALUATION: 'challenge-evaluation',
+  SANDBOX_RESET: 'sandbox-reset',
+  QUERY_EXECUTION: 'query-execution',
 } as const;
 
-// ---- Worker: sandbox-provisioning ----
+// Queue client used by the expiry scanner to enqueue cleanup jobs
+type BullConnection = import('bullmq').ConnectionOptions;
+const conn = connection as unknown as BullConnection;
+const cleanupQueue = new Queue(QUEUES.SANDBOX_CLEANUP, { connection: conn });
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Generate a safe PostgreSQL database name from the sandbox UUID */
+function sandboxDbName(sandboxId: string): string {
+  return `s_${sandboxId.replace(/-/g, '').slice(0, 16)}`;
+}
+
+/** Build a connection string pointing to a specific sandbox database */
+function sandboxConnStr(dbName: string): string {
+  return `postgresql://${sandboxUser}:${sandboxPassword}@${sandboxHost}:${sandboxPort}/${dbName}`;
+}
+
+/** Generate CREATE TABLE DDL from a parsed schema definition */
+function buildCreateTableDdl(
+  tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>,
+): string[] {
+  return tables.map(
+    (t) =>
+      `CREATE TABLE IF NOT EXISTS "${t.name}" (\n` +
+      t.columns.map((c) => `  "${c.name}" ${c.type}`).join(',\n') +
+      '\n);',
+  );
+}
+
+/** Terminate all connections to a sandbox database so it can be dropped */
+async function terminateSandboxConnections(adminPool: Pool, dbName: string): Promise<void> {
+  await adminPool.query(
+    `SELECT pg_terminate_backend(pid)
+     FROM pg_stat_activity
+     WHERE datname = $1 AND pid <> pg_backend_pid()`,
+    [dbName],
+  );
+}
+
+// ─── Worker: provision_sandbox ────────────────────────────────────────────────
+
 const sandboxProvisioningWorker = new Worker(
   QUEUES.SANDBOX_PROVISIONING,
   async (job: Job) => {
-    logger.info({ jobId: job.id, data: job.data }, 'Processing sandbox provisioning job');
-
-    const { learningSessionId, schemaTemplateId, datasetTemplateId } = job.data as {
+    const { sandboxInstanceId, learningSessionId, schemaTemplateId } = job.data as {
+      sandboxInstanceId: string;
       learningSessionId: string;
-      schemaTemplateId: string;
-      datasetTemplateId?: string;
+      schemaTemplateId: string | null;
+      datasetTemplateId: string | null;
     };
 
-    // TODO: implement actual sandbox provisioning logic
-    // 1. Create an isolated database schema for the session
-    // 2. Apply the schema template DDL
-    // 3. Load the dataset if provided
-    // 4. Update sandbox status to 'ready' in the database
-    logger.info(
-      { learningSessionId, schemaTemplateId, datasetTemplateId },
-      'Sandbox provisioning placeholder — implement me'
-    );
+    logger.info({ sandboxInstanceId, learningSessionId }, 'Provisioning sandbox');
+
+    await updateSandboxStatus(sandboxInstanceId, 'provisioning');
+
+    const dbName = sandboxDbName(sandboxInstanceId);
+    const adminPool = new Pool({ connectionString: sandboxAdminUrl, max: 1 });
+
+    try {
+      // Create isolated database
+      await adminPool.query(`CREATE DATABASE "${dbName}"`);
+      logger.info({ dbName }, 'Sandbox database created');
+
+      // Apply schema DDL if template exists
+      if (schemaTemplateId) {
+        const schemaDef = await fetchSchemaTemplate(schemaTemplateId);
+
+        if (schemaDef?.tables?.length) {
+          const ddlStatements = buildCreateTableDdl(schemaDef.tables);
+          const sandboxPool = new Pool({ connectionString: sandboxConnStr(dbName), max: 1 });
+
+          try {
+            for (const ddl of ddlStatements) {
+              await sandboxPool.query(ddl);
+            }
+            logger.info({ dbName, tableCount: ddlStatements.length }, 'Schema DDL applied');
+          } finally {
+            await sandboxPool.end();
+          }
+        }
+      }
+
+      const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      await updateSandboxReady(sandboxInstanceId, dbName, expiresAt);
+      await updateSessionStatus(learningSessionId, 'active');
+
+      logger.info({ sandboxInstanceId, dbName, expiresAt }, 'Sandbox ready');
+    } catch (err) {
+      logger.error({ err, sandboxInstanceId }, 'Sandbox provisioning failed');
+      await updateSandboxStatus(sandboxInstanceId, 'failed');
+      await updateSessionStatus(learningSessionId, 'failed');
+      throw err;
+    } finally {
+      await adminPool.end();
+    }
   },
-  { connection: connection as unknown as import("bullmq").ConnectionOptions }
+  { connection: conn },
 );
 
-// ---- Worker: sandbox-cleanup ----
+// ─── Worker: destroy_sandbox ──────────────────────────────────────────────────
+
 const sandboxCleanupWorker = new Worker(
   QUEUES.SANDBOX_CLEANUP,
   async (job: Job) => {
-    logger.info({ jobId: job.id, data: job.data }, 'Processing sandbox cleanup job');
-
     const { sandboxInstanceId, learningSessionId } = job.data as {
       sandboxInstanceId: string;
       learningSessionId: string;
     };
 
-    // TODO: implement actual sandbox cleanup logic
-    // 1. Drop the sandbox schema from sandbox-postgres
-    // 2. Update sandbox status to 'destroyed' in the database
-    logger.info(
-      { sandboxInstanceId, learningSessionId },
-      'Sandbox cleanup placeholder — implement me'
+    logger.info({ sandboxInstanceId }, 'Destroying sandbox');
+
+    const sandbox = await fetchSandbox(sandboxInstanceId);
+
+    if (!sandbox) {
+      logger.warn({ sandboxInstanceId }, 'Sandbox not found, skipping cleanup');
+      return;
+    }
+
+    if (sandbox.status === 'destroyed') {
+      logger.info({ sandboxInstanceId }, 'Sandbox already destroyed');
+      return;
+    }
+
+    await updateSandboxStatus(sandboxInstanceId, 'expiring');
+
+    if (sandbox.dbName) {
+      const adminPool = new Pool({ connectionString: sandboxAdminUrl, max: 1 });
+
+      try {
+        await terminateSandboxConnections(adminPool, sandbox.dbName);
+        await adminPool.query(`DROP DATABASE IF EXISTS "${sandbox.dbName}"`);
+        logger.info({ dbName: sandbox.dbName }, 'Sandbox database dropped');
+      } catch (err) {
+        logger.error({ err, sandboxInstanceId }, 'Failed to drop sandbox database');
+        await updateSandboxStatus(sandboxInstanceId, 'failed');
+        throw err;
+      } finally {
+        await adminPool.end();
+      }
+    }
+
+    await updateSandboxStatus(sandboxInstanceId, 'destroyed');
+
+    // Expire the session if it hasn't ended/failed already
+    const sessionResult = await mainDb.query(
+      'SELECT status FROM learning_sessions WHERE id = $1',
+      [learningSessionId],
     );
+    const sessionStatus: string | undefined = sessionResult.rows[0]?.status;
+    if (sessionStatus && !['ended', 'expired', 'failed'].includes(sessionStatus)) {
+      await updateSessionStatus(learningSessionId, 'expired');
+    }
+
+    logger.info({ sandboxInstanceId }, 'Sandbox destroyed');
   },
-  { connection: connection as unknown as import("bullmq").ConnectionOptions }
+  { connection: conn },
 );
 
-// ---- Worker: dataset-generation ----
-const datasetGenerationWorker = new Worker(
-  QUEUES.DATASET_GENERATION,
-  async (job: Job) => {
-    logger.info({ jobId: job.id, data: job.data }, 'Processing dataset generation job');
+// ─── Worker: reset_sandbox ────────────────────────────────────────────────────
 
-    const { datasetTemplateId, targetSize } = job.data as {
-      datasetTemplateId: string;
-      targetSize: 'tiny' | 'small' | 'medium' | 'large';
+const sandboxResetWorker = new Worker(
+  QUEUES.SANDBOX_RESET,
+  async (job: Job) => {
+    const { sandboxInstanceId } = job.data as {
+      sandboxInstanceId: string;
+      learningSessionId: string;
     };
 
-    // TODO: implement dataset generation logic
-    // 1. Load schema template to understand table structures
-    // 2. Generate synthetic data rows matching the target size
-    // 3. Write seed SQL files to storage (MinIO)
-    // 4. Update dataset template status to 'published'
-    logger.info(
-      { datasetTemplateId, targetSize },
-      'Dataset generation placeholder — implement me'
-    );
+    logger.info({ sandboxInstanceId }, 'Resetting sandbox');
+
+    const sandbox = await fetchSandbox(sandboxInstanceId);
+
+    if (!sandbox?.dbName) {
+      logger.warn({ sandboxInstanceId }, 'Sandbox not found or has no dbName, cannot reset');
+      await updateSandboxStatus(sandboxInstanceId, 'failed');
+      return;
+    }
+
+    try {
+      const sandboxPool = new Pool({ connectionString: sandboxConnStr(sandbox.dbName), max: 1 });
+
+      try {
+        // Drop all user tables
+        const tablesResult = await sandboxPool.query<{ tablename: string }>(
+          `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+        );
+        for (const { tablename } of tablesResult.rows) {
+          await sandboxPool.query(`DROP TABLE IF EXISTS "${tablename}" CASCADE`);
+        }
+
+        // Re-apply schema DDL
+        if (sandbox.schemaTemplateId) {
+          const schemaDef = await fetchSchemaTemplate(sandbox.schemaTemplateId);
+          if (schemaDef?.tables?.length) {
+            const ddlStatements = buildCreateTableDdl(schemaDef.tables);
+            for (const ddl of ddlStatements) {
+              await sandboxPool.query(ddl);
+            }
+            logger.info({ dbName: sandbox.dbName, tableCount: ddlStatements.length }, 'Schema re-applied');
+          }
+        }
+      } finally {
+        await sandboxPool.end();
+      }
+
+      const newExpiresAt = new Date(Date.now() + SESSION_TTL_MS);
+      await updateSandboxReady(sandboxInstanceId, sandbox.dbName, newExpiresAt);
+
+      logger.info({ sandboxInstanceId }, 'Sandbox reset complete');
+    } catch (err) {
+      logger.error({ err, sandboxInstanceId }, 'Sandbox reset failed');
+      await updateSandboxStatus(sandboxInstanceId, 'failed');
+      throw err;
+    }
   },
-  { connection: connection as unknown as import("bullmq").ConnectionOptions }
+  { connection: conn },
 );
 
-// ---- Worker: challenge-evaluation ----
-const challengeEvaluationWorker = new Worker(
-  QUEUES.CHALLENGE_EVALUATION,
-  async (job: Job) => {
-    logger.info({ jobId: job.id, data: job.data }, 'Processing challenge evaluation job');
+// ─── Worker: execute_query ────────────────────────────────────────────────────
 
-    const { challengeAttemptId, queryExecutionId, challengeVersionId } = job.data as {
-      challengeAttemptId: string;
+const queryExecutionWorker = new Worker(
+  QUEUES.QUERY_EXECUTION,
+  async (job: Job) => {
+    const { queryExecutionId, sandboxInstanceId, sql, explainPlan, planMode } = job.data as {
       queryExecutionId: string;
-      challengeVersionId: string;
+      sandboxInstanceId: string;
+      sql: string;
+      explainPlan?: boolean;
+      planMode?: 'explain' | 'explain_analyze';
     };
 
-    // TODO: implement challenge evaluation logic
-    // 1. Fetch the query execution result from the database
-    // 2. Fetch the challenge version validator config
-    // 3. Compare result set columns/rows against expected output
-    // 4. Optionally score performance (rows scanned, duration)
-    // 5. Write evaluation result back to the challenge_attempt row
-    logger.info(
-      { challengeAttemptId, queryExecutionId, challengeVersionId },
-      'Challenge evaluation placeholder — implement me'
-    );
+    logger.info({ queryExecutionId }, 'Executing query');
+
+    const sandbox = await fetchSandbox(sandboxInstanceId);
+
+    if (!sandbox?.dbName) {
+      await updateQueryExecutionFailed(queryExecutionId, 'failed', 'Sandbox not available');
+      logger.warn({ sandboxInstanceId }, 'Sandbox not found for query execution');
+      return;
+    }
+
+    if (sandbox.status === 'destroyed' || sandbox.status === 'failed') {
+      await updateQueryExecutionFailed(
+        queryExecutionId,
+        'failed',
+        `Sandbox is in unusable state: ${sandbox.status}`,
+      );
+      return;
+    }
+
+    // Pre-validate
+    const validation = validateSql(sql);
+    if (!validation.valid) {
+      await updateQueryExecutionFailed(
+        queryExecutionId,
+        'blocked',
+        validation.reason ?? 'Blocked',
+      );
+      return;
+    }
+
+    await updateQueryExecutionRunning(queryExecutionId);
+
+    const connStr = sandboxConnStr(sandbox.dbName);
+
+    try {
+      const result = await executeSql(connStr, sql);
+      const preview = shapeResults(result);
+
+      await updateQueryExecutionSuccess(
+        queryExecutionId,
+        result.durationMs,
+        result.rowCount,
+        preview,
+      );
+
+      if (explainPlan) {
+        const mode = planMode ?? 'explain';
+        try {
+          const plan = await getExplainPlan(connStr, sql, mode);
+          await insertQueryExecutionPlan(queryExecutionId, mode, plan.rawPlan, plan.planSummary);
+        } catch (planErr) {
+          logger.warn({ planErr, queryExecutionId }, 'Failed to get explain plan (non-fatal)');
+        }
+      }
+
+      logger.info(
+        { queryExecutionId, durationMs: result.durationMs, rows: result.rowCount },
+        'Query succeeded',
+      );
+    } catch (err: unknown) {
+      if (err instanceof QueryTimeoutError) {
+        await updateQueryExecutionFailed(queryExecutionId, 'timed_out', err.message);
+      } else if (err instanceof QueryBlockedError) {
+        await updateQueryExecutionFailed(queryExecutionId, 'blocked', err.message);
+      } else {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        const durationMs = (err as { durationMs?: number }).durationMs;
+        await updateQueryExecutionFailed(queryExecutionId, 'failed', message, durationMs);
+      }
+      logger.warn({ queryExecutionId, err }, 'Query execution failed');
+    }
   },
-  { connection: connection as unknown as import("bullmq").ConnectionOptions }
+  { connection: conn },
 );
 
-// ---- Event listeners ----
+// ─── Expiry scanner ───────────────────────────────────────────────────────────
+
+async function runExpiryScanner(): Promise<void> {
+  try {
+    const expired = await fetchExpiredSandboxes();
+    if (expired.length === 0) return;
+
+    logger.info({ count: expired.length }, 'Found expired sandboxes, enqueuing cleanup');
+
+    for (const sandbox of expired) {
+      // Mark as expiring immediately to prevent duplicate enqueues on next scan
+      await updateSandboxStatus(sandbox.id, 'expiring');
+      await cleanupQueue.add(
+        'destroy_sandbox',
+        { sandboxInstanceId: sandbox.id, learningSessionId: sandbox.learningSessionId },
+        { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, 'Expiry scanner error');
+  }
+}
+
+const expiryScanner = setInterval(runExpiryScanner, EXPIRY_SCAN_INTERVAL_MS);
+runExpiryScanner().catch((err) => logger.error({ err }, 'Initial expiry scan failed'));
+
+// ─── Event listeners ──────────────────────────────────────────────────────────
+
 const workers = [
   { name: QUEUES.SANDBOX_PROVISIONING, worker: sandboxProvisioningWorker },
   { name: QUEUES.SANDBOX_CLEANUP, worker: sandboxCleanupWorker },
-  { name: QUEUES.DATASET_GENERATION, worker: datasetGenerationWorker },
-  { name: QUEUES.CHALLENGE_EVALUATION, worker: challengeEvaluationWorker },
+  { name: QUEUES.SANDBOX_RESET, worker: sandboxResetWorker },
+  { name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker },
 ];
 
 for (const { name, worker } of workers) {
@@ -150,12 +419,16 @@ for (const { name, worker } of workers) {
   logger.info({ queue: name }, 'Worker started');
 }
 
-// ---- Graceful shutdown ----
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
+
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Received shutdown signal, closing workers...');
 
+  clearInterval(expiryScanner);
   await Promise.all(workers.map(({ worker }) => worker.close()));
+  await cleanupQueue.close();
   await connection.quit();
+  await mainDb.end();
 
   logger.info('All workers stopped. Exiting.');
   process.exit(0);
@@ -165,9 +438,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 logger.info(
-  {
-    queues: Object.values(QUEUES),
-    redisUrl,
-  },
-  'SQLCraft worker service started'
+  { queues: Object.values(QUEUES), redisUrl },
+  'SQLCraft worker service started',
 );

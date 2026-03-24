@@ -11,7 +11,6 @@ vi.mock('../../../db/repositories', () => ({
     listBySession: vi.fn(),
     listByUser: vi.fn(),
     updateSessionActivity: vi.fn(),
-    enqueueJob: vi.fn(),
   },
 }));
 
@@ -19,8 +18,13 @@ vi.mock('../../../services/query-executor', () => ({
   validateSql: vi.fn(),
 }));
 
+vi.mock('../../../lib/queue', () => ({
+  enqueueExecuteQuery: vi.fn(),
+}));
+
 import { queriesRepository } from '../../../db/repositories';
 import { validateSql } from '../../../services/query-executor';
+import * as queue from '../../../lib/queue';
 import { submitQuery, getQueryExecution, getSandboxStatus } from '../queries.service';
 import { NotFoundError, ForbiddenError } from '../../../lib/errors';
 import { ApiCode } from '@sqlcraft/types';
@@ -108,7 +112,7 @@ describe('submitQuery()', () => {
       makeExecution({ status: 'blocked' })
     );
     vi.mocked(queriesRepository.updateSessionActivity).mockResolvedValue(undefined);
-    vi.mocked(queriesRepository.enqueueJob).mockResolvedValue(undefined);
+    vi.mocked(queue.enqueueExecuteQuery).mockResolvedValue(undefined);
 
     const outcome = await submitQuery('user-1', validBody);
     expect(outcome.blocked).toBe(true);
@@ -126,7 +130,7 @@ describe('submitQuery()', () => {
       makeExecution({ status: 'accepted' })
     );
     vi.mocked(queriesRepository.updateSessionActivity).mockResolvedValue(undefined);
-    vi.mocked(queriesRepository.enqueueJob).mockResolvedValue(undefined);
+    vi.mocked(queue.enqueueExecuteQuery).mockResolvedValue(undefined);
 
     const outcome = await submitQuery('user-1', validBody);
     expect(outcome.blocked).toBe(false);
