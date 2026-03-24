@@ -4,7 +4,7 @@ import { usersRepository } from '../../db/repositories/users.repository';
 import { queriesRepository } from '../../db/repositories/queries.repository';
 import { getDb, schema } from '../../db/index';
 import { NotFoundError, ValidationError } from '../../lib/errors';
-import { uploadFile } from '../../lib/storage';
+import { uploadFile, getPresignedUrl } from '../../lib/storage';
 import type {
   UserProfileResponse,
   UserProfileUpdateResponse,
@@ -25,12 +25,16 @@ export async function getUserProfile(userId: string): Promise<UserProfileRespons
     usersRepository.getUserStats(userId),
   ]);
 
+  const avatarUrl = user.avatarUrl
+    ? await getPresignedUrl(user.avatarUrl)
+    : null;
+
   return {
     id: user.id,
     email: user.email,
     username: user.username,
     displayName: user.displayName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl,
     bio: user.bio,
     status: user.status,
     roles,
@@ -55,12 +59,16 @@ export async function updateUserProfile(
     throw new NotFoundError('User not found');
   }
 
+  const avatarUrl = updated.avatarUrl
+    ? await getPresignedUrl(updated.avatarUrl)
+    : null;
+
   return {
     id: updated.id,
     email: updated.email,
     username: updated.username,
     displayName: updated.displayName,
-    avatarUrl: updated.avatarUrl,
+    avatarUrl,
     bio: updated.bio,
     status: updated.status,
     updatedAt: updated.updatedAt,
@@ -79,11 +87,13 @@ export async function uploadAvatar(
 
   const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
   const objectName = `avatars/${userId}.${ext}`;
-  const avatarUrl = await uploadFile(objectName, buffer, mimeType);
+  await uploadFile(objectName, buffer, mimeType);
 
-  const updated = await usersRepository.update(userId, { avatarUrl });
+  // Store the object name in DB (not a URL); presign on every read
+  const updated = await usersRepository.update(userId, { avatarUrl: objectName });
   if (!updated) throw new NotFoundError('User not found');
 
+  const avatarUrl = await getPresignedUrl(objectName);
   return { avatarUrl };
 }
 
