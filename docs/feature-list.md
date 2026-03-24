@@ -47,8 +47,8 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 Đây là cụm tính năng đặc thù giúp SQLCraft vượt trội, tập trung vào mảng tối ưu hóa hiệu năng (Query Optimization).
 
 ### 6. Trình Vẽ Cây Execution Plan (Execution Plan Visualizer)
-- [ ] Chạy lệnh `EXPLAIN` và `EXPLAIN ANALYZE` ngầm.
-- [ ] Dịch kết quả từ Database engine thành một biểu đồ cây (Tree Visualizer) trực quan hiển thị Cost, Scanned Rows, Index Hit/Miss giúp nhận diện "cổ chai" (bottleneck).
+- [x] Chạy lệnh `EXPLAIN` và `EXPLAIN ANALYZE` ngầm. Luồng `Run` giờ tự chọn plan mode phù hợp: `EXPLAIN ANALYZE` cho query đọc an toàn (`SELECT`, `WITH ... SELECT`) và `EXPLAIN` cho các câu lệnh hỗ trợ nhưng có khả năng ghi (`INSERT` / `UPDATE` / `DELETE` / `WITH` chứa DML), tránh side-effect ngoài ý muốn.
+- [x] Dịch kết quả từ Database engine thành một biểu đồ cây (Tree Visualizer) trực quan hiển thị Cost, Scanned Rows, Actual Time, Index Hit/Miss, buffer hits/reads và highlight bottleneck/hot path thay cho JSON thô trong tab Execution Plan.
 
 ### 7. Điều Chỉnh Quy Mô Dữ Ưiệu (Progressive Dataset Scaling)
 - [ ] Cho phép người học chuyển đổi bài tập chạy trên các kích cỡ dữ liệu khác nhau cho cùng một cấu trúc bảng (Schema):

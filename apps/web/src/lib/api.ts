@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosResponse, type AxiosError } from 'axios';
+import { getExplainPlanMode } from './utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -307,6 +308,7 @@ export interface QueryExecutionPlan {
   plan: unknown;
   totalCost?: number;
   actualTime?: number;
+  mode?: 'explain' | 'explain_analyze';
 }
 
 export interface QueryExecution {
@@ -330,6 +332,150 @@ function mapQueryExecutionStatus(raw: unknown): QueryExecution['status'] {
   if (s === 'running') return 'running';
   if (s === 'pending') return 'pending';
   return 'pending';
+}
+
+function toNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeQueryResultPreview(
+  item: Record<string, unknown>,
+): QueryExecution['result'] {
+  const preview = (
+    item.result && typeof item.result === 'object'
+      ? item.result
+      : item.resultPreview && typeof item.resultPreview === 'object'
+        ? item.resultPreview
+        : null
+  ) as Record<string, unknown> | null;
+
+  if (!preview) {
+    return undefined;
+  }
+
+  const columns = Array.isArray(preview.columns) ? preview.columns : [];
+  const rows = Array.isArray(preview.rows) ? preview.rows : [];
+
+  if (columns.every((column) => typeof column === 'object' && column !== null && 'name' in column)) {
+    return {
+      columns: columns as QueryResultPreview['columns'],
+      rows: rows as QueryResultPreview['rows'],
+      totalRows:
+        toNumber(preview.totalRows) ??
+        toNumber(item.rowCount) ??
+        toNumber(item.rowsReturned) ??
+        rows.length,
+      truncated: Boolean(preview.truncated),
+    };
+  }
+
+  if (!columns.every((column) => typeof column === 'string')) {
+    return undefined;
+  }
+
+  const columnNames = columns as string[];
+  const normalizedRows = rows.map((row) => {
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      return row as Record<string, unknown>;
+    }
+
+    if (Array.isArray(row)) {
+      return Object.fromEntries(
+        columnNames.map((columnName, index) => [columnName, row[index] ?? null]),
+      );
+    }
+
+    return Object.fromEntries(columnNames.map((columnName) => [columnName, null]));
+  });
+
+  return {
+    columns: columnNames.map((name) => ({
+      name,
+      dataType: 'unknown',
+      nullable: true,
+    })),
+    rows: normalizedRows,
+    totalRows:
+      toNumber(preview.totalRows) ??
+      toNumber(item.rowCount) ??
+      toNumber(item.rowsReturned) ??
+      normalizedRows.length,
+    truncated: Boolean(preview.truncated),
+  };
+}
+
+function normalizeExecutionPlanFromPayload(
+  payload: Record<string, unknown>,
+): QueryExecution['executionPlan'] {
+  const directPlan =
+    payload.executionPlan && typeof payload.executionPlan === 'object'
+      ? (payload.executionPlan as Record<string, unknown>)
+      : null;
+
+  if (directPlan && 'plan' in directPlan) {
+    return {
+      type: directPlan.type === 'text' ? 'text' : 'json',
+      plan: directPlan.plan,
+      totalCost: toNumber(directPlan.totalCost),
+      actualTime: toNumber(directPlan.actualTime),
+      mode:
+        directPlan.mode === 'explain' || directPlan.mode === 'explain_analyze'
+          ? directPlan.mode
+          : undefined,
+    };
+  }
+
+  const plans = Array.isArray(payload.plans)
+    ? (payload.plans.filter(
+        (plan): plan is Record<string, unknown> => typeof plan === 'object' && plan !== null,
+      ) as Record<string, unknown>[])
+    : [];
+
+  if (plans.length === 0) {
+    return undefined;
+  }
+
+  const selectedPlan = plans.reduce<Record<string, unknown> | null>((best, current) => {
+    const currentMode = current.planMode === 'explain_analyze' ? 2 : current.planMode === 'explain' ? 1 : 0;
+    const bestMode = best?.planMode === 'explain_analyze' ? 2 : best?.planMode === 'explain' ? 1 : 0;
+
+    if (currentMode > bestMode) {
+      return current;
+    }
+
+    if (currentMode < bestMode) {
+      return best;
+    }
+
+    const currentCreatedAt = Date.parse(String(current.createdAt ?? ''));
+    const bestCreatedAt = Date.parse(String(best?.createdAt ?? ''));
+
+    if (Number.isFinite(currentCreatedAt) && (!Number.isFinite(bestCreatedAt) || currentCreatedAt > bestCreatedAt)) {
+      return current;
+    }
+
+    return best ?? current;
+  }, null);
+
+  if (!selectedPlan) {
+    return undefined;
+  }
+
+  const summary =
+    selectedPlan.planSummary && typeof selectedPlan.planSummary === 'object'
+      ? (selectedPlan.planSummary as Record<string, unknown>)
+      : {};
+
+  return {
+    type: 'json',
+    plan: selectedPlan.rawPlan,
+    totalCost: toNumber(summary.totalCost),
+    actualTime: toNumber(summary.actualTime),
+    mode:
+      selectedPlan.planMode === 'explain' || selectedPlan.planMode === 'explain_analyze'
+        ? selectedPlan.planMode
+        : undefined,
+  };
 }
 
 /** Normalize API rows that may use sqlText / learningSessionId / submittedAt. */
@@ -358,8 +504,8 @@ function normalizeQueryExecutionItem(item: Record<string, unknown>): QueryExecut
           ? item.rowsReturned
           : undefined,
     errorMessage: typeof item.errorMessage === 'string' ? item.errorMessage : undefined,
-    result: item.result as QueryExecution['result'],
-    executionPlan: item.executionPlan as QueryExecution['executionPlan'],
+    result: normalizeQueryResultPreview(item),
+    executionPlan: normalizeExecutionPlanFromPayload(item),
     createdAt,
   };
 }
@@ -851,25 +997,42 @@ export const sessionsApi = {
 
 export const queryApi = {
   execute: (payload: QueryExecutionRequest) =>
-    api
-      .post<QueryExecution>('/query-executions', {
-        learningSessionId: payload.sessionId,
-        sql: payload.sql,
-      })
-      .then((r) => r.data),
+    {
+      const planMode = getExplainPlanMode(payload.sql);
+      return api
+        .post<QueryExecution>('/query-executions', {
+          learningSessionId: payload.sessionId,
+          sql: payload.sql,
+          explainPlan: planMode != null,
+          planMode: planMode ?? undefined,
+        })
+        .then((r) => normalizeQueryExecutionItem(r.data as unknown as Record<string, unknown>));
+    },
 
   explain: (payload: QueryExecutionRequest) =>
-    api
-      .post<QueryExecution>('/query-executions', {
-        learningSessionId: payload.sessionId,
-        sql: payload.sql,
-        explainPlan: true,
-        planMode: 'explain_analyze',
-      })
-      .then((r) => r.data),
+    {
+      const planMode = getExplainPlanMode(payload.sql);
+
+      if (planMode == null) {
+        return Promise.reject(
+          new Error('Execution plan is only available for SELECT/INSERT/UPDATE/DELETE statements'),
+        );
+      }
+
+      return api
+        .post<QueryExecution>('/query-executions', {
+          learningSessionId: payload.sessionId,
+          sql: payload.sql,
+          explainPlan: true,
+          planMode,
+        })
+        .then((r) => normalizeQueryExecutionItem(r.data as unknown as Record<string, unknown>));
+    },
 
   poll: (executionId: string) =>
-    api.get<QueryExecution>(`/query-executions/${executionId}`).then((r) => r.data),
+    api
+      .get<QueryExecution>(`/query-executions/${executionId}`)
+      .then((r) => normalizeQueryExecutionItem(r.data as unknown as Record<string, unknown>)),
 
   history: async (sessionId?: string, params?: { page?: number; limit?: number }) => {
     const pagination = { ...params };

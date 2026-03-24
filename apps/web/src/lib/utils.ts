@@ -5,6 +5,8 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export type ExplainPlanMode = 'explain' | 'explain_analyze';
+
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
@@ -117,7 +119,7 @@ export function classifyQueryType(sql: string | null | undefined): string {
   if (sql == null || typeof sql !== 'string') {
     return 'QUERY';
   }
-  const trimmed = sql.trim().toUpperCase();
+  const trimmed = stripLeadingSqlComments(sql).toUpperCase();
   if (trimmed.startsWith('SELECT')) return 'SELECT';
   if (trimmed.startsWith('INSERT')) return 'INSERT';
   if (trimmed.startsWith('UPDATE')) return 'UPDATE';
@@ -127,4 +129,58 @@ export function classifyQueryType(sql: string | null | undefined): string {
   if (trimmed.startsWith('ALTER')) return 'ALTER';
   if (trimmed.startsWith('EXPLAIN')) return 'EXPLAIN';
   return 'QUERY';
+}
+
+export function stripLeadingSqlComments(sql: string | null | undefined): string {
+  if (sql == null || typeof sql !== 'string') {
+    return '';
+  }
+
+  let remaining = sql.trimStart();
+
+  while (remaining.length > 0) {
+    if (remaining.startsWith('--')) {
+      const newlineIndex = remaining.indexOf('\n');
+      remaining = newlineIndex === -1 ? '' : remaining.slice(newlineIndex + 1).trimStart();
+      continue;
+    }
+
+    if (remaining.startsWith('/*')) {
+      const blockEnd = remaining.indexOf('*/');
+      remaining = blockEnd === -1 ? '' : remaining.slice(blockEnd + 2).trimStart();
+      continue;
+    }
+
+    break;
+  }
+
+  return remaining.trimStart();
+}
+
+export function getExplainPlanMode(sql: string | null | undefined): ExplainPlanMode | null {
+  const normalizedSql = stripLeadingSqlComments(sql);
+
+  if (!normalizedSql || /^explain\b/i.test(normalizedSql)) {
+    return null;
+  }
+
+  if (/^select\b/i.test(normalizedSql)) {
+    return 'explain_analyze';
+  }
+
+  if (/^with\b/i.test(normalizedSql)) {
+    return /\b(insert|update|delete|merge)\b/i.test(normalizedSql)
+      ? 'explain'
+      : 'explain_analyze';
+  }
+
+  if (/^(insert|update|delete|merge)\b/i.test(normalizedSql)) {
+    return 'explain';
+  }
+
+  return null;
+}
+
+export function shouldAutoExplainAnalyze(sql: string | null | undefined): boolean {
+  return getExplainPlanMode(sql) === 'explain_analyze';
 }

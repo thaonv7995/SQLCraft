@@ -9,6 +9,9 @@ import {
   getStatusColor,
   generateInitials,
   classifyQueryType,
+  stripLeadingSqlComments,
+  getExplainPlanMode,
+  shouldAutoExplainAnalyze,
 } from '../utils';
 
 // ─── cn() ─────────────────────────────────────────────────────────────────────
@@ -209,5 +212,51 @@ describe('classifyQueryType()', () => {
   it('is case-insensitive', () => {
     expect(classifyQueryType('select 1')).toBe('SELECT');
     expect(classifyQueryType('insert into x values (1)')).toBe('INSERT');
+  });
+
+  it('ignores leading SQL comments', () => {
+    expect(classifyQueryType('-- note\nSELECT 1')).toBe('SELECT');
+    expect(classifyQueryType('/* prep */\nUPDATE users SET active = true')).toBe('UPDATE');
+  });
+});
+
+// ─── stripLeadingSqlComments() ───────────────────────────────────────────────
+
+describe('stripLeadingSqlComments()', () => {
+  it('removes line and block comments before the statement', () => {
+    expect(stripLeadingSqlComments('-- hello\nSELECT 1')).toBe('SELECT 1');
+    expect(stripLeadingSqlComments('/* hello */\nSELECT 1')).toBe('SELECT 1');
+    expect(stripLeadingSqlComments('/* hello */\n-- world\nSELECT 1')).toBe('SELECT 1');
+  });
+});
+
+// ─── getExplainPlanMode() ────────────────────────────────────────────────────
+
+describe('getExplainPlanMode()', () => {
+  it.each([
+    ['SELECT * FROM users', 'explain_analyze'],
+    ['WITH cte AS (SELECT 1) SELECT * FROM cte', 'explain_analyze'],
+    ['UPDATE users SET active = true WHERE id = 1', 'explain'],
+    ['DELETE FROM users WHERE id = 1', 'explain'],
+    ['WITH updated AS (UPDATE users SET active = true RETURNING *) SELECT * FROM updated', 'explain'],
+    ['CREATE INDEX idx_users_email ON users(email)', null],
+    ['EXPLAIN SELECT * FROM users', null],
+  ])('returns %s for %s', (sql, expected) => {
+    expect(getExplainPlanMode(sql)).toBe(expected);
+  });
+});
+
+// ─── shouldAutoExplainAnalyze() ──────────────────────────────────────────────
+
+describe('shouldAutoExplainAnalyze()', () => {
+  it('returns true only for safe read queries', () => {
+    expect(shouldAutoExplainAnalyze('SELECT * FROM users')).toBe(true);
+    expect(shouldAutoExplainAnalyze('WITH cte AS (SELECT 1) SELECT * FROM cte')).toBe(true);
+    expect(shouldAutoExplainAnalyze('UPDATE users SET active = true WHERE id = 1')).toBe(false);
+    expect(
+      shouldAutoExplainAnalyze(
+        'WITH updated AS (UPDATE users SET active = true RETURNING *) SELECT * FROM updated',
+      ),
+    ).toBe(false);
   });
 });

@@ -19,9 +19,10 @@ import {
   TableCell,
   TableEmpty,
 } from '@/components/ui/table';
-import { cn, formatDuration, formatRows, formatRelativeTime, truncateSql } from '@/lib/utils';
+import { cn, formatDuration, formatRows, formatRelativeTime, getExplainPlanMode, truncateSql } from '@/lib/utils';
 import { challengesApi, lessonsApi, type QueryResultColumn } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
+import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
 
 function sessionIdFromParams(params: { sessionId?: string | string[] }): string {
@@ -210,7 +211,7 @@ function ResultsPanel() {
 // ─── Execution Plan Panel ─────────────────────────────────────────────────────
 
 function ExecutionPlanPanel() {
-  const { executionPlan, isExplaining } = useLabStore();
+  const { executionPlan, isExplaining, lastExecution } = useLabStore();
 
   if (isExplaining) {
     return (
@@ -231,7 +232,9 @@ function ExecutionPlanPanel() {
             account_tree
           </span>
           <p className="text-sm text-on-surface-variant">
-            Click Explain to see the execution plan
+            {lastExecution
+              ? 'Execution plan is not available for that statement. Run a supported query or click Explain.'
+              : 'Run a supported query and the execution plan will appear here automatically.'}
           </p>
         </div>
       </div>
@@ -240,17 +243,7 @@ function ExecutionPlanPanel() {
 
   return (
     <div className="flex-1 overflow-auto p-4">
-      <pre className="text-xs font-mono text-on-surface-variant bg-surface-container-lowest rounded-xl p-4 overflow-auto">
-        {JSON.stringify(executionPlan.plan, null, 2)}
-      </pre>
-      {executionPlan.totalCost !== undefined && (
-        <div className="mt-3 flex gap-4 text-xs text-on-surface-variant">
-          <span>Total Cost: <span className="text-primary font-mono">{executionPlan.totalCost}</span></span>
-          {executionPlan.actualTime !== undefined && (
-            <span>Actual Time: <span className="text-tertiary font-mono">{executionPlan.actualTime}ms</span></span>
-          )}
-        </div>
-      )}
+      <ExecutionPlanTree executionPlan={executionPlan} />
     </div>
   );
 }
@@ -578,6 +571,7 @@ export default function LabPage() {
     null,
   );
   const latestChallengeAttempt = challengeAttempts[0] ?? null;
+  const explainPlanMode = getExplainPlanMode(currentQuery);
   const submitAttemptMutation = useMutation({
     mutationFn: async () => {
       if (!session?.challengeVersionId) {
@@ -729,8 +723,13 @@ export default function LabPage() {
                 variant="secondary"
                 size="sm"
                 loading={isExplaining}
-                disabled={!currentQuery.trim() || isExplaining || session?.status !== 'active'}
+                disabled={!currentQuery.trim() || !explainPlanMode || isExplaining || session?.status !== 'active'}
                 onClick={() => explainQuery({ sessionId, sql: currentQuery })}
+                title={
+                  !explainPlanMode && currentQuery.trim()
+                    ? 'Execution plan is available for SELECT/INSERT/UPDATE/DELETE statements'
+                    : 'Generate an execution plan for the current query'
+                }
                 leftIcon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
               >
                 Explain

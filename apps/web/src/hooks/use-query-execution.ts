@@ -45,13 +45,14 @@ export function useExecuteQuery() {
       return accepted;
     },
     onMutate: () => {
-      useLabStore.setState({ isExecuting: true, error: null, results: null });
+      useLabStore.setState({ isExecuting: true, error: null, results: null, executionPlan: null });
     },
     onSuccess: (data) => {
       useLabStore.setState((state) => ({
         isExecuting: false,
         lastExecution: data,
         results: data.result ?? null,
+        executionPlan: data.executionPlan ?? null,
         error: data.status === 'error' ? (data.errorMessage ?? 'Query failed') : null,
         queryHistory: [data, ...state.queryHistory].slice(0, 100),
       }));
@@ -86,7 +87,7 @@ export function useExplainQuery() {
       return accepted;
     },
     onMutate: () => {
-      useLabStore.setState({ isExplaining: true, error: null });
+      useLabStore.setState({ isExplaining: true, error: null, executionPlan: null });
     },
     onSuccess: (data) => {
       useLabStore.setState({
