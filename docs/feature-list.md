@@ -9,11 +9,11 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 Đây là nền tảng tối thiểu để học viên có thể vào học và thực hành SQL.
 
 ### 1. Quản lý Người Dùng & Phân Quyền (Identity)
-- [ ] Đăng nhập, Đăng ký, Quản lý Session bằng JWT.
-- [ ] Hệ thống Role cơ bản: **Admin** và **User**.
-  - [ ] **User**: Có quyền học tập và đặc biệt có quyền đóng góp (contribute) các Database mặc định, Schema, Bài học (Lessons), và Lộ trình (Tracks).
-  - [ ] **Admin**: Quản lý hệ thống và phê duyệt (approve) các nội dung do User đóng góp trước khi xuất bản.
-- [ ] Trang Hồ sơ người dùng (User Profile) cơ bản.
+- [x] Đăng nhập, Đăng ký, Quản lý Session bằng JWT.
+- [x] Hệ thống Role cơ bản: **Admin** và **User**.
+  - [x] **User**: Có quyền học tập và đặc biệt có quyền đóng góp (contribute) các Database mặc định, Schema, Bài học (Lessons), và Lộ trình (Tracks).
+  - [x] **Admin**: Quản lý hệ thống và phê duyệt (approve) các nội dung do User đóng góp trước khi xuất bản.
+- [x] Trang Hồ sơ người dùng (User Profile) cơ bản.
 
 ### 2. Quản lý Nội Dung Bài Học (Lesson Engine)
 - [ ] Hiển thị danh sách Lộ trình học (Tracks) và cấu trúc Bài học (Lessons).
