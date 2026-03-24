@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +18,40 @@ async function runDocker(args: string[]): Promise<string> {
   });
 
   return stdout.trim();
+}
+
+async function runDockerWithInput(args: string[], input: string | Buffer): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('docker', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+        return;
+      }
+      reject(new Error(`docker ${args.join(' ')} failed with code ${code}: ${stderr.trim()}`));
+    });
+
+    child.stdin.write(input);
+    child.stdin.end();
+  });
 }
 
 export function sandboxContainerName(sandboxId: string): string {
@@ -88,4 +123,43 @@ export async function waitForSandboxPostgres(params: {
   }
 
   throw new Error(`Sandbox container ${containerRef} did not become ready within ${timeoutMs}ms`);
+}
+
+export async function runPsqlInSandboxContainer(params: {
+  containerRef: string;
+  dbUser: string;
+  dbName: string;
+  sql: string;
+}): Promise<void> {
+  const { containerRef, dbUser, dbName, sql } = params;
+  await runDockerWithInput(
+    ['exec', '-i', containerRef, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', dbUser, '-d', dbName],
+    sql,
+  );
+}
+
+export async function runPgRestoreInSandboxContainer(params: {
+  containerRef: string;
+  dbUser: string;
+  dbName: string;
+  dump: Buffer;
+}): Promise<void> {
+  const { containerRef, dbUser, dbName, dump } = params;
+  await runDockerWithInput(
+    [
+      'exec',
+      '-i',
+      containerRef,
+      'pg_restore',
+      '--no-owner',
+      '--no-privileges',
+      '--clean',
+      '--if-exists',
+      '-U',
+      dbUser,
+      '-d',
+      dbName,
+    ],
+    dump,
+  );
 }

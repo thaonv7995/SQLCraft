@@ -10,6 +10,8 @@ import type {
   ListUsersQuery,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
+  ImportCanonicalDatabaseBody,
+  ListSystemJobsQuery,
   AdminIdParams,
 } from './admin.schema';
 import {
@@ -24,6 +26,8 @@ import {
   updateUserStatus,
   updateUserRole,
   getSystemHealth,
+  importCanonicalDatabase,
+  listSystemJobs,
 } from './admin.service';
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
@@ -126,4 +130,21 @@ export async function systemHealthHandler(
 ): Promise<void> {
   const result = await getSystemHealth();
   reply.send(success(result, 'System health retrieved'));
+}
+
+export async function importCanonicalDatabaseHandler(
+  request: FastifyRequest<{ Body: ImportCanonicalDatabaseBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const result = await importCanonicalDatabase(userId, request.body);
+  reply.status(201).send(created(result, 'Canonical database imported successfully'));
+}
+
+export async function listSystemJobsHandler(
+  request: FastifyRequest<{ Querystring: ListSystemJobsQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await listSystemJobs(request.query);
+  reply.send(success(result, 'System jobs retrieved successfully'));
 }

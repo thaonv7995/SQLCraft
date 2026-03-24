@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import pino from 'pino';
 import {
   mainDb,
+  fetchDatasetTemplate,
   fetchSchemaTemplate,
   fetchSandbox,
   updateSandboxReady,
@@ -16,6 +17,7 @@ import {
   insertQueryExecutionPlan,
   fetchExpiredSandboxes,
 } from './db';
+import { loadDatasetIntoSandbox } from './dataset-loader';
 import {
   executeSql,
   getExplainPlan,
@@ -96,12 +98,65 @@ function buildCreateTableDdl(
   );
 }
 
+async function applySchemaAndDataset(params: {
+  sandboxInstanceId: string;
+  containerRef: string;
+  dbName: string;
+  schemaTemplateId: string | null;
+  datasetTemplateId: string | null;
+}): Promise<void> {
+  const { sandboxInstanceId, containerRef, dbName, schemaTemplateId, datasetTemplateId } = params;
+  let schemaDef: Awaited<ReturnType<typeof fetchSchemaTemplate>> = null;
+
+  if (schemaTemplateId) {
+    schemaDef = await fetchSchemaTemplate(schemaTemplateId);
+    if (schemaDef?.tables?.length) {
+      const ddlStatements = buildCreateTableDdl(schemaDef.tables);
+      const sandboxPool = new Pool({
+        connectionString: sandboxConnStr(containerRef, dbName),
+        max: 1,
+      });
+
+      try {
+        for (const ddl of ddlStatements) {
+          await sandboxPool.query(ddl);
+        }
+        logger.info(
+          { sandboxInstanceId, dbName, tableCount: ddlStatements.length },
+          'Schema DDL applied',
+        );
+      } finally {
+        await sandboxPool.end();
+      }
+    }
+  }
+
+  if (!datasetTemplateId) {
+    logger.info({ sandboxInstanceId }, 'No dataset template linked, skipping dataset load');
+    return;
+  }
+
+  const datasetTemplate = await fetchDatasetTemplate(datasetTemplateId);
+  if (!datasetTemplate) {
+    throw new Error(`Dataset template not found: ${datasetTemplateId}`);
+  }
+
+  await loadDatasetIntoSandbox({
+    logger,
+    containerRef,
+    dbUser: sandboxUser,
+    dbName,
+    datasetTemplate,
+    schema: schemaDef,
+  });
+}
+
 // ─── Worker: provision_sandbox ────────────────────────────────────────────────
 
 const sandboxProvisioningWorker = new Worker(
   QUEUES.SANDBOX_PROVISIONING,
   async (job: Job) => {
-    const { sandboxInstanceId, learningSessionId, schemaTemplateId } = job.data as {
+    const { sandboxInstanceId, learningSessionId, schemaTemplateId, datasetTemplateId } = job.data as {
       sandboxInstanceId: string;
       learningSessionId: string;
       schemaTemplateId: string | null;
@@ -126,27 +181,13 @@ const sandboxProvisioningWorker = new Worker(
       await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
       logger.info({ containerRef, dbName }, 'Sandbox container ready');
 
-      // Apply schema DDL if template exists
-      if (schemaTemplateId) {
-        const schemaDef = await fetchSchemaTemplate(schemaTemplateId);
-
-        if (schemaDef?.tables?.length) {
-          const ddlStatements = buildCreateTableDdl(schemaDef.tables);
-          const sandboxPool = new Pool({
-            connectionString: sandboxConnStr(containerRef, dbName),
-            max: 1,
-          });
-
-          try {
-            for (const ddl of ddlStatements) {
-              await sandboxPool.query(ddl);
-            }
-            logger.info({ dbName, tableCount: ddlStatements.length }, 'Schema DDL applied');
-          } finally {
-            await sandboxPool.end();
-          }
-        }
-      }
+      await applySchemaAndDataset({
+        sandboxInstanceId,
+        containerRef,
+        dbName,
+        schemaTemplateId,
+        datasetTemplateId,
+      });
 
       const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
       await updateSandboxReady(sandboxInstanceId, dbName, containerRef, expiresAt);
@@ -254,24 +295,13 @@ const sandboxResetWorker = new Worker(
       });
       await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
 
-      const sandboxPool = new Pool({
-        connectionString: sandboxConnStr(containerRef, dbName),
-        max: 1,
+      await applySchemaAndDataset({
+        sandboxInstanceId,
+        containerRef,
+        dbName,
+        schemaTemplateId: sandbox.schemaTemplateId,
+        datasetTemplateId: sandbox.datasetTemplateId,
       });
-      try {
-        if (sandbox.schemaTemplateId) {
-          const schemaDef = await fetchSchemaTemplate(sandbox.schemaTemplateId);
-          if (schemaDef?.tables?.length) {
-            const ddlStatements = buildCreateTableDdl(schemaDef.tables);
-            for (const ddl of ddlStatements) {
-              await sandboxPool.query(ddl);
-            }
-            logger.info({ dbName: sandbox.dbName, tableCount: ddlStatements.length }, 'Schema re-applied');
-          }
-        }
-      } finally {
-        await sandboxPool.end();
-      }
 
       const newExpiresAt = new Date(Date.now() + SESSION_TTL_MS);
       await updateSandboxReady(sandboxInstanceId, dbName, containerRef, newExpiresAt);

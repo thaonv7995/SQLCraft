@@ -1,4 +1,17 @@
-import type { TrackRow, LessonRow, LessonVersionRow, ChallengeRow, ChallengeVersionRow, UserRow } from '../../db/repositories';
+import type { DatasetSize } from '@sqlcraft/types';
+import type {
+  TrackRow,
+  LessonRow,
+  LessonVersionRow,
+  ChallengeRow,
+  ChallengeVersionRow,
+  UserRow,
+} from '../../db/repositories';
+import type {
+  SchemaTemplateRow as AdminSchemaTemplateRow,
+  DatasetTemplateRow as AdminDatasetTemplateRow,
+  SystemJobRow as AdminSystemJobRow,
+} from '../../db/repositories/admin.repository';
 
 export interface CreateTrackResult extends TrackRow {}
 
@@ -51,4 +64,20 @@ export interface SystemHealthResult {
     activeSessions: number;
     pendingJobs: number;
   };
+}
+
+export interface ImportCanonicalDatabaseResult {
+  schemaTemplate: AdminSchemaTemplateRow;
+  sourceDatasetTemplate: AdminDatasetTemplateRow;
+  derivedDatasetTemplates: AdminDatasetTemplateRow[];
+  sourceScale: DatasetSize;
+  sourceTotalRows: number;
+  jobs: {
+    importJob: AdminSystemJobRow;
+    datasetGenerationJob: AdminSystemJobRow | null;
+  };
+}
+
+export interface ListSystemJobsResult {
+  items: AdminSystemJobRow[];
 }

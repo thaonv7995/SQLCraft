@@ -9,6 +9,9 @@ vi.mock('../../../db/repositories', () => ({
     createSession: vi.fn(),
     createSandbox: vi.fn(),
     getSandboxBySessionId: vi.fn(),
+    findDetailedSandboxBySessionId: vi.fn(),
+    listPublishedDatasetTemplatesBySchema: vi.fn(),
+    findDatasetTemplateById: vi.fn(),
     endSession: vi.fn(),
     expireSandboxBySessionId: vi.fn(),
     updateActivity: vi.fn(),
@@ -25,6 +28,7 @@ import * as queue from '../../../lib/queue';
 import { createSession, getSession, endSession, listUserSessions } from '../sessions.service';
 import { NotFoundError, ForbiddenError } from '../../../lib/errors';
 import type { SessionRow, SandboxRow } from '../../../db/repositories';
+import type { DatasetTemplateRow } from '../../../db/repositories/sessions.repository';
 
 const makeLessonVersion = (overrides = {}) => ({
   id: 'lv-1',
@@ -69,6 +73,18 @@ const makeSandbox = (overrides = {}): SandboxRow => ({
   ...overrides,
 });
 
+const makeDatasetTemplate = (overrides = {}): DatasetTemplateRow => ({
+  id: 'dataset-small',
+  schemaTemplateId: 'schema-1',
+  name: 'Ecommerce Small',
+  size: 'small',
+  rowCounts: { users: 10_000, orders: 50_000 },
+  artifactUrl: null,
+  status: 'published',
+  createdAt: new Date(),
+  ...overrides,
+});
+
 beforeEach(() => { vi.clearAllMocks(); });
 
 // ─── listUserSessions ────────────────────────────────────────────────────────
@@ -107,6 +123,7 @@ describe('createSession()', () => {
 
   it('creates a session and sandbox when lesson version exists', async () => {
     vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(makeLessonVersion());
+    vi.mocked(sessionsRepository.listPublishedDatasetTemplatesBySchema).mockResolvedValue([]);
     vi.mocked(sessionsRepository.createSession).mockResolvedValue(makeSession());
     vi.mocked(sessionsRepository.createSandbox).mockResolvedValue(makeSandbox());
     vi.mocked(queue.enqueueProvisionSandbox).mockResolvedValue(undefined);
@@ -126,6 +143,7 @@ describe('createSession()', () => {
     vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(
       makeLessonVersion({ schemaTemplateId: 'schema-1' })
     );
+    vi.mocked(sessionsRepository.listPublishedDatasetTemplatesBySchema).mockResolvedValue([]);
     vi.mocked(sessionsRepository.createSession).mockResolvedValue(makeSession());
     vi.mocked(sessionsRepository.createSandbox).mockResolvedValue(makeSandbox());
     vi.mocked(queue.enqueueProvisionSandbox).mockResolvedValue(undefined);
@@ -134,6 +152,25 @@ describe('createSession()', () => {
 
     expect(sessionsRepository.createSandbox).toHaveBeenCalledWith(
       expect.objectContaining({ schemaTemplateId: 'schema-1' })
+    );
+  });
+
+  it('uses the requested datasetSize when an exact published template exists', async () => {
+    vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(
+      makeLessonVersion({ schemaTemplateId: 'schema-1', datasetTemplateId: 'dataset-small' }),
+    );
+    vi.mocked(sessionsRepository.listPublishedDatasetTemplatesBySchema).mockResolvedValue([
+      makeDatasetTemplate({ id: 'dataset-small', size: 'small' }),
+      makeDatasetTemplate({ id: 'dataset-large', size: 'large', rowCounts: { users: 100_000, orders: 500_000 } }),
+    ]);
+    vi.mocked(sessionsRepository.createSession).mockResolvedValue(makeSession());
+    vi.mocked(sessionsRepository.createSandbox).mockResolvedValue(makeSandbox());
+    vi.mocked(queue.enqueueProvisionSandbox).mockResolvedValue(undefined);
+
+    await createSession('user-1', { lessonVersionId: 'lv-1', datasetSize: 'large' });
+
+    expect(sessionsRepository.createSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({ datasetTemplateId: 'dataset-large' }),
     );
   });
 });
@@ -147,9 +184,26 @@ describe('getSession()', () => {
     vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(
       makeSandbox({ status: 'ready', dbName: 'db_1' })
     );
+    vi.mocked(sessionsRepository.findDetailedSandboxBySessionId).mockResolvedValue(
+      makeSandbox({ status: 'ready', dbName: 'db_1', schemaTemplateId: 'schema-1', datasetTemplateId: 'dataset-small' }),
+    );
+    vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(
+      makeLessonVersion({ schemaTemplateId: 'schema-1', datasetTemplateId: 'dataset-small' }),
+    );
+    vi.mocked(sessionsRepository.listPublishedDatasetTemplatesBySchema).mockResolvedValue([
+      makeDatasetTemplate({ id: 'dataset-small', size: 'small' }),
+      makeDatasetTemplate({ id: 'dataset-large', size: 'large', rowCounts: { users: 100_000, orders: 500_000 } }),
+    ]);
 
     const result = await getSession('session-1', 'user-1', false);
     expect(result.status).toBe('active');
+    expect(result.dataset).toEqual(
+      expect.objectContaining({
+        selectedScale: 'small',
+        sourceScale: 'large',
+        availableScales: ['small', 'large'],
+      }),
+    );
   });
 
   it('throws NotFoundError when session does not exist', async () => {
@@ -165,6 +219,8 @@ describe('getSession()', () => {
   it('allows admin to access any session', async () => {
     vi.mocked(sessionsRepository.findById).mockResolvedValue(makeSession({ userId: 'other' }));
     vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(null);
+    vi.mocked(sessionsRepository.findDetailedSandboxBySessionId).mockResolvedValue(null);
+    vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(null);
 
     const result = await getSession('session-1', 'admin-id', true);
     expect(result.id).toBe('session-1');

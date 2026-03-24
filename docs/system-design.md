@@ -12,17 +12,26 @@ Describe the end-to-end design of the V1 platform from request flow to data pers
 
 ## 3. End-to-End Flows
 
-### 3.1 Start Learning Session
-1. User opens a published lesson version.
-2. Web app calls `POST /v1/learning-sessions`.
-3. API validates user, lesson version, and access.
-4. API creates `learning_sessions` record in status `provisioning`.
-5. API enqueues sandbox creation job.
-6. Worker creates sandbox instance from selected schema + dataset template.
-7. Worker marks sandbox ready and updates session.
-8. UI polls session status until ready.
+### 3.1 Import Canonical Database
+1. Admin calls the Admin API with schema definition and canonical row-count metadata.
+2. API stores a new schema template version and classifies the source scale from total row count.
+3. API creates the canonical dataset template plus all supported smaller dataset templates.
+4. API records `system_jobs` entries for import and derived-template generation.
+5. Dataset templates are published for learner sessions.
 
-### 3.2 Run Query
+### 3.2 Start Learning Session
+1. User opens a published lesson version or database page.
+2. User selects an allowed dataset scale less than or equal to the source scale.
+3. Web app calls `POST /v1/learning-sessions` or `POST /v1/databases/sessions`.
+4. API validates user, lesson/database access, and requested scale.
+5. API resolves the dataset template for the requested scale.
+6. API creates `learning_sessions` record in status `provisioning`.
+7. API enqueues sandbox creation job.
+8. Worker creates sandbox instance from the selected schema + dataset template, using artifact restore when available or deterministic synthetic loading otherwise.
+9. Worker marks sandbox ready and updates session.
+10. UI polls session status until ready.
+
+### 3.3 Run Query
 1. User submits SQL from editor.
 2. API fetches active learning session and assigned sandbox.
 3. Query Execution module validates SQL category.
@@ -31,21 +40,22 @@ Describe the end-to-end design of the V1 platform from request flow to data pers
 6. Optional plan is stored in `query_execution_plans`.
 7. Result preview and metrics are returned to UI.
 
-### 3.3 Submit Challenge Attempt
+### 3.4 Submit Challenge Attempt
 1. User submits query as challenge attempt.
 2. API links latest query execution or executes fresh query.
 3. Evaluation engine compares output to expected validator config.
 4. Score and feedback are stored in `challenge_evaluations`.
 5. Attempt result is returned.
 
-### 3.4 Reset Sandbox
+### 3.5 Reset Sandbox Or Change Scale
 1. User clicks Reset.
-2. API marks current sandbox reset requested.
-3. Worker destroys current sandbox and re-provisions from template.
-4. Session references the new active sandbox or updated sandbox state.
-5. History remains, but new executions use clean state.
+2. User may optionally choose a different allowed scale.
+3. API marks current sandbox reset requested and resolves the target dataset template.
+4. Worker destroys current sandbox and re-provisions from the selected template, restoring from artifact when available or using deterministic synthetic loading otherwise.
+5. Session references the new active sandbox or updated sandbox state.
+6. History remains, but new executions use clean state.
 
-### 3.5 Cleanup Expired Sandbox
+### 3.6 Cleanup Expired Sandbox
 1. Scheduler identifies idle sandboxes beyond TTL.
 2. Worker marks sandbox `expiring`.
 3. Sandbox is destroyed.
@@ -88,7 +98,6 @@ Data access is handled separately in `src/db/repositories/<name>.repository.ts` 
 |----------|-------|---------|
 | `jobs/sandbox-provisioning.ts` | `sandbox-provisioning` | Session created |
 | `jobs/sandbox-cleanup.ts` | `sandbox-cleanup` | Scheduled / session ended |
-| `jobs/dataset-generation.ts` | `dataset-generation` | Admin triggers new dataset |
 | `jobs/challenge-evaluation.ts` | `challenge-evaluation` | Challenge attempt submitted |
 | `jobs/repair.ts` | `repair` | Scheduled — fixes stuck sandboxes |
 

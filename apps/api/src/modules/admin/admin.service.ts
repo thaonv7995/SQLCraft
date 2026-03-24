@@ -5,7 +5,13 @@ import {
   usersRepository,
   adminRepository,
 } from '../../db/repositories';
-import { NotFoundError } from '../../lib/errors';
+import {
+  buildDerivedDatasetRowCounts,
+  classifyDatasetScaleFromTotalRows,
+  normalizeDatasetRowCounts,
+  sumDatasetRowCounts,
+} from '../../lib/dataset-scales';
+import { NotFoundError, ValidationError } from '../../lib/errors';
 import type {
   CreateTrackBody,
   UpdateTrackBody,
@@ -15,6 +21,8 @@ import type {
   ListUsersQuery,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
+  ImportCanonicalDatabaseBody,
+  ListSystemJobsQuery,
 } from './admin.schema';
 import type {
   CreateTrackResult,
@@ -28,6 +36,8 @@ import type {
   UpdateUserStatusResult,
   UpdateUserRoleResult,
   SystemHealthResult,
+  ImportCanonicalDatabaseResult,
+  ListSystemJobsResult,
 } from './admin.types';
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
@@ -177,5 +187,119 @@ export async function getSystemHealth(): Promise<SystemHealthResult> {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     stats,
+  };
+}
+
+export async function listSystemJobs(
+  query: ListSystemJobsQuery,
+): Promise<ListSystemJobsResult> {
+  const items = await adminRepository.listSystemJobs(query);
+  return { items };
+}
+
+function formatDatasetTemplateName(baseName: string, size: 'tiny' | 'small' | 'medium' | 'large'): string {
+  return `${baseName} ${size.charAt(0).toUpperCase()}${size.slice(1)}`;
+}
+
+export async function importCanonicalDatabase(
+  userId: string,
+  body: ImportCanonicalDatabaseBody,
+): Promise<ImportCanonicalDatabaseResult> {
+  const normalizedRowCounts = normalizeDatasetRowCounts(body.canonicalDataset.rowCounts);
+  const sourceTotalRows = sumDatasetRowCounts(normalizedRowCounts);
+
+  if (sourceTotalRows <= 0) {
+    throw new ValidationError('canonicalDataset.rowCounts must contain at least one positive table count');
+  }
+
+  const latestSchema = await adminRepository.findLatestSchemaTemplateByName(body.name);
+  const schemaTemplate = await adminRepository.createSchemaTemplate({
+    name: body.name,
+    description: body.description,
+    version: (latestSchema?.version ?? 0) + 1,
+    definition: body.definition,
+    status: body.status,
+    createdBy: userId,
+  });
+
+  const sourceScale = classifyDatasetScaleFromTotalRows(sourceTotalRows);
+  const sourceDatasetTemplate = await adminRepository.createDatasetTemplate({
+    schemaTemplateId: schemaTemplate.id,
+    name: body.canonicalDataset.name?.trim() || formatDatasetTemplateName(body.name, sourceScale),
+    size: sourceScale,
+    rowCounts: normalizedRowCounts,
+    artifactUrl: body.canonicalDataset.artifactUrl ?? null,
+    status: body.status,
+  });
+
+  const derivedDatasetTemplates =
+    body.generateDerivedDatasets === false
+      ? []
+      : await Promise.all(
+          buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts).map((dataset) =>
+            adminRepository.createDatasetTemplate({
+              schemaTemplateId: schemaTemplate.id,
+              name: formatDatasetTemplateName(body.name, dataset.size),
+              size: dataset.size,
+              rowCounts: dataset.rowCounts,
+              artifactUrl: null,
+              status: body.status,
+            }),
+          ),
+        );
+
+  const now = new Date();
+  const importJob = await adminRepository.createSystemJob({
+    type: 'canonical-dataset-import',
+    status: 'completed',
+    payload: {
+      schemaName: body.name,
+      generateDerivedDatasets: body.generateDerivedDatasets !== false,
+      sourceScale,
+      sourceTotalRows,
+    },
+    result: {
+      schemaTemplateId: schemaTemplate.id,
+      sourceDatasetTemplateId: sourceDatasetTemplate.id,
+      derivedDatasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
+    },
+    attempts: 1,
+    maxAttempts: 1,
+    scheduledAt: now,
+    startedAt: now,
+    completedAt: now,
+  });
+
+  const datasetGenerationJob =
+    derivedDatasetTemplates.length === 0
+      ? null
+      : await adminRepository.createSystemJob({
+          type: 'dataset-template-generation',
+          status: 'completed',
+          payload: {
+            schemaTemplateId: schemaTemplate.id,
+            sourceDatasetTemplateId: sourceDatasetTemplate.id,
+          },
+          result: {
+            generatedSizes: derivedDatasetTemplates.map((dataset) => dataset.size),
+            datasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
+          },
+          attempts: 1,
+          maxAttempts: 1,
+          scheduledAt: now,
+          startedAt: now,
+          completedAt: now,
+        });
+
+  return {
+    schemaTemplate,
+    sourceDatasetTemplate,
+    derivedDatasetTemplates,
+    sourceScale,
+    sourceTotalRows,
+    jobs: {
+      importJob,
+      datasetGenerationJob,
+    },
   };
 }

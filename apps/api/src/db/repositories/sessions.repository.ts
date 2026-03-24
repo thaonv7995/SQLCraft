@@ -3,6 +3,7 @@ import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
 export type SchemaTemplateRow = InferSelectModel<typeof schema.schemaTemplates>;
+export type DatasetTemplateRow = InferSelectModel<typeof schema.datasetTemplates>;
 
 export type SessionRow = InferSelectModel<typeof schema.learningSessions>;
 export type SandboxRow = InferSelectModel<typeof schema.sandboxInstances>;
@@ -148,6 +149,40 @@ export class SessionsRepository {
       .where(eq(schema.learningSessions.id, sessionId))
       .limit(1);
     return row?.schemaTemplate ?? null;
+  }
+
+  async findDetailedSandboxBySessionId(sessionId: string): Promise<SandboxRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.sandboxInstances)
+      .where(eq(schema.sandboxInstances.learningSessionId, sessionId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async listPublishedDatasetTemplatesBySchema(
+    schemaTemplateId: string,
+  ): Promise<DatasetTemplateRow[]> {
+    return this.db
+      .select()
+      .from(schema.datasetTemplates)
+      .where(
+        and(
+          eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+          eq(schema.datasetTemplates.status, 'published'),
+        ),
+      );
+  }
+
+  async findDatasetTemplateById(datasetTemplateId: string): Promise<DatasetTemplateRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.datasetTemplates)
+      .where(eq(schema.datasetTemplates.id, datasetTemplateId))
+      .limit(1);
+
+    return row ?? null;
   }
 
 }

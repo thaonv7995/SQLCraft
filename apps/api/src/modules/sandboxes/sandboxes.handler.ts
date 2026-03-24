@@ -1,7 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
-import type { SandboxParams, SandboxResetParams } from './sandboxes.schema';
+import type { SandboxParams, SandboxResetBody, SandboxResetParams } from './sandboxes.schema';
 import { getSandbox, resetSandbox } from './sandboxes.service';
 
 export async function getSandboxHandler(
@@ -15,11 +15,16 @@ export async function getSandboxHandler(
 }
 
 export async function resetSandboxHandler(
-  request: FastifyRequest<{ Params: SandboxResetParams }>,
+  request: FastifyRequest<{ Params: SandboxResetParams; Body: SandboxResetBody }>,
   reply: FastifyReply,
 ): Promise<void> {
   const { sessionId } = request.params;
   const user = request.user as JwtPayload;
-  const result = await resetSandbox(sessionId, user.sub, user.roles?.includes('admin') ?? false);
+  const result = await resetSandbox(
+    sessionId,
+    user.sub,
+    user.roles?.includes('admin') ?? false,
+    request.body ?? {},
+  );
   reply.send(success(result, MESSAGES.SANDBOX_RESET_REQUESTED));
 }

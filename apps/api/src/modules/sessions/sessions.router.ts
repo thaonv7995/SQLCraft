@@ -32,6 +32,8 @@ export default async function sessionsRouter(fastify: FastifyInstance): Promise<
           properties: {
             lessonVersionId: { type: 'string', format: 'uuid' },
             challengeVersionId: { type: 'string', format: 'uuid' },
+            datasetSize: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
+            scale: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
           },
         },
       },

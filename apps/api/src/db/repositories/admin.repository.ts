@@ -1,4 +1,5 @@
-import { eq, count } from 'drizzle-orm';
+import { and, count, desc, eq } from 'drizzle-orm';
+import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
 export interface SystemHealthStats {
@@ -8,6 +9,13 @@ export interface SystemHealthStats {
   activeSessions: number;
   pendingJobs: number;
 }
+
+export type SchemaTemplateRow = InferSelectModel<typeof schema.schemaTemplates>;
+export type DatasetTemplateRow = InferSelectModel<typeof schema.datasetTemplates>;
+export type SystemJobRow = InferSelectModel<typeof schema.systemJobs>;
+export type InsertSchemaTemplate = InferInsertModel<typeof schema.schemaTemplates>;
+export type InsertDatasetTemplate = InferInsertModel<typeof schema.datasetTemplates>;
+export type InsertSystemJob = InferInsertModel<typeof schema.systemJobs>;
 
 export class AdminRepository {
   private get db() {
@@ -42,6 +50,88 @@ export class AdminRepository {
       activeSessions: activeSessionCount[0]?.count ?? 0,
       pendingJobs: pendingJobCount[0]?.count ?? 0,
     };
+  }
+
+  async findLatestSchemaTemplateByName(name: string): Promise<SchemaTemplateRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.name, name))
+      .orderBy(desc(schema.schemaTemplates.version), desc(schema.schemaTemplates.createdAt))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async createSchemaTemplate(
+    data: Omit<InsertSchemaTemplate, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<SchemaTemplateRow> {
+    const [row] = await this.db.insert(schema.schemaTemplates).values(data).returning();
+    return row;
+  }
+
+  async findDatasetTemplateBySchemaAndSize(
+    schemaTemplateId: string,
+    size: DatasetTemplateRow['size'],
+  ): Promise<DatasetTemplateRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.datasetTemplates)
+      .where(
+        and(
+          eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+          eq(schema.datasetTemplates.size, size),
+        ),
+      )
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async createDatasetTemplate(
+    data: Omit<InsertDatasetTemplate, 'id' | 'createdAt'>,
+  ): Promise<DatasetTemplateRow> {
+    const [row] = await this.db.insert(schema.datasetTemplates).values(data).returning();
+    return row;
+  }
+
+  async updateDatasetTemplate(
+    id: string,
+    data: Partial<Pick<InsertDatasetTemplate, 'name' | 'rowCounts' | 'artifactUrl' | 'status'>>,
+  ): Promise<DatasetTemplateRow | null> {
+    const [row] = await this.db
+      .update(schema.datasetTemplates)
+      .set(data)
+      .where(eq(schema.datasetTemplates.id, id))
+      .returning();
+
+    return row ?? null;
+  }
+
+  async createSystemJob(
+    data: Omit<InsertSystemJob, 'id' | 'createdAt'>,
+  ): Promise<SystemJobRow> {
+    const [row] = await this.db.insert(schema.systemJobs).values(data).returning();
+    return row;
+  }
+
+  async listSystemJobs(options: {
+    limit: number;
+    status?: SystemJobRow['status'];
+    type?: string;
+  }): Promise<SystemJobRow[]> {
+    const filters = [
+      options.status ? eq(schema.systemJobs.status, options.status) : null,
+      options.type ? eq(schema.systemJobs.type, options.type) : null,
+    ].filter((value): value is NonNullable<typeof value> => value !== null);
+
+    const baseQuery = this.db.select().from(schema.systemJobs);
+    const filteredQuery =
+      filters.length === 0
+        ? baseQuery
+        : baseQuery.where(filters.length === 1 ? filters[0] : and(...filters));
+
+    return filteredQuery.orderBy(desc(schema.systemJobs.createdAt)).limit(options.limit);
   }
 }
 

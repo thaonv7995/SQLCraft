@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import type { SandboxParams, SandboxResetParams } from './sandboxes.schema';
+import type { SandboxParams, SandboxResetBody, SandboxResetParams } from './sandboxes.schema';
 import { getSandboxHandler, resetSandboxHandler } from './sandboxes.handler';
 
 export default async function sandboxesRouter(fastify: FastifyInstance): Promise<void> {
@@ -25,7 +25,7 @@ export default async function sandboxesRouter(fastify: FastifyInstance): Promise
   );
 
   // POST /v1/sandboxes/:sessionId/reset
-  fastify.post<{ Params: SandboxResetParams }>(
+  fastify.post<{ Params: SandboxResetParams; Body: SandboxResetBody }>(
     '/v1/sandboxes/:sessionId/reset',
     {
       onRequest: [fastify.authenticate],
@@ -38,6 +38,14 @@ export default async function sandboxesRouter(fastify: FastifyInstance): Promise
           required: ['sessionId'],
           properties: {
             sessionId: { type: 'string', format: 'uuid' },
+          },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            datasetSize: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
+            scale: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
+            selectedScale: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
           },
         },
       },

@@ -262,6 +262,127 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
+const DATASET_SCALE_ORDER = ['tiny', 'small', 'medium', 'large'] as const;
+const DATASET_SCALE_RANK = Object.fromEntries(
+  DATASET_SCALE_ORDER.map((scale, index) => [scale, index]),
+) as Record<DatasetScale, number>;
+
+export type DatasetScale = (typeof DATASET_SCALE_ORDER)[number];
+
+export interface DatasetScaleContext {
+  sourceScale: DatasetScale | null;
+  selectedScale: DatasetScale | null;
+  availableScales: DatasetScale[];
+  rowCount?: number;
+  sourceRowCount?: number;
+}
+
+interface NestedDatasetScalePayload {
+  sourceScale?: unknown;
+  selectedScale?: unknown;
+  availableScales?: unknown;
+  totalRows?: unknown;
+  sourceTotalRows?: unknown;
+}
+
+function normalizeDatasetScale(value: unknown): DatasetScale | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.toLowerCase();
+  if (normalized === 'massive') {
+    return 'large';
+  }
+
+  if (DATASET_SCALE_ORDER.includes(normalized as DatasetScale)) {
+    return normalized as DatasetScale;
+  }
+
+  return null;
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+export function normalizeAvailableDatasetScales(
+  input: unknown,
+  sourceScale?: DatasetScale | null,
+): DatasetScale[] {
+  const sourceRank =
+    sourceScale != null ? DATASET_SCALE_RANK[sourceScale] : Number.POSITIVE_INFINITY;
+
+  const candidates = Array.isArray(input) ? input : [];
+  const normalized = Array.from(
+    new Set(
+      candidates
+        .map((candidate) => normalizeDatasetScale(candidate))
+        .filter((scale): scale is DatasetScale => scale != null)
+        .filter((scale) => DATASET_SCALE_RANK[scale] <= sourceRank),
+    ),
+  ).sort((a, b) => DATASET_SCALE_RANK[a] - DATASET_SCALE_RANK[b]);
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  if (sourceScale != null) {
+    return DATASET_SCALE_ORDER.filter((scale) => DATASET_SCALE_RANK[scale] <= sourceRank);
+  }
+
+  return [...DATASET_SCALE_ORDER];
+}
+
+export function resolveDatasetScaleContext(payload: {
+  sourceScale?: unknown;
+  selectedScale?: unknown;
+  availableScales?: unknown;
+  scale?: unknown;
+  rowCount?: unknown;
+  sourceRowCount?: unknown;
+  dataset?: unknown;
+}): DatasetScaleContext {
+  const nestedDataset =
+    payload.dataset && typeof payload.dataset === 'object'
+      ? (payload.dataset as NestedDatasetScalePayload)
+      : null;
+  const sourceScale =
+    normalizeDatasetScale(payload.sourceScale) ??
+    normalizeDatasetScale(payload.scale) ??
+    normalizeDatasetScale(nestedDataset?.sourceScale);
+  const availableScales = normalizeAvailableDatasetScales(
+    payload.availableScales ?? nestedDataset?.availableScales,
+    sourceScale,
+  );
+
+  const requestedSelectedScale =
+    normalizeDatasetScale(payload.selectedScale) ??
+    normalizeDatasetScale(payload.scale) ??
+    normalizeDatasetScale(nestedDataset?.selectedScale);
+
+  const selectedScale =
+    requestedSelectedScale && availableScales.includes(requestedSelectedScale)
+      ? requestedSelectedScale
+      : sourceScale && availableScales.includes(sourceScale)
+        ? sourceScale
+        : (availableScales.at(-1) ?? null);
+
+  const rowCount = toFiniteNumber(payload.rowCount) ?? toFiniteNumber(nestedDataset?.totalRows);
+  const sourceRowCount =
+    toFiniteNumber(payload.sourceRowCount) ??
+    toFiniteNumber(nestedDataset?.sourceTotalRows) ??
+    rowCount;
+
+  return {
+    sourceScale: sourceScale ?? null,
+    selectedScale,
+    availableScales,
+    rowCount,
+    sourceRowCount,
+  };
+}
+
 export interface LearningSession {
   id: string;
   userId: string;
@@ -277,6 +398,11 @@ export interface LearningSession {
     expiresAt?: string | null;
     updatedAt?: string | null;
   } | null;
+  sourceScale?: DatasetScale | null;
+  selectedScale?: DatasetScale | null;
+  availableScales?: DatasetScale[];
+  rowCount?: number;
+  sourceRowCount?: number;
   startedAt: string;
   lastActivityAt?: string | null;
   createdAt: string;
@@ -287,7 +413,6 @@ export interface LearningSession {
 export interface QueryExecutionRequest {
   sessionId: string;
   sql: string;
-  datasetSize?: 'tiny' | 'small' | 'medium' | 'large';
 }
 
 export interface QueryResultColumn {
@@ -450,7 +575,7 @@ export interface SystemMetrics {
 export interface SystemJob {
   id: string;
   type: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'retrying';
   target?: string;
   startedAt: string;
   completedAt?: string;
@@ -481,7 +606,7 @@ export interface SessionSchemaResponse {
 // ─── Databases ────────────────────────────────────────────────────────────────
 
 export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'social' | 'analytics' | 'other';
-export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large' | 'massive';
+export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 export interface Database {
@@ -496,8 +621,12 @@ export interface Database {
   domainIcon: string;
   tags: string[];
   rowCount: number;
+  sourceRowCount?: number;
   tableCount: number;
   estimatedSizeGb: number;
+  sourceScale?: DatasetScale | null;
+  selectedScale?: DatasetScale | null;
+  availableScales?: DatasetScale[];
   region?: string;
   uptime?: number;
   isAvailable?: boolean;
@@ -614,6 +743,30 @@ function normalizeLesson(lesson: Lesson): Lesson {
   return {
     ...lesson,
     description: lesson.description ?? '',
+  };
+}
+
+function normalizeLearningSession(session: LearningSession): LearningSession {
+  const scaleContext = resolveDatasetScaleContext(session);
+  return {
+    ...session,
+    sourceScale: scaleContext.sourceScale,
+    selectedScale: scaleContext.selectedScale,
+    availableScales: scaleContext.availableScales,
+    rowCount: scaleContext.rowCount,
+    sourceRowCount: scaleContext.sourceRowCount,
+  };
+}
+
+function normalizeDatabase(database: Database): Database {
+  const scaleContext = resolveDatasetScaleContext(database);
+
+  return {
+    ...database,
+    sourceScale: scaleContext.sourceScale,
+    selectedScale: scaleContext.selectedScale,
+    availableScales: scaleContext.availableScales,
+    sourceRowCount: scaleContext.sourceRowCount,
   };
 }
 
@@ -887,24 +1040,46 @@ export const challengesApi = {
 
 export const sessionsApi = {
   list: () =>
-    api.get<LearningSession[]>('/learning-sessions').then((r) => r.data),
+    api.get<LearningSession[]>('/learning-sessions').then((r) => r.data.map(normalizeLearningSession)),
 
   get: (id: string) =>
-    api.get<LearningSession>(`/learning-sessions/${id}`).then((r) => r.data),
+    api.get<LearningSession>(`/learning-sessions/${id}`).then((r) => normalizeLearningSession(r.data)),
 
   getSchema: (id: string) =>
     api.get<SessionSchemaResponse>(`/learning-sessions/${id}/schema`).then((r) => r.data),
 
-  create: (payload: { lessonVersionId: string; challengeVersionId?: string }) =>
+  create: (payload: {
+    lessonVersionId: string;
+    challengeVersionId?: string;
+    selectedScale?: DatasetScale;
+  }) =>
     api.post<{ session: LearningSession; sandbox: { id: string; status: string } }>(
       '/learning-sessions',
-      payload,
-    ).then((r) => r.data.session),
+      {
+        lessonVersionId: payload.lessonVersionId,
+        challengeVersionId: payload.challengeVersionId,
+        datasetSize: payload.selectedScale,
+      },
+    ).then((r) => normalizeLearningSession(r.data.session)),
 
   end: (id: string) =>
     api.post<{ id: string; status: string; endedAt: string | null }>(
       `/learning-sessions/${id}/end`,
     ).then((r) => r.data),
+};
+
+export const sandboxesApi = {
+  reset: (sessionId: string, selectedScale?: DatasetScale) =>
+    api
+      .post<{ sandboxId: string; status: string; requestedAt: string }>(
+        `/sandboxes/${sessionId}/reset`,
+        selectedScale
+          ? {
+              datasetSize: selectedScale,
+            }
+          : {},
+      )
+      .then((r) => r.data),
 };
 
 // ─── Query Execution API ──────────────────────────────────────────────────────
@@ -1044,10 +1219,13 @@ export const databasesApi = {
   list: (params?: { domain?: string; scale?: string; difficulty?: string }) =>
     api
       .get<PaginatedResponse<Database>>('/databases', { params })
-      .then((r) => r.data),
+      .then((r) => ({
+        ...r.data,
+        items: r.data.items.map(normalizeDatabase),
+      })),
 
   get: (id: string) =>
-    api.get<Database>(`/databases/${id}`).then((r) => r.data),
+    api.get<Database>(`/databases/${id}`).then((r) => normalizeDatabase(r.data)),
 
   createSession: (databaseId: string, scale?: DatabaseScale) =>
     api
@@ -1055,7 +1233,7 @@ export const databasesApi = {
         '/databases/sessions',
         { databaseId, scale },
       )
-      .then((r) => r.data.session),
+      .then((r) => normalizeLearningSession(r.data.session)),
 };
 
 // ─── Leaderboard API ──────────────────────────────────────────────────────────

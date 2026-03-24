@@ -27,7 +27,7 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
             },
             scale: {
               type: 'string',
-              enum: ['tiny', 'small', 'medium', 'large', 'massive'],
+              enum: ['tiny', 'small', 'medium', 'large'],
             },
             difficulty: {
               type: 'string',
@@ -76,7 +76,7 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
             databaseId: { type: 'string' },
             scale: {
               type: 'string',
-              enum: ['tiny', 'small', 'medium', 'large', 'massive'],
+              enum: ['tiny', 'small', 'medium', 'large'],
             },
           },
         },

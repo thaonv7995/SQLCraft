@@ -8,6 +8,8 @@ import type {
   ListUsersQuery,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
+  ImportCanonicalDatabaseBody,
+  ListSystemJobsQuery,
   AdminIdParams,
 } from './admin.schema';
 import {
@@ -22,6 +24,8 @@ import {
   updateUserStatusHandler,
   updateUserRoleHandler,
   systemHealthHandler,
+  importCanonicalDatabaseHandler,
+  listSystemJobsHandler,
 } from './admin.handler';
 
 export default async function adminRouter(fastify: FastifyInstance): Promise<void> {
@@ -268,7 +272,69 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
     updateUserRoleHandler,
   );
 
+  // ─── Database Imports ───────────────────────────────────────────────────────
+
+  fastify.post<{ Body: ImportCanonicalDatabaseBody }>(
+    '/v1/admin/databases/import',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Import a canonical schema definition and dataset metadata',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['name', 'definition', 'canonicalDataset'],
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 100 },
+            description: { type: 'string' },
+            definition: {
+              type: 'object',
+              additionalProperties: true,
+            },
+            canonicalDataset: {
+              type: 'object',
+              required: ['rowCounts'],
+              properties: {
+                name: { type: 'string', minLength: 1, maxLength: 100 },
+                rowCounts: {
+                  type: 'object',
+                  additionalProperties: { type: 'integer', minimum: 0 },
+                },
+                artifactUrl: { type: 'string', format: 'uri' },
+              },
+            },
+            generateDerivedDatasets: { type: 'boolean', default: true },
+            status: { type: 'string', enum: ['draft', 'published', 'archived'], default: 'published' },
+          },
+        },
+      },
+    },
+    importCanonicalDatabaseHandler,
+  );
+
   // ─── System ───────────────────────────────────────────────────────────────────
+
+  fastify.get<{ Querystring: ListSystemJobsQuery }>(
+    '/v1/admin/system/jobs',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List recent system jobs',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+            status: { type: 'string', enum: ['pending', 'running', 'completed', 'failed', 'retrying'] },
+            type: { type: 'string' },
+          },
+        },
+      },
+    },
+    listSystemJobsHandler,
+  );
 
   fastify.get(
     '/v1/admin/system/health',

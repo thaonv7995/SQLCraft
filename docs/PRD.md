@@ -109,11 +109,17 @@ Users can write SQL and view:
 - errors and hints
 
 ### 9.2 Progressive Dataset Scaling
-Same lesson concepts can be practiced against:
-- tiny: 10–100 rows
-- small: 10K–100K rows
+Same lesson concepts can be practiced against the same schema and a canonical imported dataset across multiple size tiers:
+- tiny: around 100 rows
+- small: around 10K rows
 - medium: 1M–5M rows
-- large: 10M–100M+ rows
+- large: 10M+ rows
+
+Additional product rules:
+- imported canonical datasets are classified by total row count, while the exact row count is preserved as metadata
+- learners may only choose scales at or below the imported database's source scale
+- no dataset upscaling in V1
+- changing scale reprovisions the sandbox from the selected dataset template; worker restores from artifact when available or falls back to deterministic synthetic loading rather than resizing the live sandbox in place
 
 ### 9.3 Query Optimization Labs
 Users can:

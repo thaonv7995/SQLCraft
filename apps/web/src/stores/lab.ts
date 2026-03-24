@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { queryApi } from '@/lib/api';
 import type {
+  DatasetScale,
   LearningSession,
   QueryExecution,
   QueryResultPreview,
@@ -16,9 +17,12 @@ interface LabState {
   currentQuery: string;
   setQuery: (sql: string) => void;
 
-  // Dataset size
-  datasetSize: 'tiny' | 'small' | 'medium' | 'large';
-  setDatasetSize: (size: 'tiny' | 'small' | 'medium' | 'large') => void;
+  // Dataset scale context
+  sourceScale: DatasetScale | null;
+  selectedScale: DatasetScale | null;
+  availableScales: DatasetScale[];
+  sourceRowCount: number | null;
+  setSelectedScale: (scale: DatasetScale) => void;
 
   // Execution state
   isExecuting: boolean;
@@ -45,13 +49,28 @@ interface LabState {
 
 export const useLabStore = create<LabState>()((set, get) => ({
   session: null,
-  setSession: (session) => set({ session }),
+  setSession: (session) =>
+    set({
+      session,
+      sourceScale: session?.sourceScale ?? null,
+      selectedScale: session?.selectedScale ?? null,
+      availableScales: session?.availableScales ?? ['tiny', 'small', 'medium', 'large'],
+      sourceRowCount:
+        typeof session?.sourceRowCount === 'number'
+          ? session.sourceRowCount
+          : typeof session?.rowCount === 'number'
+            ? session.rowCount
+            : null,
+    }),
 
   currentQuery: '-- Welcome to SQLCraft!\n-- Start writing your SQL query here...\n\nSELECT * FROM employees LIMIT 10;',
   setQuery: (sql) => set({ currentQuery: sql }),
 
-  datasetSize: 'small',
-  setDatasetSize: (size) => set({ datasetSize: size }),
+  sourceScale: null,
+  selectedScale: null,
+  availableScales: ['tiny', 'small', 'medium', 'large'],
+  sourceRowCount: null,
+  setSelectedScale: (scale) => set({ selectedScale: scale }),
 
   isExecuting: false,
   isExplaining: false,
@@ -67,7 +86,7 @@ export const useLabStore = create<LabState>()((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   executeQuery: async (sessionId: string) => {
-    const { currentQuery, datasetSize } = get();
+    const { currentQuery } = get();
     if (!currentQuery.trim()) return;
 
     set({ isExecuting: true, error: null, results: null, activeTab: 'results' });
@@ -76,7 +95,6 @@ export const useLabStore = create<LabState>()((set, get) => ({
       const execution = await queryApi.execute({
         sessionId,
         sql: currentQuery,
-        datasetSize,
       });
 
       set((state) => ({
@@ -93,7 +111,7 @@ export const useLabStore = create<LabState>()((set, get) => ({
   },
 
   explainQuery: async (sessionId: string) => {
-    const { currentQuery, datasetSize } = get();
+    const { currentQuery } = get();
     if (!currentQuery.trim()) return;
 
     set({ isExplaining: true, error: null, activeTab: 'plan' });
@@ -102,7 +120,6 @@ export const useLabStore = create<LabState>()((set, get) => ({
       const execution = await queryApi.explain({
         sessionId,
         sql: currentQuery,
-        datasetSize,
       });
 
       set({

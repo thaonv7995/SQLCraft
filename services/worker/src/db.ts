@@ -20,6 +20,15 @@ export interface SchemaDefinition {
   tables: RawTable[];
 }
 
+export interface DatasetTemplateDefinition {
+  id: string;
+  schemaTemplateId: string;
+  name: string;
+  size: string;
+  rowCounts: Record<string, unknown>;
+  artifactUrl: string | null;
+}
+
 export async function fetchSchemaTemplate(
   schemaTemplateId: string,
 ): Promise<SchemaDefinition | null> {
@@ -33,6 +42,44 @@ export async function fetchSchemaTemplate(
   return def as SchemaDefinition;
 }
 
+export async function fetchDatasetTemplate(
+  datasetTemplateId: string,
+): Promise<DatasetTemplateDefinition | null> {
+  const result = await mainDb.query<{
+    id: string;
+    schemaTemplateId: string;
+    name: string;
+    size: string;
+    rowCounts: unknown;
+    artifactUrl: string | null;
+  }>(
+    `SELECT id,
+            schema_template_id AS "schemaTemplateId",
+            name,
+            size,
+            row_counts AS "rowCounts",
+            artifact_url AS "artifactUrl"
+       FROM dataset_templates
+      WHERE id = $1`,
+    [datasetTemplateId],
+  );
+
+  const row = result.rows[0];
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    schemaTemplateId: row.schemaTemplateId,
+    name: row.name,
+    size: row.size,
+    rowCounts:
+      row.rowCounts && typeof row.rowCounts === 'object'
+        ? (row.rowCounts as Record<string, unknown>)
+        : {},
+    artifactUrl: row.artifactUrl,
+  };
+}
+
 // ─── Sandbox instance ─────────────────────────────────────────────────────────
 
 export async function fetchSandbox(
@@ -44,6 +91,7 @@ export async function fetchSandbox(
   status: string;
   learningSessionId: string;
   schemaTemplateId: string | null;
+  datasetTemplateId: string | null;
 } | null> {
   const result = await mainDb.query(
     `SELECT id,
@@ -51,7 +99,8 @@ export async function fetchSandbox(
             container_ref AS "containerRef",
             status,
             learning_session_id AS "learningSessionId",
-            schema_template_id AS "schemaTemplateId"
+            schema_template_id AS "schemaTemplateId",
+            dataset_template_id AS "datasetTemplateId"
        FROM sandbox_instances
       WHERE id = $1`,
     [sandboxId],

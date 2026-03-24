@@ -51,12 +51,15 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 - [x] Dịch kết quả từ Database engine thành một biểu đồ cây (Tree Visualizer) trực quan hiển thị Cost, Scanned Rows, Actual Time, Index Hit/Miss, buffer hits/reads và highlight bottleneck/hot path thay cho JSON thô trong tab Execution Plan.
 
 ### 7. Điều Chỉnh Quy Mô Dữ Ưiệu (Progressive Dataset Scaling)
-- [ ] Cho phép người học chuyển đổi bài tập chạy trên các kích cỡ dữ liệu khác nhau cho cùng một cấu trúc bảng (Schema):
-  - [ ] **Tiny**: 100 dòng.
-  - [ ] **Small**: 10,000 dòng.
-  - [ ] **Medium**: 1-5 Triệu dòng.
-  - [ ] **Large**: Trên 10 Triệu dòng.
-- [ ] Worker tự động sinh (Async Dataset Generation) các bộ dữ liệu mẫu lớn như dữ liệu Ecommerce.
+- [x] Khi Admin import metadata của một canonical dataset qua Admin API, hệ thống lưu schema definition, row count từng bảng, tổng số dòng toàn DB, phân loại source scale dựa trên tổng số dòng, và ghi `system_jobs` để theo dõi import/generation.
+- [x] Cho phép người học chuyển đổi bài tập chạy trên các kích cỡ dữ liệu khác nhau cho cùng một cấu trúc bảng (Schema):
+  - [x] **Tiny**: khoảng 100 dòng.
+  - [x] **Small**: khoảng 10,000 dòng.
+  - [x] **Medium**: khoảng 1-5 Triệu dòng.
+  - [x] **Large**: trên 10 Triệu dòng.
+  - [x] Chỉ cho phép chọn từ scale gốc xuống các scale nhỏ hơn; không upscale vượt quá database import ban đầu.
+  - [x] Khi đổi scale, worker reprovision sandbox từ dataset template tương ứng; nếu template có artifact thì restore từ artifact, nếu không thì seed deterministic từ rowCounts thay vì resize trực tiếp sandbox đang chạy.
+- [x] Hệ thống tự sinh các dataset template dẫn xuất cho cùng schema từ canonical rowCounts; worker provision/reprovision từ artifact nếu có, hoặc fallback sang deterministic synthetic load để giữ FK integrity, phân phối dữ liệu và coverage nghiệp vụ cơ bản.
 
 ### 8. Thực Hành Tối Ưu Hóa & Đánh Giá Chi Phí (Optimization Labs)
 - [x] Hỗ trợ lưu lịch sử truy vấn (Query History) để dễ dàng nhìn lại quá trình làm bài.
@@ -74,7 +77,7 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 - [ ] Leaderboard vinh danh những người giải quyết bài toán với thời gian và chi phí truy vấn (Cost) thấp nhất.
 
 ### 11. Quản Trị Hệ Thống Toàn Diện (Super Admin Console)
-- [ ] **Quản Lý Database & Schema (Database Management)**: Quản lý các mẫu Schema gốc (Schema Templates) và mẫu Dữ liệu gốc (Dataset Templates). **Hỗ trợ tính năng Upload SQL Dump**: Khi Admin tải lên một file dump (ví dụ `.sql`), hệ thống tự động quét (auto-scan) và trích xuất cấu trúc (danh sách bảng, cột, khóa, số lượng dòng) để review và duyệt trước khi đưa vào cấu hình làm CSDL mặc định.
+- [ ] **Quản Lý Database & Schema (Database Management)**: Quản lý các mẫu Schema gốc (Schema Templates) và mẫu Dữ liệu gốc (Dataset Templates). **Hỗ trợ tính năng Upload SQL Dump**: Khi Admin tải lên một file dump (ví dụ `.sql`), hệ thống tự động quét (auto-scan) và trích xuất cấu trúc (danh sách bảng, cột, khóa, số lượng dòng), tổng row count, metadata domain và phân loại scale gốc để review trước khi publish. Từ database gốc này, worker có thể sinh các dataset artifact nhỏ hơn dùng cho learner sandbox.
 - [ ] **Quản Lý Hệ Thống Bài Học (Content Management)**: Công cụ cho phép Admin có toàn quyền tạo mới, chỉnh sửa, xóa Lộ trình học (Tracks), Bài học (Lessons), và cấu hình chi tiết cho các Thử thách (Challenges) nếu không đợi User đóng góp.
 - [ ] **Quản Lý Cộng Đồng (User & Contribution)**: Giao diện phân quyền tài khoản (User Management), ban/khóa User vi phạm, phê duyệt hoặc từ chối các nội dung (bài học/thử thách/db) do User gửi lên.
 - [ ] **Giám Sát Hệ Thống (System Monitoring)**: Theo dõi "sức khỏe" nền tảng (Health Dashboard), trạng thái hàng đợi cấp phát Container/Dataset của Worker, xem log lỗi và quản lý tài nguyên máy chủ.

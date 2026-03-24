@@ -7,7 +7,7 @@ export type DatabaseDomain =
   | 'analytics'
   | 'other';
 
-export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large' | 'massive';
+export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 export interface DatabaseColumn {
@@ -38,15 +38,18 @@ export interface DatabaseItem {
   description: string;
   domain: DatabaseDomain;
   scale: DatabaseScale;
+  sourceScale: DatabaseScale;
   difficulty: DatabaseDifficulty;
   engine: string;
   domainIcon: string;
   tags: string[];
   rowCount: number;
+  sourceRowCount: number;
   tableCount: number;
   estimatedSizeGb: number;
   schemaTemplateId: string;
   availableScales: DatabaseScale[];
+  availableScaleMetadata: Array<{ scale: DatabaseScale; rowCount: number }>;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }
@@ -68,6 +71,11 @@ export interface CreateDatabaseSessionResult {
     status: string;
     startedAt: Date;
     createdAt: Date;
+    sourceScale: DatabaseScale;
+    selectedScale: DatabaseScale;
+    availableScales: DatabaseScale[];
+    rowCount: number;
+    sourceRowCount: number;
   };
   sandbox: {
     id: string;

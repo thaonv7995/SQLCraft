@@ -1,7 +1,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
-import { NotFoundError } from '../../lib/errors';
+import { NotFoundError, ValidationError } from '../../lib/errors';
 import { enqueueProvisionSandbox } from '../../lib/queue';
 import type {
   CreateDatabaseSessionBody,
@@ -45,6 +45,14 @@ const DOMAIN_ICONS: Record<DatabaseDomain, string> = {
   social: 'groups',
   analytics: 'monitoring',
   other: 'database',
+};
+
+const SCALE_ORDER: DatabaseScale[] = ['tiny', 'small', 'medium', 'large'];
+const SCALE_RANK: Record<DatabaseScale, number> = {
+  tiny: 0,
+  small: 1,
+  medium: 2,
+  large: 3,
 };
 
 function slugify(value: string): string {
@@ -162,13 +170,33 @@ function sumRowCounts(rowCounts: unknown): number {
   }
 
   return Object.values(rowCounts as Record<string, unknown>).reduce<number>((total, value) => {
-    return total + (typeof value === 'number' ? value : 0);
+    if (typeof value === 'number') {
+      return total + value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? total + parsed : total;
+    }
+    return total;
   }, 0);
 }
 
-function choosePreferredScale(availableScales: DatabaseScale[]): DatabaseScale {
-  const priority: DatabaseScale[] = ['medium', 'small', 'tiny', 'large', 'massive'];
-  return priority.find((scale) => availableScales.includes(scale)) ?? availableScales[0] ?? 'small';
+function rowCountForDataset(datasetTemplate: DatasetTemplateRow | null): number {
+  return datasetTemplate ? sumRowCounts(datasetTemplate.rowCounts) : 0;
+}
+
+function uniqueSortedScales(scales: DatabaseScale[]): DatabaseScale[] {
+  return Array.from(new Set(scales))
+    .filter((scale): scale is DatabaseScale => SCALE_ORDER.includes(scale))
+    .sort((a, b) => SCALE_RANK[b] - SCALE_RANK[a]);
+}
+
+function chooseSourceScale(availableScales: DatabaseScale[]): DatabaseScale {
+  return uniqueSortedScales(availableScales)[0] ?? 'small';
+}
+
+function isUpscale(requestedScale: DatabaseScale, sourceScale: DatabaseScale): boolean {
+  return SCALE_RANK[requestedScale] > SCALE_RANK[sourceScale];
 }
 
 function buildTags(domain: DatabaseDomain, tables: SchemaTableDefinition[]): string[] {
@@ -197,11 +225,12 @@ function buildDatabaseItem(
 ): DatabaseItem {
   const definition = parseSchemaDefinition(schemaTemplate.definition);
   const tables = definition.tables ?? [];
-  const availableScales = Array.from(new Set(datasetTemplates.map((dataset) => dataset.size as DatabaseScale)));
-  const preferredScale = choosePreferredScale(availableScales);
-  const preferredDataset =
-    datasetTemplates.find((dataset) => dataset.size === preferredScale) ?? datasetTemplates[0];
-  const rowCount = preferredDataset ? sumRowCounts(preferredDataset.rowCounts) : 0;
+  const availableScales = uniqueSortedScales(
+    datasetTemplates.map((dataset) => dataset.size as DatabaseScale),
+  );
+  const sourceScale = chooseSourceScale(availableScales);
+  const sourceDataset = datasetTemplates.find((dataset) => dataset.size === sourceScale);
+  const sourceRowCount = sourceDataset ? sumRowCounts(sourceDataset.rowCounts) : 0;
   const description = schemaTemplate.description ?? `${schemaTemplate.name} training database`;
   const domain = inferDomain(schemaTemplate.name, description);
 
@@ -211,16 +240,25 @@ function buildDatabaseItem(
     slug: slugify(schemaTemplate.name),
     description,
     domain,
-    scale: preferredScale,
+    scale: sourceScale,
+    sourceScale,
     difficulty: inferDifficulty(tables.length),
     engine: 'PostgreSQL 16',
     domainIcon: DOMAIN_ICONS[domain],
     tags: buildTags(domain, tables),
-    rowCount,
+    rowCount: sourceRowCount,
+    sourceRowCount,
     tableCount: tables.length,
-    estimatedSizeGb: estimateSizeGb(rowCount, tables.length),
+    estimatedSizeGb: estimateSizeGb(sourceRowCount, tables.length),
     schemaTemplateId: schemaTemplate.id,
     availableScales,
+    availableScaleMetadata: availableScales.map((scale) => {
+      const dataset = datasetTemplates.find((row) => row.size === scale);
+      return {
+        scale,
+        rowCount: dataset ? sumRowCounts(dataset.rowCounts) : 0,
+      };
+    }),
     schema: tables.map((table) => ({
       name: table.name,
       role: inferTableRole(table),
@@ -283,40 +321,22 @@ async function findPublishedLessonVersionForSchema(
 
 async function findDatasetForSchema(
   schemaTemplateId: string,
-  requestedScale?: DatabaseScale,
+  requestedScale: DatabaseScale,
 ): Promise<DatasetTemplateRow | null> {
   const db = getDb();
-  const rows = await db
+  const [row] = await db
     .select()
     .from(dbSchema.datasetTemplates)
     .where(
       and(
         eq(dbSchema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+        eq(dbSchema.datasetTemplates.size, requestedScale),
         eq(dbSchema.datasetTemplates.status, 'published'),
       ),
     )
-    .orderBy(desc(dbSchema.datasetTemplates.createdAt));
-
-  if (rows.length === 0) {
-    return null;
-  }
-
-  if (requestedScale) {
-    const exact = rows.find((row) => row.size === requestedScale);
-    if (exact) {
-      return exact;
-    }
-  }
-
-  const fallbackOrder: DatabaseScale[] = ['medium', 'small', 'tiny', 'large', 'massive'];
-  for (const scale of fallbackOrder) {
-    const match = rows.find((row) => row.size === scale);
-    if (match) {
-      return match;
-    }
-  }
-
-  return rows[0];
+    .orderBy(desc(dbSchema.datasetTemplates.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 export async function listDatabases(
@@ -358,13 +378,48 @@ export async function createDatabaseSession(
   body: CreateDatabaseSessionBody,
 ): Promise<CreateDatabaseSessionResult> {
   const database = await getDatabase(body.databaseId);
+  const sourceScale = database.sourceScale ?? database.scale;
+  const requestedScale = body.scale ?? sourceScale;
+
+  if (isUpscale(requestedScale, sourceScale)) {
+    throw new ValidationError(
+      `Requested scale "${requestedScale}" is larger than source scale "${sourceScale}"`,
+      {
+        sourceScale,
+        requestedScale,
+        availableScales: database.availableScales,
+      },
+    );
+  }
+
+  if (!database.availableScales.includes(requestedScale)) {
+    throw new ValidationError(
+      `Scale "${requestedScale}" is unavailable for this database`,
+      {
+        sourceScale,
+        requestedScale,
+        availableScales: database.availableScales,
+      },
+    );
+  }
+
   const lessonVersion = await findPublishedLessonVersionForSchema(database.schemaTemplateId);
 
   if (!lessonVersion) {
     throw new NotFoundError('No published lesson version is linked to this database');
   }
 
-  const datasetTemplate = await findDatasetForSchema(database.schemaTemplateId, body.scale);
+  const datasetTemplate = await findDatasetForSchema(database.schemaTemplateId, requestedScale);
+  if (!datasetTemplate) {
+    throw new ValidationError(
+      `Dataset template for scale "${requestedScale}" is unavailable`,
+      {
+        sourceScale,
+        requestedScale,
+        availableScales: database.availableScales,
+      },
+    );
+  }
 
   const session = await sessionsRepository.createSession({
     userId,
@@ -376,7 +431,7 @@ export async function createDatabaseSession(
   const sandbox = await sessionsRepository.createSandbox({
     learningSessionId: session.id,
     schemaTemplateId: database.schemaTemplateId,
-    datasetTemplateId: datasetTemplate?.id,
+    datasetTemplateId: datasetTemplate.id,
     status: 'requested',
   });
 
@@ -384,7 +439,7 @@ export async function createDatabaseSession(
     sandboxInstanceId: sandbox.id,
     learningSessionId: session.id,
     schemaTemplateId: database.schemaTemplateId,
-    datasetTemplateId: datasetTemplate?.id ?? null,
+    datasetTemplateId: datasetTemplate.id,
   });
 
   return {
@@ -396,6 +451,11 @@ export async function createDatabaseSession(
       status: session.status,
       startedAt: session.startedAt,
       createdAt: session.createdAt,
+      sourceScale,
+      selectedScale: requestedScale,
+      availableScales: database.availableScales,
+      rowCount: rowCountForDataset(datasetTemplate),
+      sourceRowCount: database.sourceRowCount,
     },
     sandbox: {
       id: sandbox.id,

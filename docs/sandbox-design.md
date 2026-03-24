@@ -9,6 +9,7 @@ Provide a safe, isolated, resettable SQL execution environment for each active l
 - reset must return to known clean template state
 - sandbox network access must be restricted
 - lifecycle must be observable
+- scale changes must recreate the sandbox from a selected dataset template, never delete rows in place inside the live sandbox
 
 ## 3. Sandbox Model
 ### Recommended V1 Model
@@ -36,7 +37,7 @@ Why:
 2. Sandbox creation job enqueued.
 3. Container started using base image.
 4. Schema template applied.
-5. Dataset imported or seeded.
+5. Selected dataset is restored from artifact or seeded deterministically from template row counts.
 6. Readiness checks pass.
 7. Status becomes `ready`.
 8. User runs queries.
@@ -56,17 +57,25 @@ Best for medium/large datasets.
 Pros:
 - faster restore
 - deterministic
+- avoids expensive live downscale operations during session startup
 Cons:
 - more artifact management complexity
 
 ### V1 Recommendation
 - tiny/small: seed scripts
-- medium/large: restore from prepared artifact where possible
+- medium/large: restore from prepared artifact when available
+- scale switching: hard reprovision from the target template, not in-place resize
 
 ## 6. Reset Strategies
 ### Hard Reset
 Destroy container and recreate from template.
 Best default for V1.
+
+### Scale Change
+Changing dataset scale should follow the same hard reprovision model as reset:
+- current sandbox is discarded
+- a new sandbox is provisioned from the selected derived dataset template
+- query history may remain, but the runtime database state starts clean for the new scale
 
 ### Soft Reset
 Truncate/reload tables inside same container.

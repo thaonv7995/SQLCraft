@@ -9,20 +9,21 @@ import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { databasesApi, type Database, type DatabaseScale } from '@/lib/api';
+import { databasesApi, type Database, type DatabaseScale, type DatasetScale } from '@/lib/api';
 import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DOMAIN_LABELS,
   DATABASE_SCALE_LABELS,
-  DATABASE_SCALE_OPTIONS,
   getFallbackDatabase,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 
-const SCALE_OPTIONS = DATABASE_SCALE_OPTIONS.filter((option) => option.value !== 'all') as Array<{
-  value: DatabaseScale;
-  label: string;
-}>;
+const SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
+  { value: 'tiny', label: DATABASE_SCALE_LABELS.tiny },
+  { value: 'small', label: DATABASE_SCALE_LABELS.small },
+  { value: 'medium', label: DATABASE_SCALE_LABELS.medium },
+  { value: 'large', label: DATABASE_SCALE_LABELS.large },
+];
 
 const ROLE_STYLES = {
   primary: 'border-primary/30 bg-primary/5 text-primary',
@@ -414,7 +415,7 @@ export default function DatabaseDetailPage() {
 
 function DatabaseDetail({ dbId }: { dbId: string }) {
   const router = useRouter();
-  const [scaleOverride, setScaleOverride] = useState<DatabaseScale | null>(null);
+  const [scaleOverride, setScaleOverride] = useState<DatasetScale | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [progress, setProgress] = useState(10);
 
@@ -439,7 +440,28 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
     staleTime: 60_000,
   });
 
-  const selectedScale = scaleOverride ?? database?.scale ?? 'medium';
+  const availableScales = useMemo(() => {
+    if (!database?.availableScales?.length) {
+      return SCALE_OPTIONS.map((option) => option.value);
+    }
+
+    return database.availableScales;
+  }, [database?.availableScales]);
+
+  const defaultScale =
+    database?.selectedScale ??
+    database?.sourceScale ??
+    availableScales[availableScales.length - 1] ??
+    'medium';
+  const selectedScale = scaleOverride && availableScales.includes(scaleOverride)
+    ? scaleOverride
+    : defaultScale;
+
+  useEffect(() => {
+    if (scaleOverride && !availableScales.includes(scaleOverride)) {
+      setScaleOverride(null);
+    }
+  }, [availableScales, scaleOverride]);
 
   const launchMutation = useMutation({
     mutationFn: async () => {
@@ -537,19 +559,19 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
       role="group"
       aria-label="Sandbox dataset size"
     >
-      {SCALE_OPTIONS.map((option) => (
+      {availableScales.map((scaleValue) => (
         <button
-          key={option.value}
+          key={scaleValue}
           type="button"
-          onClick={() => setScaleOverride(option.value)}
+          onClick={() => setScaleOverride(scaleValue)}
           className={cn(
             'rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors',
-            selectedScale === option.value
+            selectedScale === scaleValue
               ? 'border-primary/40 bg-primary/10 text-on-surface'
               : 'border-outline-variant/10 text-on-surface-variant hover:border-outline-variant/25 hover:bg-surface-container',
           )}
         >
-          {option.label}
+          {DATABASE_SCALE_LABELS[scaleValue]}
         </button>
       ))}
     </div>
@@ -570,13 +592,18 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
   const datasetSummary = (
     <div className="mt-2 space-y-1">
       <p className="text-xs text-on-surface-variant">
-        {formatRows(database.rowCount)} rows
+        {formatRows(database.sourceRowCount ?? database.rowCount)} rows
         <span className="mx-1.5 text-outline">·</span>
         {database.tableCount} tables
         <span className="mx-1.5 text-outline">·</span>
         {database.estimatedSizeGb.toFixed(1)} GB
         <span className="mx-1.5 text-outline">·</span>
-        {DATABASE_SCALE_LABELS[database.scale] ?? database.scale}
+        Source scale {DATABASE_SCALE_LABELS[database.sourceScale ?? selectedScale]}
+      </p>
+      <p className="text-[11px] text-outline">
+        Launch scale <span className="font-medium text-on-surface-variant">{DATABASE_SCALE_LABELS[selectedScale]}</span>
+        <span className="mx-1.5">·</span>
+        {availableScales.length} option{availableScales.length === 1 ? '' : 's'} available
       </p>
       <p className="text-[11px] text-outline">
         Region{' '}

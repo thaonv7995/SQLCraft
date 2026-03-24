@@ -1,9 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
 export type SandboxRow = InferSelectModel<typeof schema.sandboxInstances>;
 export type SessionRow = InferSelectModel<typeof schema.learningSessions>;
+export type DatasetTemplateRow = InferSelectModel<typeof schema.datasetTemplates>;
 
 export class SandboxesRepository {
   private get db() {
@@ -49,6 +50,37 @@ export class SandboxesRepository {
       .update(schema.sandboxInstances)
       .set({ status: 'resetting', updatedAt: new Date() })
       .where(eq(schema.sandboxInstances.id, id));
+  }
+
+  async updateDatasetTemplate(id: string, datasetTemplateId: string | null): Promise<void> {
+    await this.db
+      .update(schema.sandboxInstances)
+      .set({ datasetTemplateId, updatedAt: new Date() })
+      .where(eq(schema.sandboxInstances.id, id));
+  }
+
+  async findDatasetTemplateById(id: string): Promise<DatasetTemplateRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.datasetTemplates)
+      .where(eq(schema.datasetTemplates.id, id))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async listPublishedDatasetTemplatesBySchema(
+    schemaTemplateId: string,
+  ): Promise<DatasetTemplateRow[]> {
+    return this.db
+      .select()
+      .from(schema.datasetTemplates)
+      .where(
+        and(
+          eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+          eq(schema.datasetTemplates.status, 'published'),
+        ),
+      );
   }
 
 }

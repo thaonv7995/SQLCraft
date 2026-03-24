@@ -20,7 +20,7 @@ import {
   TableEmpty,
 } from '@/components/ui/table';
 import { cn, formatDuration, formatRows, formatRelativeTime, getExplainPlanMode, truncateSql } from '@/lib/utils';
-import { challengesApi, lessonsApi, type QueryResultColumn } from '@/lib/api';
+import { challengesApi, lessonsApi, sandboxesApi, type DatasetScale, type QueryResultColumn } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
@@ -36,38 +36,65 @@ function sessionIdFromParams(params: { sessionId?: string | string[] }): string 
   return '';
 }
 
-// ─── Dataset Size Selector ────────────────────────────────────────────────────
+// ─── Dataset Scale Selector ───────────────────────────────────────────────────
 
-const DATASET_SIZES = [
-  { value: 'tiny', label: 'Tiny', desc: '~1K rows' },
-  { value: 'small', label: 'Small', desc: '~10K rows' },
-  { value: 'medium', label: 'Medium', desc: '~100K rows' },
-  { value: 'large', label: 'Large', desc: '~1M rows' },
-] as const;
+const DATASET_SCALE_META: Record<DatasetScale, { label: string; desc: string }> = {
+  tiny: { label: 'Tiny', desc: '100 rows' },
+  small: { label: 'Small', desc: '10K rows' },
+  medium: { label: 'Medium', desc: '1M-5M rows' },
+  large: { label: 'Large', desc: '10M+ rows' },
+};
 
-function DatasetSizeSelector() {
-  const { datasetSize, setDatasetSize } = useLabStore();
+function DatasetScaleSelector({
+  selectedScale,
+  sourceScale,
+  sourceRowCount,
+  availableScales,
+  isSwitching,
+  sessionStatus,
+  onChange,
+}: {
+  selectedScale: DatasetScale | null;
+  sourceScale: DatasetScale | null;
+  sourceRowCount: number | null;
+  availableScales: DatasetScale[];
+  isSwitching: boolean;
+  sessionStatus?: string | null;
+  onChange: (scale: DatasetScale) => void;
+}) {
+  const scales = availableScales.length > 0 ? availableScales : (Object.keys(DATASET_SCALE_META) as DatasetScale[]);
+  const isDisabled = sessionStatus !== 'active' || isSwitching;
+  const sourceScaleLabel = sourceScale ? DATASET_SCALE_META[sourceScale].label : 'Unknown';
+
   return (
-    <div
-      className="flex items-center gap-0.5 rounded-lg border border-outline-variant/10 bg-surface-container-low p-0.5"
-      title="Dataset scale for query execution"
-    >
-      {DATASET_SIZES.map((s) => (
-        <button
-          key={s.value}
-          type="button"
-          onClick={() => setDatasetSize(s.value)}
-          className={cn(
-            'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
-            datasetSize === s.value
-              ? 'bg-surface-container-high text-on-surface shadow-sm'
-              : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
-          )}
-          title={s.desc}
-        >
-          {s.label}
-        </button>
-      ))}
+    <div className="flex flex-col items-end gap-1">
+      <div
+        className="flex items-center gap-0.5 rounded-lg border border-outline-variant/10 bg-surface-container-low p-0.5"
+        title="Changing scale reprovisions the sandbox from a prepared dataset artifact"
+      >
+        {scales.map((scale) => (
+          <button
+            key={scale}
+            type="button"
+            disabled={isDisabled}
+            onClick={() => onChange(scale)}
+            className={cn(
+              'rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+              selectedScale === scale
+                ? 'bg-surface-container-high text-on-surface shadow-sm'
+                : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
+            )}
+            title={DATASET_SCALE_META[scale].desc}
+          >
+            {DATASET_SCALE_META[scale].label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-outline">
+        Source {sourceScaleLabel}
+        {typeof sourceRowCount === 'number' ? ` (${formatRows(sourceRowCount)} rows)` : ''}
+        {selectedScale ? ` · Selected ${DATASET_SCALE_META[selectedScale].label}` : ''}
+      </p>
     </div>
   );
 }
@@ -506,6 +533,11 @@ export default function LabPage() {
     error,
     currentQuery,
     setQuery,
+    selectedScale,
+    sourceScale,
+    availableScales,
+    sourceRowCount,
+    setSelectedScale,
   } = useLabStore();
 
   const { mutate: executeQuery } = useExecuteQuery();
@@ -605,6 +637,41 @@ export default function LabPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to submit challenge attempt');
     },
   });
+  const scaleSwitchMutation = useMutation({
+    mutationFn: async (nextScale: DatasetScale) => {
+      return sandboxesApi.reset(sessionId, nextScale);
+    },
+    onMutate: (nextScale) => {
+      const previousSession = useLabStore.getState().session;
+      setSelectedScale(nextScale);
+      useLabStore.getState().resetResults();
+      useLabStore.setState({ queryHistory: [] });
+
+      if (previousSession) {
+        useLabStore.getState().setSession({
+          ...previousSession,
+          status: 'provisioning',
+          selectedScale: nextScale,
+        });
+      }
+
+      return { previousSession };
+    },
+    onSuccess: () => {
+      toast.success('Sandbox reprovision started for selected scale.');
+    },
+    onError: (err, _nextScale, context) => {
+      if (context?.previousSession) {
+        useLabStore.getState().setSession(context.previousSession);
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to reprovision sandbox');
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['session-status', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
+    },
+  });
 
   useEffect(() => {
     const bootstrap = readLabBootstrap(sessionId);
@@ -674,6 +741,20 @@ export default function LabPage() {
     setQuery('');
     useLabStore.getState().resetResults();
   }, [setQuery]);
+  const handleScaleChange = useCallback(
+    (nextScale: DatasetScale) => {
+      if (!session || session.status !== 'active' || scaleSwitchMutation.isPending) {
+        return;
+      }
+
+      if (selectedScale === nextScale) {
+        return;
+      }
+
+      scaleSwitchMutation.mutate(nextScale);
+    },
+    [scaleSwitchMutation, selectedScale, session],
+  );
 
   if (!sessionId) {
     return (
@@ -709,7 +790,12 @@ export default function LabPage() {
                 variant="primary"
                 size="sm"
                 loading={isExecuting}
-                disabled={!currentQuery.trim() || isExecuting || session?.status !== 'active'}
+                disabled={
+                  !currentQuery.trim() ||
+                  isExecuting ||
+                  scaleSwitchMutation.isPending ||
+                  session?.status !== 'active'
+                }
                 onClick={() => executeQuery({ sessionId, sql: currentQuery })}
                 leftIcon={
                   <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -723,7 +809,13 @@ export default function LabPage() {
                 variant="secondary"
                 size="sm"
                 loading={isExplaining}
-                disabled={!currentQuery.trim() || !explainPlanMode || isExplaining || session?.status !== 'active'}
+                disabled={
+                  !currentQuery.trim() ||
+                  !explainPlanMode ||
+                  isExplaining ||
+                  scaleSwitchMutation.isPending ||
+                  session?.status !== 'active'
+                }
                 onClick={() => explainQuery({ sessionId, sql: currentQuery })}
                 title={
                   !explainPlanMode && currentQuery.trim()
@@ -752,6 +844,7 @@ export default function LabPage() {
                   disabled={
                     !latestSuccessfulExecution ||
                     session?.status === 'provisioning' ||
+                    scaleSwitchMutation.isPending ||
                     submitAttemptMutation.isPending
                   }
                   onClick={() => submitAttemptMutation.mutate()}
@@ -766,7 +859,15 @@ export default function LabPage() {
                 </Button>
               ) : null}
             </div>
-            <DatasetSizeSelector />
+            <DatasetScaleSelector
+              selectedScale={selectedScale}
+              sourceScale={sourceScale}
+              sourceRowCount={sourceRowCount}
+              availableScales={availableScales}
+              isSwitching={scaleSwitchMutation.isPending}
+              sessionStatus={session?.status}
+              onChange={handleScaleChange}
+            />
           </div>
 
           <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">

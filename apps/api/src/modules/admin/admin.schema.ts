@@ -88,6 +88,27 @@ export const UpdateUserRoleSchema = z.object({
   role: z.enum(['learner', 'contributor', 'admin']),
 });
 
+// ─── Database Imports & Jobs ─────────────────────────────────────────────────
+
+export const ImportCanonicalDatabaseSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().optional(),
+  definition: z.record(z.unknown()),
+  canonicalDataset: z.object({
+    name: z.string().min(1).max(100).optional(),
+    rowCounts: z.record(z.string(), z.coerce.number().int().min(0)),
+    artifactUrl: z.string().url().optional().nullable(),
+  }),
+  generateDerivedDatasets: z.boolean().default(true),
+  status: z.enum(['draft', 'published', 'archived']).default('published'),
+});
+
+export const ListSystemJobsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'retrying']).optional(),
+  type: z.string().min(1).max(100).optional(),
+});
+
 // ─── Params ───────────────────────────────────────────────────────────────────
 
 export const AdminIdParamsSchema = z.object({
@@ -104,4 +125,6 @@ export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
 export type UpdateUserStatusBody = z.infer<typeof UpdateUserStatusSchema>;
 export type UpdateUserRoleBody = z.infer<typeof UpdateUserRoleSchema>;
+export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabaseSchema>;
+export type ListSystemJobsQuery = z.infer<typeof ListSystemJobsQuerySchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;

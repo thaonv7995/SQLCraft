@@ -11,11 +11,10 @@ export const DATABASE_DOMAIN_LABELS: Record<DatabaseDomain, string> = {
 };
 
 export const DATABASE_SCALE_LABELS: Record<DatabaseScale, string> = {
-  tiny: '< 10K rows',
-  small: '~100K rows',
-  medium: '~1M rows',
-  large: '~10M rows',
-  massive: '100M+ rows',
+  tiny: '100 rows',
+  small: '10K rows',
+  medium: '1M-5M rows',
+  large: '10M+ rows',
 };
 
 export const DATABASE_DOMAIN_OPTIONS = [
@@ -34,7 +33,6 @@ export const DATABASE_SCALE_OPTIONS = [
   { value: 'small', label: 'Small' },
   { value: 'medium', label: 'Medium' },
   { value: 'large', label: 'Large' },
-  { value: 'massive', label: 'Massive' },
 ];
 
 export const DATABASE_DIFFICULTY_STYLES: Record<
@@ -305,7 +303,7 @@ export const PLACEHOLDER_DATABASES: Database[] = [
     description:
       'Time-series sensor readings from 2,400 edge devices with aggregation tables, anomaly logs, and device metadata.',
     domain: 'iot',
-    scale: 'massive',
+    scale: 'large',
     difficulty: 'advanced',
     engine: 'TimescaleDB',
     domainIcon: 'sensors',

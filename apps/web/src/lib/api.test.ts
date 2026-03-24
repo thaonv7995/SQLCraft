@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeQueryExecutionItem } from './api';
+import {
+  normalizeAvailableDatasetScales,
+  normalizeQueryExecutionItem,
+  resolveDatasetScaleContext,
+} from './api';
 
 describe('normalizeQueryExecutionItem', () => {
   it('maps the accepted submit-query payload using sessionId/sql/createdAt', () => {
@@ -109,5 +113,70 @@ describe('normalizeQueryExecutionItem', () => {
 
     expect(execution.result).toBeUndefined();
     expect(execution.executionPlan).toBeUndefined();
+  });
+});
+
+describe('dataset scale context helpers', () => {
+  it('normalizes available scales, enforces downscale-only against source scale, and sorts', () => {
+    const scales = normalizeAvailableDatasetScales(
+      ['medium', 'tiny', 'large', 'small', 'small'],
+      'medium',
+    );
+
+    expect(scales).toEqual(['tiny', 'small', 'medium']);
+  });
+
+  it('maps legacy massive scale to large and resolves selected scale from available list', () => {
+    const context = resolveDatasetScaleContext({
+      scale: 'massive',
+      selectedScale: 'large',
+      availableScales: ['small', 'tiny', 'large'],
+      rowCount: 2_000_000,
+    });
+
+    expect(context).toEqual({
+      sourceScale: 'large',
+      selectedScale: 'large',
+      availableScales: ['tiny', 'small', 'large'],
+      rowCount: 2_000_000,
+      sourceRowCount: 2_000_000,
+    });
+  });
+
+  it('falls back to source scale when selected scale is invalid for the source', () => {
+    const context = resolveDatasetScaleContext({
+      sourceScale: 'small',
+      selectedScale: 'large',
+      availableScales: ['tiny', 'small', 'medium'],
+      sourceRowCount: 25_000,
+    });
+
+    expect(context).toEqual({
+      sourceScale: 'small',
+      selectedScale: 'small',
+      availableScales: ['tiny', 'small'],
+      rowCount: undefined,
+      sourceRowCount: 25_000,
+    });
+  });
+
+  it('reads nested dataset summaries returned by the session API', () => {
+    const context = resolveDatasetScaleContext({
+      dataset: {
+        sourceScale: 'large',
+        selectedScale: 'small',
+        availableScales: ['tiny', 'small', 'large'],
+        totalRows: 10_000,
+        sourceTotalRows: 10_000_000,
+      },
+    });
+
+    expect(context).toEqual({
+      sourceScale: 'large',
+      selectedScale: 'small',
+      availableScales: ['tiny', 'small', 'large'],
+      rowCount: 10_000,
+      sourceRowCount: 10_000_000,
+    });
   });
 });

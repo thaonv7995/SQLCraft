@@ -1,6 +1,14 @@
 import { sessionsRepository } from '../../db/repositories';
 import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/repositories';
-import { NotFoundError, ForbiddenError } from '../../lib/errors';
+import type { DatasetTemplateRow } from '../../db/repositories/sessions.repository';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
+import {
+  getLargestDatasetScale,
+  isDatasetScaleAllowed,
+  normalizeDatasetScales,
+  sumDatasetRowCounts,
+} from '../../lib/dataset-scales';
+import type { DatasetSize } from '@sqlcraft/types';
 import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue';
 import type { CreateSessionBody } from './sessions.schema';
 
@@ -60,12 +68,24 @@ export interface CreateSessionResult {
   session: Pick<
     SessionRow,
     'id' | 'userId' | 'lessonVersionId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
-  >;
+  > & {
+    sourceScale: DatasetSize | null;
+    selectedScale: DatasetSize | null;
+    availableScales: DatasetSize[];
+    rowCount: number | null;
+    sourceRowCount: number | null;
+  };
   sandbox: Pick<SandboxRow, 'id' | 'status'>;
 }
 
 export interface GetSessionResult extends SessionRow {
   sandbox: Pick<SandboxRow, 'id' | 'status' | 'dbName' | 'expiresAt' | 'updatedAt'> | null;
+  dataset: SessionDatasetSummary;
+  sourceScale: DatasetSize | null;
+  selectedScale: DatasetSize | null;
+  availableScales: DatasetSize[];
+  rowCount: number | null;
+  sourceRowCount: number | null;
 }
 
 export interface EndSessionResult {
@@ -84,6 +104,106 @@ export interface SessionListItem {
   startedAt: Date;
   lastActivityAt: Date | null;
   createdAt: Date;
+}
+
+export interface SessionDatasetSummary {
+  schemaTemplateId: string | null;
+  datasetTemplateId: string | null;
+  selectedScale: DatasetSize | null;
+  sourceScale: DatasetSize | null;
+  availableScales: DatasetSize[];
+  totalRows: number | null;
+  sourceTotalRows: number | null;
+  rowCounts: Record<string, number> | null;
+}
+
+function normalizeRowCounts(rowCounts: unknown): Record<string, number> | null {
+  if (!rowCounts || typeof rowCounts !== 'object') {
+    return null;
+  }
+
+  const entries = Object.entries(rowCounts as Record<string, unknown>).filter(
+    (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]),
+  );
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return Object.fromEntries(entries);
+}
+
+function buildDatasetSummary(
+  schemaTemplateId: string | null,
+  selectedTemplate: DatasetTemplateRow | null,
+  schemaTemplates: DatasetTemplateRow[],
+): SessionDatasetSummary {
+  const availableScales = normalizeDatasetScales(
+    schemaTemplates.map((datasetTemplate) => datasetTemplate.size as DatasetSize),
+  );
+  const sourceScale = getLargestDatasetScale(availableScales);
+  const sourceTemplate =
+    schemaTemplates.find((datasetTemplate) => datasetTemplate.size === sourceScale) ?? null;
+  const rowCounts = normalizeRowCounts(selectedTemplate?.rowCounts);
+  const sourceRowCounts = normalizeRowCounts(sourceTemplate?.rowCounts);
+
+  return {
+    schemaTemplateId,
+    datasetTemplateId: selectedTemplate?.id ?? null,
+    selectedScale: (selectedTemplate?.size as DatasetSize | undefined) ?? null,
+    sourceScale,
+    availableScales,
+    totalRows: rowCounts ? sumDatasetRowCounts(rowCounts) : null,
+    sourceTotalRows: sourceRowCounts ? sumDatasetRowCounts(sourceRowCounts) : null,
+    rowCounts,
+  };
+}
+
+async function loadSchemaDatasetTemplates(
+  schemaTemplateId: string | null | undefined,
+): Promise<DatasetTemplateRow[]> {
+  if (!schemaTemplateId) {
+    return [];
+  }
+
+  return sessionsRepository.listPublishedDatasetTemplatesBySchema(schemaTemplateId);
+}
+
+async function resolveRequestedDatasetTemplate(
+  lessonVersion: LessonVersionRow,
+  requestedScale?: DatasetSize,
+): Promise<{ selectedTemplate: DatasetTemplateRow | null; summary: SessionDatasetSummary }> {
+  const schemaTemplateId = lessonVersion.schemaTemplateId ?? null;
+  const schemaTemplates = await loadSchemaDatasetTemplates(schemaTemplateId);
+  const sourceScale = getLargestDatasetScale(
+    schemaTemplates.map((datasetTemplate) => datasetTemplate.size as DatasetSize),
+  );
+
+  let defaultTemplate =
+    schemaTemplates.find((datasetTemplate) => datasetTemplate.id === lessonVersion.datasetTemplateId) ??
+    null;
+
+  if (!defaultTemplate && lessonVersion.datasetTemplateId) {
+    defaultTemplate = await sessionsRepository.findDatasetTemplateById(lessonVersion.datasetTemplateId);
+  }
+
+  let selectedTemplate = defaultTemplate;
+
+  if (requestedScale) {
+    if (!isDatasetScaleAllowed(requestedScale, sourceScale)) {
+      throw new ValidationError('Requested dataset scale exceeds the source dataset scale');
+    }
+
+    selectedTemplate =
+      schemaTemplates.find((datasetTemplate) => datasetTemplate.size === requestedScale) ?? null;
+
+    if (!selectedTemplate) {
+      throw new ValidationError('Requested dataset scale is not available for this lesson');
+    }
+  }
+
+  const summary = buildDatasetSummary(schemaTemplateId, selectedTemplate, schemaTemplates);
+  return { selectedTemplate, summary };
 }
 
 export async function listUserSessions(userId: string, limit = 20): Promise<SessionListItem[]> {
@@ -120,6 +240,11 @@ export async function createSession(
     }
   }
 
+  const { selectedTemplate, summary: dataset } = await resolveRequestedDatasetTemplate(
+    lessonVersion,
+    body.datasetSize ?? body.scale,
+  );
+
   const session = await sessionsRepository.createSession({
     userId,
     lessonVersionId: body.lessonVersionId,
@@ -130,7 +255,7 @@ export async function createSession(
   const sandbox = await sessionsRepository.createSandbox({
     learningSessionId: session.id,
     schemaTemplateId: lessonVersion.schemaTemplateId ?? undefined,
-    datasetTemplateId: lessonVersion.datasetTemplateId ?? undefined,
+    datasetTemplateId: selectedTemplate?.id ?? lessonVersion.datasetTemplateId ?? undefined,
     status: 'requested',
   });
 
@@ -138,7 +263,7 @@ export async function createSession(
     sandboxInstanceId: sandbox.id,
     learningSessionId: session.id,
     schemaTemplateId: lessonVersion.schemaTemplateId ?? null,
-    datasetTemplateId: lessonVersion.datasetTemplateId ?? null,
+    datasetTemplateId: selectedTemplate?.id ?? lessonVersion.datasetTemplateId ?? null,
   });
 
   return {
@@ -150,6 +275,11 @@ export async function createSession(
       status: session.status,
       startedAt: session.startedAt,
       createdAt: session.createdAt,
+      sourceScale: dataset.sourceScale,
+      selectedScale: dataset.selectedScale,
+      availableScales: dataset.availableScales,
+      rowCount: dataset.totalRows,
+      sourceRowCount: dataset.sourceTotalRows,
     },
     sandbox: {
       id: sandbox.id,
@@ -174,10 +304,30 @@ export async function getSession(
   }
 
   const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
+  const detailedSandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
+  const lessonVersion = await sessionsRepository.findPublishedLessonVersion(session.lessonVersionId);
+
+  let dataset = buildDatasetSummary(null, null, []);
+
+  if (lessonVersion) {
+    const schemaTemplates = await loadSchemaDatasetTemplates(lessonVersion.schemaTemplateId ?? null);
+    const selectedTemplate =
+      schemaTemplates.find((datasetTemplate) => datasetTemplate.id === detailedSandbox?.datasetTemplateId) ??
+      schemaTemplates.find((datasetTemplate) => datasetTemplate.id === lessonVersion.datasetTemplateId) ??
+      null;
+
+    dataset = buildDatasetSummary(lessonVersion.schemaTemplateId ?? null, selectedTemplate, schemaTemplates);
+  }
 
   return {
     ...session,
     sandbox: sandbox ?? null,
+    dataset,
+    sourceScale: dataset.sourceScale,
+    selectedScale: dataset.selectedScale,
+    availableScales: dataset.availableScales,
+    rowCount: dataset.totalRows,
+    sourceRowCount: dataset.sourceTotalRows,
   };
 }
 

@@ -245,27 +245,23 @@ async function seed() {
   // 5. Create dataset templates
   console.log('Creating dataset templates...');
   const datasetSizes: Array<{
-    size: 'tiny' | 'small' | 'medium';
+    size: 'tiny' | 'small' | 'medium' | 'large';
     rowCounts: Record<string, number>;
   }> = [
     { size: 'tiny', rowCounts: { users: 10, categories: 5, products: 20, orders: 15, order_items: 30 } },
     { size: 'small', rowCounts: { users: 100, categories: 20, products: 200, orders: 150, order_items: 400 } },
     { size: 'medium', rowCounts: { users: 1000, categories: 50, products: 2000, orders: 3000, order_items: 8000 } },
+    { size: 'large', rowCounts: { users: 20000, categories: 200, products: 150000, orders: 250000, order_items: 900000 } },
   ];
 
+  const existingDatasets = await db
+    .select()
+    .from(schema.datasetTemplates)
+    .where(eq(schema.datasetTemplates.schemaTemplateId, ecommerceSchema.id));
+
   for (const ds of datasetSizes) {
-    const existing = await db
-      .select()
-      .from(schema.datasetTemplates)
-      .where(eq(schema.datasetTemplates.schemaTemplateId, ecommerceSchema.id))
-      .limit(1);
-
-    const alreadyExists = existing.some((e) => {
-      // We rely on unique name per schema
-      return false; // simplified - just insert
-    });
-
-    if (existing.length === 0 || !existing.find((e) => e.size === ds.size)) {
+    const existing = existingDatasets.find((e) => e.size === ds.size);
+    if (!existing) {
       await db.insert(schema.datasetTemplates).values({
         schemaTemplateId: ecommerceSchema.id,
         name: `Ecommerce ${ds.size.charAt(0).toUpperCase() + ds.size.slice(1)}`,
@@ -274,7 +270,18 @@ async function seed() {
         status: 'published',
       });
       console.log(`  Created ${ds.size} dataset template`);
+      continue;
     }
+
+    await db
+      .update(schema.datasetTemplates)
+      .set({
+        name: `Ecommerce ${ds.size.charAt(0).toUpperCase() + ds.size.slice(1)}`,
+        rowCounts: ds.rowCounts,
+        status: 'published',
+      })
+      .where(eq(schema.datasetTemplates.id, existing.id));
+    console.log(`  Updated ${ds.size} dataset template`);
   }
 
   // 6. Create tracks
