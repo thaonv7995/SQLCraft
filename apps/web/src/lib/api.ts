@@ -126,6 +126,7 @@ export interface LessonChallengeSummary {
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   sortOrder: number;
+  points?: number;
   publishedVersionId?: string | null;
 }
 
@@ -175,6 +176,7 @@ export interface ChallengeVersionDetail {
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   sortOrder: number;
+  points: number;
   problemStatement: string;
   hintText: string | null;
   expectedResultColumns: string[];
@@ -188,7 +190,12 @@ export interface ChallengeEvaluation {
   score?: number;
   correctnessScore?: number;
   performanceScore?: number;
+  indexScore?: number;
   feedbackText?: string;
+  pointsPossible?: number;
+  baselineDurationMs?: number | null;
+  latestDurationMs?: number | null;
+  usedIndexing?: boolean;
 }
 
 export interface ChallengeAttempt {
@@ -219,6 +226,37 @@ export interface ChallengeLeaderboardEntry {
   attemptsCount: number;
   passedAttempts: number;
   lastSubmittedAt: string;
+}
+
+export interface ChallengeCatalogItem {
+  id: string;
+  lessonId: string;
+  lessonSlug: string;
+  lessonTitle: string;
+  trackId: string;
+  trackSlug: string;
+  trackTitle: string;
+  slug: string;
+  title: string;
+  description: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  sortOrder: number;
+  status: 'draft' | 'published' | 'archived';
+  points: number;
+  publishedVersionId?: string | null;
+  latestVersionId?: string | null;
+  latestVersionNo?: number | null;
+  validatorType?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface ChallengeReviewItem extends ChallengeCatalogItem {
+  createdBy: {
+    id?: string | null;
+    username?: string | null;
+    displayName?: string | null;
+  };
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
@@ -522,10 +560,33 @@ function normalizeChallengeVersionDetail(
   return {
     ...detail,
     description: detail.description ?? '',
+    points: detail.points ?? 100,
     hintText: detail.hintText ?? null,
     expectedResultColumns: Array.isArray(detail.expectedResultColumns)
       ? detail.expectedResultColumns.filter((value): value is string => typeof value === 'string')
       : [],
+  };
+}
+
+function normalizeChallengeCatalogItem(item: ChallengeCatalogItem): ChallengeCatalogItem {
+  return {
+    ...item,
+    description: item.description ?? '',
+    publishedVersionId: item.publishedVersionId ?? null,
+    latestVersionId: item.latestVersionId ?? null,
+    latestVersionNo: item.latestVersionNo ?? null,
+    validatorType: item.validatorType ?? null,
+  };
+}
+
+function normalizeChallengeReviewItem(item: ChallengeReviewItem): ChallengeReviewItem {
+  return {
+    ...normalizeChallengeCatalogItem(item),
+    createdBy: {
+      id: item.createdBy?.id ?? null,
+      username: item.createdBy?.username ?? null,
+      displayName: item.createdBy?.displayName ?? item.createdBy?.username ?? null,
+    },
   };
 }
 
@@ -683,6 +744,32 @@ export const lessonsApi = {
 };
 
 export const challengesApi = {
+  listPublished: () =>
+    api
+      .get<ChallengeCatalogItem[]>('/challenges')
+      .then((r) => r.data.map(normalizeChallengeCatalogItem)),
+
+  listMine: () =>
+    api
+      .get<ChallengeCatalogItem[]>('/challenges/mine')
+      .then((r) => r.data.map(normalizeChallengeCatalogItem)),
+
+  create: (payload: {
+    lessonId: string;
+    slug: string;
+    title: string;
+    description?: string;
+    difficulty?: 'beginner' | 'intermediate' | 'advanced';
+    sortOrder?: number;
+    points?: number;
+    problemStatement: string;
+    hintText?: string;
+    expectedResultColumns?: string[];
+    referenceSolution?: string;
+    validatorType?: string;
+    validatorConfig?: Record<string, unknown>;
+  }) => api.post<{ challenge: { id: string }; version: { id: string } }>('/challenges', payload).then((r) => r.data),
+
   getVersion: (id: string) =>
     api
       .get<ChallengeVersionDetail>(`/challenge-versions/${id}`)
@@ -705,6 +792,14 @@ export const challengesApi = {
         params: { limit },
       })
       .then((r) => r.data),
+
+  listReviewQueue: () =>
+    api
+      .get<ChallengeReviewItem[]>('/admin/challenges')
+      .then((r) => r.data.map(normalizeChallengeReviewItem)),
+
+  publishVersion: (versionId: string) =>
+    api.post(`/admin/challenge-versions/${versionId}/publish`).then((r) => r.data),
 };
 
 // ─── Sessions API ─────────────────────────────────────────────────────────────

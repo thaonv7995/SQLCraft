@@ -5,12 +5,16 @@ vi.mock('../../../db/repositories', () => ({
     findPublishedVersionById: vi.fn(),
     findPublishedVersionDetailById: vi.fn(),
     findQueryExecution: vi.fn(),
+    listSessionExecutions: vi.fn(),
     countAttempts: vi.fn(),
     createAttempt: vi.fn(),
     findAttemptById: vi.fn(),
     getSessionUserId: vi.fn(),
     listAttemptsForUser: vi.fn(),
     listAttemptsForChallengeVersion: vi.fn(),
+    listPublishedChallenges: vi.fn(),
+    listChallengesForUser: vi.fn(),
+    listChallengesForReview: vi.fn(),
     createChallenge: vi.fn(),
     createVersion: vi.fn(),
     findVersionById: vi.fn(),
@@ -25,7 +29,11 @@ import { challengesRepository } from '../../../db/repositories';
 import {
   getChallengeLeaderboard,
   getChallengeVersionDetail,
+  listPublishedChallenges,
+  listReviewChallenges,
+  listUserChallenges,
   listUserAttempts,
+  submitAttempt,
 } from '../challenges.service';
 import { NotFoundError } from '../../../lib/errors';
 
@@ -44,6 +52,7 @@ describe('getChallengeVersionDetail()', () => {
       description: null,
       difficulty: 'intermediate',
       sortOrder: 1,
+      points: 100,
       problemStatement: 'Return only active users.',
       hintText: null,
       expectedResultColumns: ['id', 'email', 123] as unknown,
@@ -83,6 +92,7 @@ describe('listUserAttempts()', () => {
       description: 'desc',
       difficulty: 'intermediate',
       sortOrder: 1,
+      points: 100,
       problemStatement: 'Return only active users.',
       hintText: 'Filter by active flag',
       expectedResultColumns: ['id', 'email'],
@@ -127,6 +137,230 @@ describe('listUserAttempts()', () => {
   });
 });
 
+describe('submitAttempt()', () => {
+  it('returns correctness, performance, and index breakdown for optimization challenges', async () => {
+    vi.mocked(challengesRepository.getSessionUserId).mockResolvedValue('user-1');
+    vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users quickly.',
+      hintText: null,
+      expectedResultColumns: ['id', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+        requiresIndexOptimization: true,
+      },
+      isPublished: true,
+      publishedAt: new Date('2026-03-24T00:00:00.000Z'),
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      points: 200,
+    } as never);
+    vi.mocked(challengesRepository.findQueryExecution).mockResolvedValue({
+      id: 'query-1',
+      learningSessionId: 'session-1',
+      sandboxInstanceId: 'sandbox-1',
+      userId: 'user-1',
+      sqlText: 'SELECT id, email FROM users WHERE active = true;',
+      normalizedSql: null,
+      status: 'succeeded',
+      durationMs: 100,
+      rowsReturned: 42,
+      rowsScanned: 420,
+      resultPreview: {
+        columns: ['id', 'email'],
+        rows: [{ id: 1, email: 'ada@example.com' }],
+        totalRows: 1,
+        truncated: false,
+      },
+      errorMessage: null,
+      errorCode: null,
+      submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(challengesRepository.listSessionExecutions).mockResolvedValue([
+      {
+        id: 'query-0',
+        sqlText: 'CREATE INDEX idx_users_active ON users(active);',
+        status: 'succeeded',
+        durationMs: 18,
+        submittedAt: new Date('2026-03-24T00:02:00.000Z'),
+      },
+      {
+        id: 'query-1',
+        sqlText: 'SELECT id, email FROM users WHERE active = true;',
+        status: 'succeeded',
+        durationMs: 100,
+        submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+      },
+    ] as never);
+    vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
+    vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
+      id: 'attempt-1',
+      submittedAt: new Date('2026-03-24T00:06:00.000Z'),
+      ...data,
+    }) as never);
+
+    const result = await submitAttempt(
+      {
+        learningSessionId: 'session-1',
+        challengeVersionId: 'challenge-version-1',
+        queryExecutionId: 'query-1',
+      },
+      'user-1',
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'passed',
+        score: 200,
+        evaluation: expect.objectContaining({
+          isCorrect: true,
+          correctnessScore: 100,
+          performanceScore: 70,
+          indexScore: 30,
+          usedIndexing: true,
+          baselineDurationMs: 200,
+          latestDurationMs: 100,
+        }),
+      }),
+    );
+  });
+});
+
+describe('listPublishedChallenges()', () => {
+  it('returns normalized challenge catalog items with points and lesson metadata', async () => {
+    vi.mocked(challengesRepository.listPublishedChallenges).mockResolvedValue([
+      {
+        id: 'challenge-1',
+        lessonId: 'lesson-1',
+        lessonSlug: 'filtering',
+        lessonTitle: 'Filtering',
+        trackId: 'track-1',
+        trackSlug: 'sql-fundamentals',
+        trackTitle: 'SQL Fundamentals',
+        slug: 'filter-active-users',
+        title: 'Filter active users',
+        description: null,
+        difficulty: 'intermediate',
+        sortOrder: 1,
+        status: 'published',
+        points: 200,
+        publishedVersionId: 'challenge-version-1',
+        latestVersionId: 'challenge-version-1',
+        latestVersionNo: 1,
+        validatorType: 'result_set',
+        updatedAt: new Date('2026-03-24T00:00:00.000Z'),
+        createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      },
+    ] as never);
+
+    const result = await listPublishedChallenges();
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'challenge-1',
+        title: 'Filter active users',
+        description: '',
+        points: 200,
+        lessonTitle: 'Filtering',
+        trackTitle: 'SQL Fundamentals',
+        validatorType: 'result_set',
+      }),
+    ]);
+  });
+});
+
+describe('listUserChallenges()', () => {
+  it('returns the current user challenge drafts with latest version metadata', async () => {
+    vi.mocked(challengesRepository.listChallengesForUser).mockResolvedValue([
+      {
+        id: 'challenge-1',
+        lessonId: 'lesson-1',
+        lessonSlug: 'filtering',
+        lessonTitle: 'Filtering',
+        trackId: 'track-1',
+        trackSlug: 'sql-fundamentals',
+        trackTitle: 'SQL Fundamentals',
+        slug: 'filter-active-users',
+        title: 'Filter active users',
+        description: 'Return only active users.',
+        difficulty: 'intermediate',
+        sortOrder: 1,
+        status: 'draft',
+        points: 200,
+        publishedVersionId: null,
+        latestVersionId: 'challenge-version-1',
+        latestVersionNo: 1,
+        validatorType: 'result_set',
+        updatedAt: new Date('2026-03-24T00:00:00.000Z'),
+        createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      },
+    ] as never);
+
+    const result = await listUserChallenges('user-1');
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'challenge-1',
+        status: 'draft',
+        points: 200,
+        latestVersionId: 'challenge-version-1',
+        trackTitle: 'SQL Fundamentals',
+      }),
+    ]);
+  });
+});
+
+describe('listReviewChallenges()', () => {
+  it('returns admin moderation entries with creator identity and latest draft version', async () => {
+    vi.mocked(challengesRepository.listChallengesForReview).mockResolvedValue([
+      {
+        id: 'challenge-1',
+        lessonId: 'lesson-1',
+        lessonSlug: 'filtering',
+        lessonTitle: 'Filtering',
+        trackId: 'track-1',
+        trackSlug: 'sql-fundamentals',
+        trackTitle: 'SQL Fundamentals',
+        slug: 'filter-active-users',
+        title: 'Filter active users',
+        description: 'Return only active users.',
+        difficulty: 'intermediate',
+        sortOrder: 1,
+        status: 'draft',
+        points: 200,
+        publishedVersionId: null,
+        latestVersionId: 'challenge-version-1',
+        latestVersionNo: 1,
+        validatorType: 'result_set',
+        createdById: 'user-2',
+        createdByUsername: 'alice',
+        createdByDisplayName: 'Alice',
+        updatedAt: new Date('2026-03-24T00:00:00.000Z'),
+        createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      },
+    ] as never);
+
+    const result = await listReviewChallenges();
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'challenge-1',
+        status: 'draft',
+        latestVersionId: 'challenge-version-1',
+        createdBy: expect.objectContaining({
+          id: 'user-2',
+          username: 'alice',
+          displayName: 'Alice',
+        }),
+      }),
+    ]);
+  });
+});
+
 describe('getChallengeLeaderboard()', () => {
   it('aggregates best score per user and sorts ties by earlier best submission', async () => {
     vi.mocked(challengesRepository.findPublishedVersionDetailById).mockResolvedValue({
@@ -138,6 +372,7 @@ describe('getChallengeLeaderboard()', () => {
       description: 'desc',
       difficulty: 'intermediate',
       sortOrder: 1,
+      points: 100,
       problemStatement: 'Return only active users.',
       hintText: null,
       expectedResultColumns: ['id', 'email'],

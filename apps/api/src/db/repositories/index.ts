@@ -57,7 +57,11 @@ export type {
   ChallengeAttemptRow,
   ChallengeAttemptWithExecutionRow,
   ChallengeLeaderboardAttemptRow,
+  ChallengeCatalogRow,
+  PublishedChallengeVersionRow,
   PublishedChallengeVersionDetailRow,
+  ReviewChallengeRow,
+  SessionExecutionSummaryRow,
 } from './challenges.repository';
 
 // ─── Types: Admin ─────────────────────────────────────────────────────────────

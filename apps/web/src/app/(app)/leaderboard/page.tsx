@@ -1,342 +1,178 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { leaderboardApi } from '@/lib/api';
-import type { LeaderboardEntry } from '@/lib/api';
+import { DifficultyBadge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { challengesApi } from '@/lib/api';
 import { cn, generateInitials } from '@/lib/utils';
 
-type Period = 'weekly' | 'monthly' | 'alltime';
-
-const PERIOD_TABS: { value: Period; label: string }[] = [
-  { value: 'weekly', label: 'This Week' },
-  { value: 'monthly', label: 'This Month' },
-  { value: 'alltime', label: 'All Time' },
-];
-
-// Top rank accent colors
-const RANK_STYLES: Record<number, { num: string }> = {
-  1: { num: 'text-[#FFD700]' },
-  2: { num: 'text-[#C0C0C0]' },
-  3: { num: 'text-[#CD7F32]' },
-};
-
-function RankRow({ entry, isMe = false }: { entry: LeaderboardEntry; isMe?: boolean }) {
-  const style = RANK_STYLES[entry.rank];
-  return (
-    <div
-      className={cn(
-        'px-4 py-3 flex items-center justify-between hover:bg-surface-container-high transition-colors',
-        isMe && 'bg-primary/10',
-        entry.rank < 4 ? '' : ''
-      )}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className={cn(
-            'w-6 text-center font-mono font-bold text-sm shrink-0',
-            style?.num ?? 'text-outline/60'
-          )}
-        >
-          {entry.rank}
-        </div>
-        {entry.avatarUrl ? (
-          <img
-            src={entry.avatarUrl}
-            alt={entry.displayName}
-            className={cn(
-              'w-8 h-8 rounded-full object-cover shrink-0',
-              isMe && 'ring-1 ring-outline'
-            )}
-          />
-        ) : (
-          <div
-            className={cn(
-              'w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold font-headline shrink-0',
-              isMe
-                ? 'bg-surface-container-highest text-on-surface ring-1 ring-outline'
-                : 'bg-surface-container-highest text-on-surface-variant'
-            )}
-          >
-            {generateInitials(entry.displayName)}
-          </div>
-        )}
-        <div className="min-w-0">
-          <p className={cn('text-sm font-medium truncate', isMe && 'text-on-surface font-bold')}>
-            {isMe ? 'You' : entry.displayName}
-          </p>
-          <p className="text-[10px] text-outline font-mono">@{entry.username}</p>
-        </div>
-      </div>
-      <div className="text-right shrink-0 ml-2">
-        <p className={cn('font-mono text-sm', entry.rank <= 3 ? 'text-secondary' : 'text-outline')}>
-          {entry.points.toLocaleString()} pts
-        </p>
-        <div className="flex items-center gap-0.5 justify-end mt-0.5">
-          <span
-            className="material-symbols-outlined text-[10px] text-error"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            local_fire_department
-          </span>
-          <span className="text-[10px] text-outline font-mono">{entry.streak}d</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function LeaderboardPage() {
-  const [period, setPeriod] = useState<Period>('alltime');
+  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['leaderboard', period],
-    queryFn: () => leaderboardApi.get(period, 50),
+  const challengesQuery = useQuery({
+    queryKey: ['published-challenges'],
+    queryFn: () => challengesApi.listPublished(),
     staleTime: 60_000,
   });
 
-  const entries = data ?? [];
-  const top5 = entries.slice(0, 5);
+  const publishedChallenges = challengesQuery.data ?? [];
+
+  useEffect(() => {
+    if (!selectedChallengeId && publishedChallenges.length > 0) {
+      setSelectedChallengeId(publishedChallenges[0].id);
+    }
+  }, [publishedChallenges, selectedChallengeId]);
+
+  const selectedChallenge = useMemo(
+    () => publishedChallenges.find((challenge) => challenge.id === selectedChallengeId) ?? null,
+    [publishedChallenges, selectedChallengeId],
+  );
+
+  const leaderboardQuery = useQuery({
+    queryKey: ['challenge-leaderboard', selectedChallenge?.publishedVersionId],
+    enabled: !!selectedChallenge?.publishedVersionId,
+    queryFn: () => challengesApi.getLeaderboard(selectedChallenge!.publishedVersionId!, 10),
+    staleTime: 30_000,
+  });
+
+  const leaderboard = leaderboardQuery.data ?? [];
 
   return (
     <div className="page-shell page-stack">
-      {/* Page header */}
-      <div className="mb-10">
-        <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface mb-2">
-          Competitive Tracks
+      <section className="space-y-3 rounded-[28px] border border-outline-variant/10 bg-surface-container-low px-6 py-6">
+        <p className="text-xs uppercase tracking-[0.24em] text-outline">Challenge engine</p>
+        <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface">
+          Challenge Leaderboard
         </h1>
-        <p className="text-outline font-light max-w-2xl">
-          Fine-tune your architecture. Compete against the engine and the community in
-          precision-focused SQL challenges.
+        <p className="max-w-3xl text-base leading-7 text-on-surface-variant">
+          Browse live challenge missions, then inspect the best submitted scores for each published
+          version.
         </p>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-        {/* ── Left: challenge cards ──────────────────────────────── */}
-        <div className="xl:col-span-8 space-y-5">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-headline text-xl font-medium flex items-center gap-2">
-              <span className="w-1.5 h-6 bg-on-surface-variant rounded-full shrink-0" />
-              Active Missions
-            </h2>
-            <div className="flex gap-2">
-              <span className="px-3 py-1 bg-surface-container-high rounded-full text-xs text-outline">
-                Filter: All
-              </span>
-              <span className="px-3 py-1 bg-surface-container-high rounded-full text-xs text-outline">
-                Sort: Difficulty
-              </span>
+      <section className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+        <Card className="rounded-[28px] border border-outline-variant/10">
+          <CardHeader className="flex-col items-start gap-2 px-6 py-5">
+            <div>
+              <CardTitle>Published Challenges</CardTitle>
+              <CardDescription className="mt-1">
+                Select a mission to inspect its current leaderboard and scoring surface.
+              </CardDescription>
             </div>
-          </div>
-
-          {/* Challenge cards */}
-          {[
-            {
-              title: 'The Heavy Hitter',
-              tag: 'Crucial',
-              tagColor: 'bg-error-container/20 text-error',
-              desc: 'Optimize massive analytical joins across legacy schemas without using temp tables.',
-              pts: '840 pts',
-              stats: [
-                { label: 'Difficulty', value: 'Expert (Lvl 9)', color: 'text-secondary' },
-                { label: 'Domain', value: 'Data Warehousing', color: 'text-on-surface' },
-                { label: 'Dataset', value: '2.4 TB', color: 'text-tertiary' },
-              ],
-            },
-            {
-              title: 'Index Optimizer',
-              tag: 'Optimization',
-              tagColor: 'bg-secondary/10 text-secondary',
-              desc: 'Refactor a fragmented search query to reduce scan times by 40% using partial indexing.',
-              pts: '620 pts',
-              stats: [
-                { label: 'Difficulty', value: 'Advanced', color: 'text-primary' },
-                { label: 'Domain', value: 'Performance Tuning', color: 'text-on-surface' },
-                { label: 'Dataset', value: '140 GB', color: 'text-tertiary' },
-              ],
-            },
-            {
-              title: 'Recursive Descent',
-              tag: 'Logic',
-              tagColor: 'bg-primary/10 text-primary',
-              desc: 'Solve a multi-level organizational hierarchy traversal using CTEs and window functions.',
-              pts: '510 pts',
-              stats: [
-                { label: 'Difficulty', value: 'Intermediate', color: 'text-primary' },
-                { label: 'Domain', value: 'Complex Logic', color: 'text-on-surface' },
-                { label: 'Dataset', value: '12 MB', color: 'text-tertiary' },
-              ],
-            },
-          ].map((challenge) => (
-            <div
-              key={challenge.title}
-              className="bg-surface-container-low p-6 rounded-xl group hover:bg-surface-container-high transition-all duration-200 border-l-4 border-transparent hover:border-primary cursor-pointer"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <h3 className="font-headline text-xl font-bold text-on-surface">
-                      {challenge.title}
-                    </h3>
-                    <span
-                      className={cn(
-                        'text-[10px] px-2 py-0.5 rounded font-mono uppercase tracking-tighter',
-                        challenge.tagColor
-                      )}
-                    >
-                      {challenge.tag}
-                    </span>
-                  </div>
-                  <p className="text-sm text-outline">{challenge.desc}</p>
-                </div>
-                <span className="text-tertiary font-mono text-xs shrink-0 ml-4">
-                  {challenge.pts}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 pt-4 mt-1 bg-surface-container-lowest/30 rounded-lg px-4 py-3">
-                {challenge.stats.map((stat) => (
-                  <div key={stat.label} className="flex flex-col">
-                    <span className="text-[9px] text-outline uppercase tracking-widest mb-1 font-bold">
-                      {stat.label}
-                    </span>
-                    <span className={cn('text-sm font-medium', stat.color)}>{stat.value}</span>
-                  </div>
+          </CardHeader>
+          <CardContent className="space-y-3 px-6 pb-6 pt-0">
+            {challengesQuery.isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((index) => (
+                  <div key={index} className="h-28 animate-pulse rounded-2xl bg-surface-container-low" />
                 ))}
               </div>
-            </div>
-          ))}
-
-          {/* Locked card */}
-          <div className="bg-surface-container-low p-6 rounded-xl opacity-50 border-l-4 border-transparent">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <h3 className="font-headline text-xl font-bold text-on-surface">The Sentinel</h3>
-                  <span className="text-[10px] px-2 py-0.5 rounded font-mono uppercase tracking-tighter bg-surface-container-highest text-outline">
-                    Locked
-                  </span>
-                </div>
-                <p className="text-sm text-outline">
-                  Coming Soon: Distributed SQL performance across geographically separated nodes.
-                </p>
+            ) : publishedChallenges.length === 0 ? (
+              <div className="rounded-2xl bg-surface-container-low p-6 text-sm text-on-surface-variant">
+                No published challenges yet.
               </div>
-              <span className="material-symbols-outlined text-outline text-xl shrink-0 ml-4">
-                lock
-              </span>
-            </div>
-          </div>
-        </div>
+            ) : (
+              publishedChallenges.map((challenge) => {
+                const isSelected = challenge.id === selectedChallengeId;
 
-        {/* ── Right: leaderboard panel ───────────────────────────── */}
-        <div className="xl:col-span-4 flex flex-col gap-5">
-          {/* Period tabs */}
-          <div className="bg-surface-container-low rounded-xl p-1 flex items-center">
-            {PERIOD_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setPeriod(tab.value)}
-                className={cn(
-                  'flex-1 py-2.5 text-xs font-semibold rounded-lg transition-all',
-                  period === tab.value
-                    ? 'bg-surface-container-highest text-on-surface'
-                    : 'text-outline hover:text-on-surface'
-                )}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Rankings panel */}
-          <div className="bg-surface-container-low rounded-xl overflow-hidden flex flex-col">
-            <div className="px-4 py-3 bg-surface-container-high flex justify-between items-center">
-              <h3 className="font-headline font-bold uppercase tracking-wider text-xs text-on-surface">
-                Global Rankings
-              </h3>
-              <span
-                className="material-symbols-outlined text-tertiary text-lg"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                leaderboard
-              </span>
-            </div>
-
-            <div className="flex-1">
-              {isLoading ? (
-                <div className="space-y-px">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="px-4 py-3 flex items-center gap-3">
-                      <div className="w-6 h-4 bg-surface-container-high rounded animate-pulse" />
-                      <div className="w-8 h-8 bg-surface-container-high rounded-full animate-pulse shrink-0" />
-                      <div className="flex-1 space-y-1.5">
-                        <div className="h-3 w-24 bg-surface-container-high rounded animate-pulse" />
-                        <div className="h-2 w-16 bg-surface-container-high rounded animate-pulse" />
+                return (
+                  <button
+                    key={challenge.id}
+                    type="button"
+                    onClick={() => setSelectedChallengeId(challenge.id)}
+                    className={cn(
+                      'w-full rounded-2xl border px-5 py-4 text-left transition-all',
+                      isSelected
+                        ? 'border-primary bg-primary/10'
+                        : 'border-outline-variant/10 bg-surface-container-low hover:bg-surface-container',
+                    )}
+                  >
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-lg font-semibold text-on-surface">{challenge.title}</h3>
+                          <DifficultyBadge difficulty={challenge.difficulty} />
+                          <span className="rounded-full bg-secondary/10 px-2 py-0.5 text-xs text-secondary">
+                            {challenge.points} pts
+                          </span>
+                        </div>
+                        <p className="text-sm leading-6 text-on-surface-variant">
+                          {challenge.description}
+                        </p>
+                        <div className="grid gap-2 text-sm text-on-surface-variant sm:grid-cols-2">
+                          <p>
+                            <span className="text-on-surface">Track:</span> {challenge.trackTitle}
+                          </p>
+                          <p>
+                            <span className="text-on-surface">Lesson:</span> {challenge.lessonTitle}
+                          </p>
+                          <p>
+                            <span className="text-on-surface">Validator:</span>{' '}
+                            {challenge.validatorType ?? 'result_set'}
+                          </p>
+                          <p>
+                            <span className="text-on-surface">Version:</span> v
+                            {challenge.latestVersionNo ?? 1}
+                          </p>
+                        </div>
                       </div>
-                      <div className="h-4 w-16 bg-surface-container-high rounded animate-pulse" />
                     </div>
-                  ))}
-                </div>
-              ) : entries.length === 0 ? (
-                <div className="px-4 py-10 text-center">
-                  <span className="material-symbols-outlined text-2xl text-outline mb-2 block">
-                    leaderboard
-                  </span>
-                  <p className="text-xs text-on-surface-variant">No rankings yet.</p>
-                </div>
-              ) : (
-                top5.map((entry) => <RankRow key={entry.userId} entry={entry} />)
-              )}
-            </div>
-
-            {/* Current user highlight */}
-            {entries.length > 0 && (
-              <div className="border-t border-outline-variant/10">
-                <RankRow
-                  entry={{
-                    rank: 142,
-                    userId: 'me',
-                    username: 'you',
-                    displayName: 'You',
-                    points: 0,
-                    challengesCompleted: 0,
-                    streak: 0,
-                  }}
-                  isMe
-                />
-              </div>
+                  </button>
+                );
+              })
             )}
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Challenge completion rates */}
-          <div className="bg-surface-container-low rounded-xl p-5">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-outline mb-4">
-              Completion Rates
-            </h3>
-            <div className="space-y-3">
-              {[
-                { label: 'SQL Fundamentals', pct: 57, color: 'bg-secondary' },
-                { label: 'Window Functions', pct: 21, color: 'bg-primary' },
-                { label: 'CTEs & Subqueries', pct: 16, color: 'bg-tertiary' },
-                { label: 'Query Optimization', pct: 6, color: 'bg-error' },
-              ].map((item) => (
-                <div key={item.label}>
-                  <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="text-on-surface-variant">{item.label}</span>
-                    <span className="font-mono text-outline">{item.pct}%</span>
+        <Card className="rounded-[28px] border border-outline-variant/10">
+          <CardHeader className="flex-col items-start gap-2 px-6 py-5">
+            <div>
+              <CardTitle>{selectedChallenge?.title ?? 'Leaderboard'}</CardTitle>
+              <CardDescription className="mt-1">
+                {selectedChallenge
+                  ? `${selectedChallenge.trackTitle} / ${selectedChallenge.lessonTitle}`
+                  : 'Select a challenge to view leaderboard entries.'}
+              </CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 px-6 pb-6 pt-0">
+            {leaderboardQuery.isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((index) => (
+                  <div key={index} className="h-16 animate-pulse rounded-2xl bg-surface-container-low" />
+                ))}
+              </div>
+            ) : leaderboard.length === 0 ? (
+              <div className="rounded-2xl bg-surface-container-low p-6 text-sm text-on-surface-variant">
+                No leaderboard entries yet for this challenge.
+              </div>
+            ) : (
+              leaderboard.map((entry) => (
+                <div
+                  key={entry.userId}
+                  className="flex items-center justify-between rounded-2xl bg-surface-container-low px-4 py-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-container-high text-xs font-bold text-on-surface">
+                      {generateInitials(entry.displayName)}
+                    </div>
+                    <div>
+                      <p className="font-medium text-on-surface">{entry.displayName}</p>
+                      <p className="text-xs text-on-surface-variant">@{entry.username}</p>
+                    </div>
                   </div>
-                  <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
-                    <div
-                      className={cn('h-full rounded-full transition-all', item.color)}
-                      style={{ width: `${item.pct}%` }}
-                    />
+
+                  <div className="text-right">
+                    <p className="font-mono text-sm text-secondary">{entry.bestScore} pts</p>
+                    <p className="text-xs text-on-surface-variant">#{entry.rank}</p>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }

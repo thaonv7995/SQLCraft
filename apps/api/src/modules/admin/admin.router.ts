@@ -163,6 +163,7 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             description: { type: 'string' },
             difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
             sortOrder: { type: 'integer', default: 0 },
+            points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
             problemStatement: { type: 'string' },
             hintText: { type: 'string' },
             referenceSolution: { type: 'string' },

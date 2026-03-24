@@ -100,6 +100,9 @@ export async function createChallenge(
     description: body.description,
     difficulty: body.difficulty,
     sortOrder: body.sortOrder,
+    points: body.points ?? 100,
+    status: 'draft',
+    createdBy: userId,
   });
 
   const version = await challengesRepository.createVersion({

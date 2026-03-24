@@ -51,6 +51,7 @@ export const CreateChallengeSchema = z.object({
   description: z.string().optional(),
   difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
   sortOrder: z.number().int().default(0),
+  points: z.number().int().min(10).max(1000).default(100),
   problemStatement: z.string().min(1),
   hintText: z.string().optional(),
   expectedResultColumns: z.array(z.string()).optional(),

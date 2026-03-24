@@ -5,6 +5,9 @@ import {
   submitAttempt,
   getAttempt,
   getChallengeVersionDetail,
+  listPublishedChallenges,
+  listReviewChallenges,
+  listUserChallenges,
   listUserAttempts,
   getChallengeLeaderboard,
   createChallenge,
@@ -58,6 +61,23 @@ export async function getChallengeVersionHandler(
   return reply.send(success(detail, MESSAGES.CHALLENGE_VERSION_RETRIEVED));
 }
 
+export async function listPublishedChallengesHandler(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const challenges = await listPublishedChallenges();
+  return reply.send(success(challenges, 'Published challenges retrieved successfully'));
+}
+
+export async function listUserChallengesHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? '';
+  const challenges = await listUserChallenges(userId);
+  return reply.send(success(challenges, 'User challenges retrieved successfully'));
+}
+
 export async function listUserAttemptsHandler(
   request: FastifyRequest<{ Querystring: ChallengeAttemptsQuery }>,
   reply: FastifyReply,
@@ -95,4 +115,12 @@ export async function publishChallengeVersionHandler(
   const { id } = request.params;
   const published = await publishChallengeVersion(id);
   return reply.send(success(published, MESSAGES.CONTENT_PUBLISHED));
+}
+
+export async function listReviewChallengesHandler(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const challenges = await listReviewChallenges();
+  return reply.send(success(challenges, 'Challenge review queue retrieved successfully'));
 }
