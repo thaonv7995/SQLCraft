@@ -454,6 +454,10 @@ export default function LabPage() {
     refetch: refetchSession,
   } = useSessionStatus(sessionId);
   const lessonContext = useMemo(() => readLabBootstrap(sessionId), [sessionId]);
+  const entryPath = lessonContext?.challengePath ?? lessonContext?.lessonPath;
+  const entryLabel = lessonContext?.challengePath ? 'Back to challenge' : 'Back to lesson';
+  const modeLabel =
+    lessonContext?.mode === 'challenge' || session?.challengeVersionId ? 'Challenge' : 'Lesson';
 
   useEffect(() => {
     const bootstrap = readLabBootstrap(sessionId);
@@ -584,18 +588,26 @@ export default function LabPage() {
           </div>
 
           <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {lessonContext?.lessonPath && (
+            {entryPath && (
               <Link
-                href={lessonContext.lessonPath}
+                href={entryPath}
                 className="hidden items-center gap-1 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant transition-colors hover:text-on-surface md:inline-flex"
               >
                 <span className="material-symbols-outlined text-sm">arrow_back</span>
-                Back to lesson
+                {entryLabel}
               </Link>
             )}
+            <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant md:inline-flex">
+              {modeLabel}
+            </span>
             {(session?.lessonTitle ?? lessonContext?.lessonTitle) && (
               <span className="hidden max-w-[14rem] truncate text-xs text-on-surface-variant md:block">
                 {session?.lessonTitle ?? lessonContext?.lessonTitle}
+              </span>
+            )}
+            {lessonContext?.challengeTitle && (
+              <span className="hidden max-w-[14rem] truncate text-xs text-outline lg:block">
+                {lessonContext.challengeTitle}
               </span>
             )}
             <div className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1">

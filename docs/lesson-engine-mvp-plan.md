@@ -4,6 +4,7 @@
 > Worktree: `/Users/thaonv/Projects/Personal/SQLForge/.claude/worktrees/lesson-engine-mvp`
 > Status legend: `[ ]` Pending | `[~]` In Progress | `[x]` Done
 > Last updated: 2026-03-24
+> Current milestone: lesson-first flow shipped, challenge extension hooks added
 
 ## Approach
 
@@ -345,6 +346,21 @@ Recommended MVP behavior:
 - [ ] Re-run `pnpm test`
 - [ ] Re-run targeted checks such as `pnpm lint` and `pnpm typecheck`
 - [ ] Separate pre-existing baseline failures from feature-introduced failures in the final verification report
+
+### Phase 9: Challenge Extension Hooks
+
+- [x] Add a nested challenge route under lesson context:
+  - `/tracks/[trackId]/lessons/[lessonId]/challenges/[challengeId]`
+- [x] Link lesson challenge summary cards to the nested challenge route
+- [x] Allow challenge mode session creation using both:
+  - `lessonVersionId`
+  - `challengeVersionId`
+- [x] Surface challenge counts on the track detail lesson cards using published lesson version data
+- [x] Extend lab bootstrap context so the lab can show:
+  - lesson mode vs challenge mode
+  - back link to lesson or challenge entry point
+  - optional challenge title
+- [ ] Replace placeholder challenge route with full challenge detail, evaluation, scoring, and leaderboard UI in feature 4
 
 ## Suggested Implementation Order
 

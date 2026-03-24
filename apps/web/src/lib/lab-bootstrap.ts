@@ -1,8 +1,11 @@
 const LAB_BOOTSTRAP_PREFIX = 'sqlcraft-lab-bootstrap:';
 
 export interface LabBootstrapPayload {
+  mode?: 'lesson' | 'challenge';
   lessonPath?: string;
   lessonTitle?: string;
+  challengePath?: string;
+  challengeTitle?: string;
   starterQuery?: string | null;
   starterQueryConsumed?: boolean;
 }

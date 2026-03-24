@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DifficultyBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { tracksApi } from '@/lib/api';
+import { lessonsApi, tracksApi } from '@/lib/api';
 import { formatMinutes } from '@/lib/utils';
 
 function TrackPageSkeleton() {
@@ -34,6 +34,29 @@ export default function TrackDetailPage() {
   } = useQuery({
     queryKey: ['track', trackId],
     queryFn: () => tracksApi.get(trackId),
+    staleTime: 60_000,
+  });
+
+  const lessons = track?.lessons ?? [];
+  const { data: challengeCounts } = useQuery({
+    queryKey: [
+      'track-challenge-counts',
+      trackId,
+      lessons.map((lesson) => `${lesson.id}:${lesson.publishedVersionId ?? 'draft'}`),
+    ],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        lessons
+          .filter((lesson) => lesson.publishedVersionId)
+          .map(async (lesson) => {
+            const version = await lessonsApi.getVersion(lesson.publishedVersionId!);
+            return [lesson.id, version.challenges.length] as const;
+          })
+      );
+
+      return Object.fromEntries(entries) as Record<string, number>;
+    },
+    enabled: lessons.some((lesson) => lesson.publishedVersionId),
     staleTime: 60_000,
   });
 
@@ -69,8 +92,8 @@ export default function TrackDetailPage() {
     );
   }
 
-  const lessons = track.lessons ?? [];
   const totalMinutes = lessons.reduce((sum, lesson) => sum + (lesson.estimatedMinutes ?? 0), 0);
+  const totalChallenges = Object.values(challengeCounts ?? {}).reduce((sum, count) => sum + count, 0);
 
   return (
     <div className="page-shell-narrow page-stack">
@@ -94,6 +117,9 @@ export default function TrackDetailPage() {
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
                   {formatMinutes(totalMinutes)}
                 </span>
+                <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
+                  {totalChallenges > 0 ? `${totalChallenges} optional challenges` : 'Lesson-first path'}
+                </span>
               </div>
               <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface sm:text-4xl">
                 {track.title}
@@ -103,7 +129,7 @@ export default function TrackDetailPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 sm:min-w-72">
+            <div className="grid grid-cols-3 gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 sm:min-w-72">
               <div>
                 <p className="text-[11px] uppercase tracking-wider text-outline">Published lessons</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
@@ -114,6 +140,12 @@ export default function TrackDetailPage() {
                 <p className="text-[11px] uppercase tracking-wider text-outline">Learning path</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
                   {track.lessonCount}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-outline">Challenges</p>
+                <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
+                  {totalChallenges}
                 </p>
               </div>
             </div>
@@ -141,6 +173,7 @@ export default function TrackDetailPage() {
           <div className="space-y-3">
             {lessons.map((lesson, index) => {
               const isAvailable = Boolean(lesson.publishedVersionId);
+              const challengeCount = challengeCounts?.[lesson.id] ?? 0;
 
               return (
                 <Card
@@ -171,6 +204,12 @@ export default function TrackDetailPage() {
                               <span className="material-symbols-outlined text-sm">article</span>
                               Markdown lesson
                             </span>
+                            {challengeCount > 0 && (
+                              <span className="inline-flex items-center gap-1">
+                                <span className="material-symbols-outlined text-sm">target</span>
+                                {challengeCount} optional challenge{challengeCount > 1 ? 's' : ''}
+                              </span>
+                            )}
                             {!isAvailable && (
                               <span className="inline-flex items-center gap-1 text-outline">
                                 <span className="material-symbols-outlined text-sm">hourglass_top</span>

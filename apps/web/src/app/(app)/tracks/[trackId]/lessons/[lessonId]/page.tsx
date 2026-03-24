@@ -79,6 +79,7 @@ export default function LessonPage() {
       const session = await sessionsApi.create({ lessonVersionId: lessonVersion.id });
 
       saveLabBootstrap(session.id, {
+        mode: 'lesson',
         lessonPath: `/tracks/${params.trackId}/lessons/${params.lessonId}`,
         lessonTitle,
         starterQuery: lessonVersion.starterQuery ?? null,
@@ -233,9 +234,10 @@ export default function LessonPage() {
             <CardContent className="space-y-3">
               {lessonVersion?.challenges.length ? (
                 lessonVersion.challenges.map((challenge) => (
-                  <div
+                  <Link
                     key={challenge.id}
-                    className="rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-3"
+                    href={`/tracks/${params.trackId}/lessons/${params.lessonId}/challenges/${challenge.id}`}
+                    className="block rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-3 transition-colors hover:bg-surface-container"
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-on-surface">{challenge.title}</p>
@@ -244,10 +246,16 @@ export default function LessonPage() {
                     <p className="text-xs leading-6 text-on-surface-variant">
                       {challenge.description}
                     </p>
-                    <p className="mt-2 text-[11px] uppercase tracking-wider text-outline">
-                      Challenge UI lands in feature 4
-                    </p>
-                  </div>
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <p className="text-[11px] uppercase tracking-wider text-outline">
+                        Placeholder route ready for feature 4
+                      </p>
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-on-surface-variant">
+                        Open
+                        <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                      </span>
+                    </div>
+                  </Link>
                 ))
               ) : (
                 <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
