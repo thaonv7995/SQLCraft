@@ -37,9 +37,23 @@ export async function fetchSchemaTemplate(
 
 export async function fetchSandbox(
   sandboxId: string,
-): Promise<{ id: string; dbName: string | null; status: string; learningSessionId: string; schemaTemplateId: string | null } | null> {
+): Promise<{
+  id: string;
+  dbName: string | null;
+  containerRef: string | null;
+  status: string;
+  learningSessionId: string;
+  schemaTemplateId: string | null;
+} | null> {
   const result = await mainDb.query(
-    'SELECT id, db_name AS "dbName", status, learning_session_id AS "learningSessionId", schema_template_id AS "schemaTemplateId" FROM sandbox_instances WHERE id = $1',
+    `SELECT id,
+            db_name AS "dbName",
+            container_ref AS "containerRef",
+            status,
+            learning_session_id AS "learningSessionId",
+            schema_template_id AS "schemaTemplateId"
+       FROM sandbox_instances
+      WHERE id = $1`,
     [sandboxId],
   );
   return result.rows[0] ?? null;
@@ -48,14 +62,15 @@ export async function fetchSandbox(
 export async function updateSandboxReady(
   sandboxId: string,
   dbName: string,
+  containerRef: string,
   expiresAt: Date,
 ): Promise<void> {
   await mainDb.query(
     `UPDATE sandbox_instances
-     SET status = 'ready', db_name = $2, container_ref = 'sandbox-postgres',
-         expires_at = $3, updated_at = now()
+     SET status = 'ready', db_name = $2, container_ref = $3,
+         expires_at = $4, updated_at = now()
      WHERE id = $1`,
-    [sandboxId, dbName, expiresAt],
+    [sandboxId, dbName, containerRef, expiresAt],
   );
 }
 

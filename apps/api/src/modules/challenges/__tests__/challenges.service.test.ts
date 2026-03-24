@@ -20,12 +20,21 @@ vi.mock('../../../db/repositories', () => ({
     findVersionById: vi.fn(),
     publishVersion: vi.fn(),
   },
+  sandboxesRepository: {
+    findById: vi.fn(),
+  },
   lessonsRepository: {
     existsById: vi.fn(),
   },
 }));
 
-import { challengesRepository } from '../../../db/repositories';
+vi.mock('../../../services/query-executor', () => ({
+  executeSql: vi.fn(),
+  getExplainPlan: vi.fn(),
+}));
+
+import { challengesRepository, sandboxesRepository } from '../../../db/repositories';
+import { executeSql, getExplainPlan } from '../../../services/query-executor';
 import {
   getChallengeLeaderboard,
   getChallengeVersionDetail,
@@ -168,7 +177,7 @@ describe('submitAttempt()', () => {
       normalizedSql: null,
       status: 'succeeded',
       durationMs: 100,
-      rowsReturned: 42,
+      rowsReturned: 1,
       rowsScanned: 420,
       resultPreview: {
         columns: ['id', 'email'],
@@ -180,6 +189,37 @@ describe('submitAttempt()', () => {
       errorCode: null,
       submittedAt: new Date('2026-03-24T00:05:00.000Z'),
     } as never);
+    vi.mocked(sandboxesRepository.findById).mockResolvedValue({
+      id: 'sandbox-1',
+      learningSessionId: 'session-1',
+      schemaTemplateId: 'schema-1',
+      datasetTemplateId: null,
+      status: 'ready',
+      containerRef: 'sandbox-1',
+      dbName: 's_session1',
+      expiresAt: new Date('2026-03-24T02:05:00.000Z'),
+      createdAt: new Date('2026-03-24T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(executeSql).mockResolvedValue({
+      columns: ['id', 'email'],
+      rows: [[1, 'ada@example.com']],
+      rowCount: 1,
+      truncated: false,
+      durationMs: 90,
+    });
+    vi.mocked(getExplainPlan).mockResolvedValue({
+      rawPlan: {
+        Plan: {
+          'Node Type': 'Index Scan',
+          'Actual Total Time': 90,
+        },
+      },
+      planSummary: {
+        nodeType: 'Index Scan',
+        actualTime: 90,
+      },
+    });
     vi.mocked(challengesRepository.listSessionExecutions).mockResolvedValue([
       {
         id: 'query-0',
@@ -225,6 +265,218 @@ describe('submitAttempt()', () => {
           baselineDurationMs: 200,
           latestDurationMs: 100,
         }),
+      }),
+    );
+  });
+
+  it('fails the attempt when the submitted result rows do not match the reference solution', async () => {
+    vi.mocked(challengesRepository.getSessionUserId).mockResolvedValue('user-1');
+    vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users.',
+      hintText: null,
+      expectedResultColumns: ['id', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      validatorType: 'result_set',
+      validatorConfig: null,
+      isPublished: true,
+      publishedAt: new Date('2026-03-24T00:00:00.000Z'),
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      points: 100,
+    } as never);
+    vi.mocked(challengesRepository.findQueryExecution).mockResolvedValue({
+      id: 'query-1',
+      learningSessionId: 'session-1',
+      sandboxInstanceId: 'sandbox-1',
+      userId: 'user-1',
+      sqlText: 'SELECT id, email FROM users WHERE active = true;',
+      normalizedSql: null,
+      status: 'succeeded',
+      durationMs: 44,
+      rowsReturned: 1,
+      rowsScanned: 10,
+      resultPreview: {
+        columns: ['id', 'email'],
+        rows: [[999, 'wrong@example.com']],
+        truncated: false,
+      },
+      errorMessage: null,
+      errorCode: null,
+      submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(sandboxesRepository.findById).mockResolvedValue({
+      id: 'sandbox-1',
+      learningSessionId: 'session-1',
+      schemaTemplateId: 'schema-1',
+      datasetTemplateId: null,
+      status: 'ready',
+      containerRef: 'sandbox-1',
+      dbName: 's_session1',
+      expiresAt: new Date('2026-03-24T02:05:00.000Z'),
+      createdAt: new Date('2026-03-24T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(executeSql).mockResolvedValue({
+      columns: ['id', 'email'],
+      rows: [[1, 'ada@example.com']],
+      rowCount: 1,
+      truncated: false,
+      durationMs: 12,
+    });
+    vi.mocked(challengesRepository.listSessionExecutions).mockResolvedValue([
+      {
+        id: 'query-1',
+        sqlText: 'SELECT id, email FROM users WHERE active = true;',
+        status: 'succeeded',
+        durationMs: 44,
+        submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+      },
+    ] as never);
+    vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
+    vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
+      id: 'attempt-2',
+      submittedAt: new Date('2026-03-24T00:06:00.000Z'),
+      ...data,
+    }) as never);
+
+    const result = await submitAttempt(
+      {
+        learningSessionId: 'session-1',
+        challengeVersionId: 'challenge-version-1',
+        queryExecutionId: 'query-1',
+      },
+      'user-1',
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.score).toBe(0);
+    expect(result.evaluation).toEqual(
+      expect.objectContaining({
+        isCorrect: false,
+        correctnessScore: 0,
+        feedbackText: expect.stringMatching(/result set/i),
+      }),
+    );
+    expect(executeSql).toHaveBeenCalledWith(
+      expect.stringContaining('/s_session1'),
+      'SELECT id, email FROM users WHERE active = true ORDER BY id;',
+      expect.any(Object),
+    );
+  });
+
+  it('does not award index score from history alone when the explain plan does not use an index', async () => {
+    vi.mocked(challengesRepository.getSessionUserId).mockResolvedValue('user-1');
+    vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users quickly.',
+      hintText: null,
+      expectedResultColumns: ['id', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+        requiresIndexOptimization: true,
+      },
+      isPublished: true,
+      publishedAt: new Date('2026-03-24T00:00:00.000Z'),
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      points: 200,
+    } as never);
+    vi.mocked(challengesRepository.findQueryExecution).mockResolvedValue({
+      id: 'query-1',
+      learningSessionId: 'session-1',
+      sandboxInstanceId: 'sandbox-1',
+      userId: 'user-1',
+      sqlText: 'SELECT id, email FROM users WHERE active = true;',
+      normalizedSql: null,
+      status: 'succeeded',
+      durationMs: 100,
+      rowsReturned: 1,
+      rowsScanned: 420,
+      resultPreview: {
+        columns: ['id', 'email'],
+        rows: [[1, 'ada@example.com']],
+        truncated: false,
+      },
+      errorMessage: null,
+      errorCode: null,
+      submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(sandboxesRepository.findById).mockResolvedValue({
+      id: 'sandbox-1',
+      learningSessionId: 'session-1',
+      schemaTemplateId: 'schema-1',
+      datasetTemplateId: null,
+      status: 'ready',
+      containerRef: 'sandbox-1',
+      dbName: 's_session1',
+      expiresAt: new Date('2026-03-24T02:05:00.000Z'),
+      createdAt: new Date('2026-03-24T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(executeSql).mockResolvedValue({
+      columns: ['id', 'email'],
+      rows: [[1, 'ada@example.com']],
+      rowCount: 1,
+      truncated: false,
+      durationMs: 90,
+    });
+    vi.mocked(getExplainPlan).mockResolvedValue({
+      rawPlan: {
+        Plan: {
+          'Node Type': 'Seq Scan',
+          'Actual Total Time': 100,
+        },
+      },
+      planSummary: {
+        nodeType: 'Seq Scan',
+        actualTime: 100,
+      },
+    });
+    vi.mocked(challengesRepository.listSessionExecutions).mockResolvedValue([
+      {
+        id: 'query-0',
+        sqlText: 'CREATE INDEX idx_users_active ON users(active);',
+        status: 'succeeded',
+        durationMs: 18,
+        submittedAt: new Date('2026-03-24T00:02:00.000Z'),
+      },
+      {
+        id: 'query-1',
+        sqlText: 'SELECT id, email FROM users WHERE active = true;',
+        status: 'succeeded',
+        durationMs: 100,
+        submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+      },
+    ] as never);
+    vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
+    vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
+      id: 'attempt-3',
+      submittedAt: new Date('2026-03-24T00:06:00.000Z'),
+      ...data,
+    }) as never);
+
+    const result = await submitAttempt(
+      {
+        learningSessionId: 'session-1',
+        challengeVersionId: 'challenge-version-1',
+        queryExecutionId: 'query-1',
+      },
+      'user-1',
+    );
+
+    expect(result.evaluation).toEqual(
+      expect.objectContaining({
+        isCorrect: true,
+        performanceScore: 70,
+        indexScore: 0,
+        usedIndexing: false,
       }),
     );
   });

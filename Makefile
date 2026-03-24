@@ -23,7 +23,7 @@ setup: ## Initial project setup (install deps, copy env)
 # ---- Development ----
 dev: ## Start full dev environment (Docker + services)
 	@echo "Starting SQLCraft dev environment..."
-	@docker compose -f docker-compose.dev.yml up -d postgres redis minio sandbox-postgres
+	@docker compose -f docker-compose.dev.yml up -d postgres redis minio
 	@echo "Waiting for databases..."
 	@sleep 3
 	@pnpm run db:migrate
@@ -31,7 +31,7 @@ dev: ## Start full dev environment (Docker + services)
 	@docker compose -f docker-compose.dev.yml up --build api web worker
 
 dev-infra: ## Start only infrastructure (Postgres, Redis, MinIO)
-	docker compose -f docker-compose.dev.yml up -d postgres redis minio sandbox-postgres
+	docker compose -f docker-compose.dev.yml up -d postgres redis minio
 
 dev-services: ## Start app services without rebuilding infra
 	docker compose -f docker-compose.dev.yml up --build api web worker

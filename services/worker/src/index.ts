@@ -24,6 +24,12 @@ import {
   QueryBlockedError,
   QueryTimeoutError,
 } from './query-executor';
+import {
+  createSandboxContainer,
+  ensureSandboxContainerRemoved,
+  sandboxContainerName,
+  waitForSandboxPostgres,
+} from './docker';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -40,7 +46,6 @@ const sandboxHost = process.env.SANDBOX_DB_HOST ?? 'localhost';
 const sandboxPort = process.env.SANDBOX_DB_PORT ?? '5433';
 const sandboxUser = process.env.SANDBOX_DB_USER ?? 'sandbox';
 const sandboxPassword = process.env.SANDBOX_DB_PASSWORD ?? 'sandbox';
-const sandboxAdminUrl = `postgresql://${sandboxUser}:${sandboxPassword}@${sandboxHost}:${sandboxPort}/postgres`;
 
 // Session TTL: 2 hours
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -75,8 +80,8 @@ function sandboxDbName(sandboxId: string): string {
 }
 
 /** Build a connection string pointing to a specific sandbox database */
-function sandboxConnStr(dbName: string): string {
-  return `postgresql://${sandboxUser}:${sandboxPassword}@${sandboxHost}:${sandboxPort}/${dbName}`;
+function sandboxConnStr(host: string, dbName: string, port = 5432): string {
+  return `postgresql://${sandboxUser}:${sandboxPassword}@${host}:${port}/${dbName}`;
 }
 
 /** Generate CREATE TABLE DDL from a parsed schema definition */
@@ -88,16 +93,6 @@ function buildCreateTableDdl(
       `CREATE TABLE IF NOT EXISTS "${t.name}" (\n` +
       t.columns.map((c) => `  "${c.name}" ${c.type}`).join(',\n') +
       '\n);',
-  );
-}
-
-/** Terminate all connections to a sandbox database so it can be dropped */
-async function terminateSandboxConnections(adminPool: Pool, dbName: string): Promise<void> {
-  await adminPool.query(
-    `SELECT pg_terminate_backend(pid)
-     FROM pg_stat_activity
-     WHERE datname = $1 AND pid <> pg_backend_pid()`,
-    [dbName],
   );
 }
 
@@ -118,12 +113,18 @@ const sandboxProvisioningWorker = new Worker(
     await updateSandboxStatus(sandboxInstanceId, 'provisioning');
 
     const dbName = sandboxDbName(sandboxInstanceId);
-    const adminPool = new Pool({ connectionString: sandboxAdminUrl, max: 1 });
+    const containerRef = sandboxContainerName(sandboxInstanceId);
 
     try {
-      // Create isolated database
-      await adminPool.query(`CREATE DATABASE "${dbName}"`);
-      logger.info({ dbName }, 'Sandbox database created');
+      await createSandboxContainer({
+        containerRef,
+        dbName,
+        dbUser: sandboxUser,
+        dbPassword: sandboxPassword,
+        sandboxId: sandboxInstanceId,
+      });
+      await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
+      logger.info({ containerRef, dbName }, 'Sandbox container ready');
 
       // Apply schema DDL if template exists
       if (schemaTemplateId) {
@@ -131,7 +132,10 @@ const sandboxProvisioningWorker = new Worker(
 
         if (schemaDef?.tables?.length) {
           const ddlStatements = buildCreateTableDdl(schemaDef.tables);
-          const sandboxPool = new Pool({ connectionString: sandboxConnStr(dbName), max: 1 });
+          const sandboxPool = new Pool({
+            connectionString: sandboxConnStr(containerRef, dbName),
+            max: 1,
+          });
 
           try {
             for (const ddl of ddlStatements) {
@@ -145,17 +149,18 @@ const sandboxProvisioningWorker = new Worker(
       }
 
       const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-      await updateSandboxReady(sandboxInstanceId, dbName, expiresAt);
+      await updateSandboxReady(sandboxInstanceId, dbName, containerRef, expiresAt);
       await updateSessionStatus(learningSessionId, 'active');
 
-      logger.info({ sandboxInstanceId, dbName, expiresAt }, 'Sandbox ready');
+      logger.info({ sandboxInstanceId, containerRef, dbName, expiresAt }, 'Sandbox ready');
     } catch (err) {
       logger.error({ err, sandboxInstanceId }, 'Sandbox provisioning failed');
+      await ensureSandboxContainerRemoved(containerRef).catch((cleanupErr) =>
+        logger.warn({ cleanupErr, containerRef }, 'Failed to remove sandbox container after provisioning error'),
+      );
       await updateSandboxStatus(sandboxInstanceId, 'failed');
       await updateSessionStatus(learningSessionId, 'failed');
       throw err;
-    } finally {
-      await adminPool.end();
     }
   },
   { connection: conn },
@@ -187,19 +192,14 @@ const sandboxCleanupWorker = new Worker(
 
     await updateSandboxStatus(sandboxInstanceId, 'expiring');
 
-    if (sandbox.dbName) {
-      const adminPool = new Pool({ connectionString: sandboxAdminUrl, max: 1 });
-
+    if (sandbox.containerRef) {
       try {
-        await terminateSandboxConnections(adminPool, sandbox.dbName);
-        await adminPool.query(`DROP DATABASE IF EXISTS "${sandbox.dbName}"`);
-        logger.info({ dbName: sandbox.dbName }, 'Sandbox database dropped');
+        await ensureSandboxContainerRemoved(sandbox.containerRef);
+        logger.info({ containerRef: sandbox.containerRef }, 'Sandbox container removed');
       } catch (err) {
-        logger.error({ err, sandboxInstanceId }, 'Failed to drop sandbox database');
+        logger.error({ err, sandboxInstanceId }, 'Failed to remove sandbox container');
         await updateSandboxStatus(sandboxInstanceId, 'failed');
         throw err;
-      } finally {
-        await adminPool.end();
       }
     }
 
@@ -234,25 +234,31 @@ const sandboxResetWorker = new Worker(
 
     const sandbox = await fetchSandbox(sandboxInstanceId);
 
-    if (!sandbox?.dbName) {
-      logger.warn({ sandboxInstanceId }, 'Sandbox not found or has no dbName, cannot reset');
+    if (!sandbox) {
+      logger.warn({ sandboxInstanceId }, 'Sandbox not found, cannot reset');
       await updateSandboxStatus(sandboxInstanceId, 'failed');
       return;
     }
 
+    const dbName = sandbox.dbName ?? sandboxDbName(sandboxInstanceId);
+    const containerRef = sandbox.containerRef ?? sandboxContainerName(sandboxInstanceId);
+
     try {
-      const sandboxPool = new Pool({ connectionString: sandboxConnStr(sandbox.dbName), max: 1 });
+      await ensureSandboxContainerRemoved(containerRef);
+      await createSandboxContainer({
+        containerRef,
+        dbName,
+        dbUser: sandboxUser,
+        dbPassword: sandboxPassword,
+        sandboxId: sandboxInstanceId,
+      });
+      await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
 
+      const sandboxPool = new Pool({
+        connectionString: sandboxConnStr(containerRef, dbName),
+        max: 1,
+      });
       try {
-        // Drop all user tables
-        const tablesResult = await sandboxPool.query<{ tablename: string }>(
-          `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
-        );
-        for (const { tablename } of tablesResult.rows) {
-          await sandboxPool.query(`DROP TABLE IF EXISTS "${tablename}" CASCADE`);
-        }
-
-        // Re-apply schema DDL
         if (sandbox.schemaTemplateId) {
           const schemaDef = await fetchSchemaTemplate(sandbox.schemaTemplateId);
           if (schemaDef?.tables?.length) {
@@ -268,11 +274,14 @@ const sandboxResetWorker = new Worker(
       }
 
       const newExpiresAt = new Date(Date.now() + SESSION_TTL_MS);
-      await updateSandboxReady(sandboxInstanceId, sandbox.dbName, newExpiresAt);
+      await updateSandboxReady(sandboxInstanceId, dbName, containerRef, newExpiresAt);
 
-      logger.info({ sandboxInstanceId }, 'Sandbox reset complete');
+      logger.info({ sandboxInstanceId, containerRef }, 'Sandbox reset complete');
     } catch (err) {
       logger.error({ err, sandboxInstanceId }, 'Sandbox reset failed');
+      await ensureSandboxContainerRemoved(containerRef).catch((cleanupErr) =>
+        logger.warn({ cleanupErr, containerRef }, 'Failed to remove sandbox container after reset error'),
+      );
       await updateSandboxStatus(sandboxInstanceId, 'failed');
       throw err;
     }
@@ -325,7 +334,11 @@ const queryExecutionWorker = new Worker(
 
     await updateQueryExecutionRunning(queryExecutionId);
 
-    const connStr = sandboxConnStr(sandbox.dbName);
+    const connStr = sandboxConnStr(
+      sandbox.containerRef ?? sandboxHost,
+      sandbox.dbName,
+      sandbox.containerRef ? 5432 : Number(sandboxPort),
+    );
 
     try {
       const result = await executeSql(connStr, sql);

@@ -44,21 +44,31 @@ export const CreateLessonVersionSchema = z.object({
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
-export const CreateChallengeSchema = z.object({
-  lessonId: z.string().uuid(),
-  slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
-  title: z.string().min(1).max(255),
-  description: z.string().optional(),
-  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
-  sortOrder: z.number().int().default(0),
-  points: z.number().int().min(10).max(1000).default(100),
-  problemStatement: z.string().min(1),
-  hintText: z.string().optional(),
-  expectedResultColumns: z.array(z.string()).optional(),
-  referenceSolution: z.string().optional(),
-  validatorType: z.string().default('result_set'),
-  validatorConfig: z.record(z.unknown()).optional(),
-});
+export const CreateChallengeSchema = z
+  .object({
+    lessonId: z.string().uuid(),
+    slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
+    title: z.string().min(1).max(255),
+    description: z.string().optional(),
+    difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
+    sortOrder: z.number().int().default(0),
+    points: z.number().int().min(10).max(1000).default(100),
+    problemStatement: z.string().min(1),
+    hintText: z.string().optional(),
+    expectedResultColumns: z.array(z.string()).optional(),
+    referenceSolution: z.string().optional(),
+    validatorType: z.string().default('result_set'),
+    validatorConfig: z.record(z.unknown()).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.validatorType === 'result_set' && !value.referenceSolution?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['referenceSolution'],
+        message: 'referenceSolution is required for result_set challenges',
+      });
+    }
+  });
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 

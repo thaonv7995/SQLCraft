@@ -24,7 +24,22 @@ import { formatRelativeTime } from '@/lib/utils';
 
 type TrackWithLessons = Track & { lessons?: Lesson[] };
 
-const DEFAULT_FORM = {
+type ContributorForm = {
+  lessonId: string;
+  title: string;
+  slug: string;
+  description: string;
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  points: string;
+  problemStatement: string;
+  hintText: string;
+  expectedResultColumns: string;
+  referenceSolution: string;
+  baselineDurationMs: string;
+  requiresIndexOptimization: 'false' | 'true';
+};
+
+const DEFAULT_FORM: ContributorForm = {
   lessonId: '',
   title: '',
   slug: '',
@@ -33,6 +48,10 @@ const DEFAULT_FORM = {
   points: '100',
   problemStatement: '',
   hintText: '',
+  expectedResultColumns: '',
+  referenceSolution: '',
+  baselineDurationMs: '',
+  requiresIndexOptimization: 'false' as const,
 };
 
 function slugify(value: string): string {
@@ -47,7 +66,7 @@ export default function ContributorPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
   const displayName = user?.displayName ?? user?.username ?? 'Contributor';
-  const [form, setForm] = useState(DEFAULT_FORM);
+  const [form, setForm] = useState<ContributorForm>(DEFAULT_FORM);
 
   const tracksQuery = useQuery({
     queryKey: ['contributor-track-list'],
@@ -89,8 +108,22 @@ export default function ContributorPage() {
   const publishedCount = myChallenges.filter((challenge) => challenge.status === 'published').length;
 
   const createChallengeMutation = useMutation({
-    mutationFn: () =>
-      challengesApi.create({
+    mutationFn: () => {
+      const expectedResultColumns = form.expectedResultColumns
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const validatorConfig: Record<string, unknown> = {};
+
+      if (form.baselineDurationMs.trim()) {
+        validatorConfig.baselineDurationMs = Number(form.baselineDurationMs);
+      }
+
+      if (form.requiresIndexOptimization === 'true') {
+        validatorConfig.requiresIndexOptimization = true;
+      }
+
+      return challengesApi.create({
         lessonId: form.lessonId,
         title: form.title.trim(),
         slug: form.slug.trim(),
@@ -99,8 +132,12 @@ export default function ContributorPage() {
         points: Number(form.points),
         problemStatement: form.problemStatement.trim(),
         hintText: form.hintText.trim() || undefined,
+        expectedResultColumns: expectedResultColumns.length > 0 ? expectedResultColumns : undefined,
+        referenceSolution: form.referenceSolution.trim(),
         validatorType: 'result_set',
-      }),
+        validatorConfig: Object.keys(validatorConfig).length > 0 ? validatorConfig : undefined,
+      });
+    },
     onSuccess: () => {
       toast.success('Challenge draft created');
       setForm((current) => ({
@@ -117,8 +154,14 @@ export default function ContributorPage() {
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!form.lessonId || !form.title.trim() || !form.slug.trim() || !form.problemStatement.trim()) {
-      toast.error('Lesson, title, slug, and problem statement are required');
+    if (
+      !form.lessonId ||
+      !form.title.trim() ||
+      !form.slug.trim() ||
+      !form.problemStatement.trim() ||
+      !form.referenceSolution.trim()
+    ) {
+      toast.error('Lesson, title, slug, problem statement, and reference solution are required');
       return;
     }
 
@@ -249,6 +292,52 @@ export default function ContributorPage() {
                 onChange={(event) => setForm((current) => ({ ...current, hintText: event.target.value }))}
                 placeholder="Optional hint for the learner."
               />
+
+              <Input
+                label="Expected Columns"
+                value={form.expectedResultColumns}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, expectedResultColumns: event.target.value }))
+                }
+                placeholder="id, email"
+              />
+
+              <Textarea
+                label="Reference Solution"
+                value={form.referenceSolution}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, referenceSolution: event.target.value }))
+                }
+                placeholder="SELECT id, email FROM users WHERE active = true ORDER BY id;"
+              />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input
+                  label="Baseline Duration (ms)"
+                  type="number"
+                  min={1}
+                  value={form.baselineDurationMs}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, baselineDurationMs: event.target.value }))
+                  }
+                  placeholder="200"
+                />
+
+                <Select
+                  label="Index Optimization"
+                  value={form.requiresIndexOptimization}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      requiresIndexOptimization: event.target.value as typeof DEFAULT_FORM.requiresIndexOptimization,
+                    }))
+                  }
+                  options={[
+                    { value: 'false', label: 'Not required' },
+                    { value: 'true', label: 'Required' },
+                  ]}
+                />
+              </div>
 
               <Button
                 type="submit"

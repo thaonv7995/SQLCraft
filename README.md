@@ -8,10 +8,10 @@ SQLCraft is an open-source, interactive SQL learning platform that takes you bey
 
 - **Interactive SQL Lab** — Write and run SQL directly in the browser. View tabular results, query duration, scanned rows, and visual `EXPLAIN ANALYZE` execution plans to spot bottlenecks.
 - **Progressive Dataset Scaling** — Practice with the same schema across multiple data scales (Tiny: 100 rows ➔ Small: 100K ➔ Medium: 5M ➔ Large: 10M-100M+ rows) to see real performance implications.
-- **Query Optimization Labs** — Compare entirely different queries for the same problem. Create and drop indexes safely to observe immediate changes in execution plans and execution time.
-- **User Sandbox Isolation** — Every learning session provisions a dedicated, ephemeral PostgreSQL container. Test destructive DDL/DML queries (like `DROP TABLE`) with zero risk to the platform or other learners.
-- **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically for both **correctness** and **performance/cost**.
-- **Admin & Contributor Tools** — Built-in tools for async dataset generation, tracking query history, and a robust authoring workflow for community lesson creation.
+- **Query Optimization Labs** — Compare entirely different queries for the same problem. Create and drop indexes safely, then verify improvements through real execution plans and challenge scoring baselines.
+- **User Sandbox Isolation** — Every learning session provisions a dedicated, ephemeral PostgreSQL container attached to the internal Docker network. Cleanup is automatic on session end and TTL expiry.
+- **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically for both **correctness** and **performance/cost**, using full result-set comparison plus EXPLAIN-backed index checks where configured.
+- **Admin & Contributor Tools** — Built-in tools for async dataset generation, tracking query history, and a contributor workflow that captures reference solutions, expected columns, and optimization baselines for community-created challenges.
 
 ## Tech Stack
 

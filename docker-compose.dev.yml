@@ -16,23 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  sandbox-postgres:
-    image: postgres:16-alpine
-    container_name: sqlcraft-sandbox-postgres
-    environment:
-      POSTGRES_USER: sandbox
-      POSTGRES_PASSWORD: sandbox
-      POSTGRES_DB: sandbox_template
-    ports:
-      - "5433:5432"
-    volumes:
-      - sandbox_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sandbox"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    networks:
+      - sqlcraft
 
   redis:
     image: redis:7-alpine
@@ -46,6 +31,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - sqlcraft
 
   minio:
     image: minio/minio
@@ -64,6 +51,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
+    networks:
+      - sqlcraft
 
   # ---- Application Services ----
   api:
@@ -75,7 +64,7 @@ services:
     environment:
       DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
       REDIS_URL: redis://redis:6379
-      SANDBOX_DB_HOST: sandbox-postgres
+      SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
       SANDBOX_DB_PASSWORD: sandbox
@@ -92,6 +81,8 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - sqlcraft
 
   web:
     build:
@@ -111,6 +102,8 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    networks:
+      - sqlcraft
 
   worker:
     build:
@@ -121,23 +114,30 @@ services:
     environment:
       DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
       REDIS_URL: redis://redis:6379
-      SANDBOX_DB_HOST: sandbox-postgres
+      SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
       SANDBOX_DB_PASSWORD: sandbox
+      SANDBOX_DOCKER_NETWORK: sqlcraft-dev
     volumes:
       - ./services/worker:/app/services/worker
       - ./packages:/app/packages
       - /app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - sqlcraft
 
 volumes:
   postgres_data:
-  sandbox_postgres_data:
   redis_data:
   minio_data:
+
+networks:
+  sqlcraft:
+    name: sqlcraft-dev

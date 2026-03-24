@@ -22,6 +22,11 @@ describe('validateSql', () => {
       expect(result.reason).toMatch(/drop/i);
     });
 
+    it('allows DROP INDEX for sandbox optimization challenges', () => {
+      const result = validateSql('DROP INDEX IF EXISTS idx_users_active');
+      expect(result.valid).toBe(true);
+    });
+
     it('blocks DROP with leading whitespace', () => {
       const result = validateSql('  drop table orders;');
       expect(result.valid).toBe(false);

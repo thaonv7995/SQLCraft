@@ -6,7 +6,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 // Patterns that are completely blocked
 const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /^\s*drop\s+/i, reason: 'DROP statements are not allowed' },
+  { pattern: /^\s*drop\s+(?!index\b)/i, reason: 'DROP statements are not allowed' },
   { pattern: /^\s*truncate\s+/i, reason: 'TRUNCATE statements are not allowed' },
   { pattern: /^\s*create\s+user\b/i, reason: 'CREATE USER is not allowed' },
   { pattern: /^\s*alter\s+user\b/i, reason: 'ALTER USER is not allowed' },

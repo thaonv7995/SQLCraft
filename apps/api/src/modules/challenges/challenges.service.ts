@@ -1,4 +1,4 @@
-import { challengesRepository, lessonsRepository } from '../../db/repositories';
+import { challengesRepository, lessonsRepository, sandboxesRepository } from '../../db/repositories';
 import type {
   ChallengeAttemptRow,
   ChallengeAttemptWithExecutionRow,
@@ -11,7 +11,9 @@ import type {
   ReviewChallengeRow,
   SessionExecutionSummaryRow,
 } from '../../db/repositories';
-import { ForbiddenError, NotFoundError } from '../../lib/errors';
+import { ForbiddenError, NotFoundError, QueryExecutionFailedError } from '../../lib/errors';
+import type { ExplainResult } from '../../services/query-executor';
+import { executeSql, getExplainPlan } from '../../services/query-executor';
 import type { CreateChallengeBody, SubmitAttemptBody } from './challenges.schema';
 
 export interface AttemptEvaluation {
@@ -118,6 +120,24 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
     username: string | null;
     displayName: string | null;
   };
+}
+
+interface NormalizedResultPreview {
+  columns: string[];
+  rows: unknown[][];
+  truncated: boolean;
+}
+
+interface ResultSetReference {
+  columns: string[];
+  rows: unknown[][];
+  rowCount: number;
+  truncated: boolean;
+}
+
+interface AttemptEvaluationContext {
+  referenceResult?: ResultSetReference | null;
+  explainPlan?: ExplainResult | null;
 }
 
 function normalizeDescription(value: string | null | undefined): string {
@@ -252,10 +272,199 @@ function isDropIndexStatement(sqlText: string): boolean {
   return /^\s*drop\s+index\b/i.test(sqlText);
 }
 
+function normalizeResultColumns(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((column): column is string => typeof column === 'string');
+}
+
+function normalizeResultRows(value: unknown): unknown[][] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((row) => {
+    if (Array.isArray(row)) {
+      return [row];
+    }
+
+    if (row && typeof row === 'object') {
+      return [Object.values(row as Record<string, unknown>)];
+    }
+
+    return [];
+  });
+}
+
+function normalizeResultPreview(value: unknown): NormalizedResultPreview {
+  if (!value || typeof value !== 'object') {
+    return { columns: [], rows: [], truncated: false };
+  }
+
+  const preview = value as {
+    columns?: unknown;
+    rows?: unknown;
+    truncated?: unknown;
+  };
+
+  return {
+    columns: normalizeResultColumns(preview.columns),
+    rows: normalizeResultRows(preview.rows),
+    truncated: preview.truncated === true,
+  };
+}
+
+function normalizeComparableValue(value: unknown): unknown {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeComparableValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, normalizeComparableValue(entryValue)]),
+    );
+  }
+
+  return value;
+}
+
+function serializeRow(row: unknown[]): string {
+  return JSON.stringify(normalizeComparableValue(row));
+}
+
+function compareColumnLists(actual: string[], expected: string[]): boolean {
+  if (actual.length !== expected.length) {
+    return false;
+  }
+
+  return actual.every(
+    (column, index) => column.trim().toLowerCase() === expected[index]?.trim().toLowerCase(),
+  );
+}
+
+function compareResultSets(
+  actualPreview: NormalizedResultPreview,
+  actualRowCount: number | null,
+  referenceResult: ResultSetReference,
+): { matches: boolean; feedbackText?: string } {
+  if (actualPreview.columns.length === 0) {
+    return {
+      matches: false,
+      feedbackText: 'No results returned.',
+    };
+  }
+
+  if (!compareColumnLists(actualPreview.columns, referenceResult.columns)) {
+    return {
+      matches: false,
+      feedbackText: 'Result set columns do not match the reference solution.',
+    };
+  }
+
+  if (actualPreview.truncated || referenceResult.truncated) {
+    return {
+      matches: false,
+      feedbackText: 'Result set is truncated and cannot be validated safely.',
+    };
+  }
+
+  const resolvedActualRowCount = actualRowCount ?? actualPreview.rows.length;
+  if (resolvedActualRowCount !== referenceResult.rowCount) {
+    return {
+      matches: false,
+      feedbackText: 'Result set row count does not match the reference solution.',
+    };
+  }
+
+  const actualRows = actualPreview.rows.map((row) => serializeRow(row)).sort();
+  const expectedRows = referenceResult.rows.map((row) => serializeRow(row)).sort();
+
+  if (actualRows.length !== expectedRows.length) {
+    return {
+      matches: false,
+      feedbackText: 'Result set row count does not match the reference solution.',
+    };
+  }
+
+  const hasMismatch = actualRows.some((row, index) => row !== expectedRows[index]);
+  if (hasMismatch) {
+    return {
+      matches: false,
+      feedbackText: 'Result set does not match the reference solution.',
+    };
+  }
+
+  return { matches: true };
+}
+
+function shouldExplainAnalyze(sqlText: string): boolean {
+  return /^(select|with)\b/i.test(sqlText.trim());
+}
+
+function getSandboxRuntimeConfig(): {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  maxQueryTimeMs: number;
+  maxRowsPreview: number;
+} {
+  return {
+    host: process.env.SANDBOX_DB_HOST ?? 'localhost',
+    port: Number(process.env.SANDBOX_DB_PORT ?? '5433'),
+    user: process.env.SANDBOX_DB_USER ?? 'sandbox',
+    password: process.env.SANDBOX_DB_PASSWORD ?? 'sandbox',
+    maxQueryTimeMs: Number(process.env.SANDBOX_MAX_QUERY_TIME_MS ?? '30000'),
+    maxRowsPreview: Number(process.env.SANDBOX_MAX_ROWS_PREVIEW ?? '500'),
+  };
+}
+
+function planUsesIndex(rawPlan: unknown): boolean {
+  if (!rawPlan || typeof rawPlan !== 'object') {
+    return false;
+  }
+
+  const queue: unknown[] = [rawPlan];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+
+    const node = current as Record<string, unknown>;
+    const planNode = (node.Plan as Record<string, unknown> | undefined) ?? node;
+    const nodeType = typeof planNode['Node Type'] === 'string' ? planNode['Node Type'] : '';
+
+    if (nodeType.toLowerCase().includes('index')) {
+      return true;
+    }
+
+    if (Array.isArray(planNode.Plans)) {
+      queue.push(...planNode.Plans);
+    }
+  }
+
+  return false;
+}
+
 function detectIndexUsage(
   executions: SessionExecutionSummaryRow[],
   latestQueryId: string | undefined,
+  explainPlan?: ExplainResult | null,
 ): boolean {
+  if (!explainPlan || !planUsesIndex(explainPlan.rawPlan)) {
+    return false;
+  }
+
   let hasIndex = false;
 
   for (const execution of executions) {
@@ -352,6 +561,7 @@ export function evaluateAttempt(
     durationMs: number | null;
   },
   sessionExecutions: SessionExecutionSummaryRow[] = [],
+  context: AttemptEvaluationContext = {},
 ): AttemptEvaluation {
   const config =
     challengeVersion.validatorConfig && typeof challengeVersion.validatorConfig === 'object'
@@ -383,14 +593,10 @@ export function evaluateAttempt(
   }
 
   const expectedColumns = normalizeExpectedResultColumns(challengeVersion.expectedResultColumns);
-  const resultPreview = queryExecution.resultPreview as
-    | {
-        columns?: string[];
-      }
-    | null;
+  const resultPreview = normalizeResultPreview(queryExecution.resultPreview);
 
   if (challengeVersion.validatorType === 'result_set') {
-    if (!resultPreview?.columns || resultPreview.columns.length === 0) {
+    if (resultPreview.columns.length === 0) {
       return {
         isCorrect: false,
         score: 0,
@@ -405,26 +611,40 @@ export function evaluateAttempt(
       };
     }
 
-    if (expectedColumns.length > 0) {
-      const hasAllColumns = expectedColumns.every((column) =>
-        resultPreview.columns?.includes(column),
+    if (context.referenceResult) {
+      const comparison = compareResultSets(
+        resultPreview,
+        queryExecution.rowsReturned ?? null,
+        context.referenceResult,
       );
 
-      if (!hasAllColumns) {
-        const correctnessScore = Math.min(weights.correctness, Math.round(totalPoints * 0.3));
+      if (!comparison.matches) {
         return {
           isCorrect: false,
-          score: correctnessScore,
-          correctnessScore,
+          score: 0,
+          correctnessScore: 0,
           performanceScore: 0,
           indexScore: 0,
-          feedbackText: `Expected columns: ${expectedColumns.join(', ')}. Got: ${resultPreview.columns.join(', ')}`,
+          feedbackText: comparison.feedbackText ?? 'Result set does not match the reference solution.',
           pointsPossible: totalPoints,
           baselineDurationMs,
           latestDurationMs: queryExecution.durationMs ?? null,
           usedIndexing: false,
         };
       }
+    } else if (expectedColumns.length > 0 && !compareColumnLists(resultPreview.columns, expectedColumns)) {
+      return {
+        isCorrect: false,
+        score: 0,
+        correctnessScore: 0,
+        performanceScore: 0,
+        indexScore: 0,
+        feedbackText: `Expected columns: ${expectedColumns.join(', ')}. Got: ${resultPreview.columns.join(', ')}`,
+        pointsPossible: totalPoints,
+        baselineDurationMs,
+        latestDurationMs: queryExecution.durationMs ?? null,
+        usedIndexing: false,
+      };
     }
   }
 
@@ -437,7 +657,7 @@ export function evaluateAttempt(
 
   const usedIndexing =
     requiresIndexOptimization && weights.index > 0
-      ? detectIndexUsage(sessionExecutions, queryExecution.id)
+      ? detectIndexUsage(sessionExecutions, queryExecution.id, context.explainPlan)
       : false;
   const indexScore = usedIndexing ? weights.index : 0;
 
@@ -456,6 +676,78 @@ export function evaluateAttempt(
   evaluation.feedbackText = buildFeedback(evaluation);
 
   return evaluation;
+}
+
+function buildSandboxConnectionString(params: {
+  dbName: string;
+  containerRef: string | null;
+}): string {
+  const runtime = getSandboxRuntimeConfig();
+  const user = encodeURIComponent(runtime.user);
+  const password = encodeURIComponent(runtime.password);
+  const host = params.containerRef ?? runtime.host;
+  const port = params.containerRef ? 5432 : runtime.port;
+
+  return `postgresql://${user}:${password}@${host}:${port}/${params.dbName}`;
+}
+
+async function buildEvaluationContext(
+  challengeVersion: Pick<
+    PublishedChallengeVersionRow,
+    'validatorType' | 'validatorConfig' | 'referenceSolution'
+  >,
+  queryExecution: {
+    sandboxInstanceId: string | null;
+    sqlText: string;
+  },
+): Promise<AttemptEvaluationContext> {
+  if (!queryExecution.sandboxInstanceId) {
+    return {};
+  }
+
+  const sandbox = await sandboxesRepository.findById(queryExecution.sandboxInstanceId);
+
+  if (!sandbox?.dbName) {
+    throw new QueryExecutionFailedError('Sandbox is not ready for challenge evaluation');
+  }
+
+  const connectionString = buildSandboxConnectionString({
+    dbName: sandbox.dbName,
+    containerRef: sandbox.containerRef ?? null,
+  });
+  const runtime = getSandboxRuntimeConfig();
+  const validatorConfig =
+    challengeVersion.validatorConfig && typeof challengeVersion.validatorConfig === 'object'
+      ? (challengeVersion.validatorConfig as Record<string, unknown>)
+      : {};
+  const context: AttemptEvaluationContext = {};
+
+  if (
+    challengeVersion.validatorType === 'result_set' &&
+    typeof challengeVersion.referenceSolution === 'string' &&
+    challengeVersion.referenceSolution.trim().length > 0
+  ) {
+    const referenceResult = await executeSql(connectionString, challengeVersion.referenceSolution, {
+      timeoutMs: runtime.maxQueryTimeMs,
+      maxRows: runtime.maxRowsPreview,
+    });
+
+    context.referenceResult = {
+      columns: referenceResult.columns,
+      rows: referenceResult.rows,
+      rowCount: referenceResult.rowCount,
+      truncated: referenceResult.truncated,
+    };
+  }
+
+  if (
+    validatorConfig.requiresIndexOptimization === true &&
+    shouldExplainAnalyze(queryExecution.sqlText)
+  ) {
+    context.explainPlan = await getExplainPlan(connectionString, queryExecution.sqlText, 'explain_analyze');
+  }
+
+  return context;
 }
 
 export async function submitAttempt(
@@ -498,7 +790,13 @@ export async function submitAttempt(
     data.learningSessionId,
     userId,
   );
-  const evaluation = evaluateAttempt(challengeVersion, queryExecution, sessionExecutions);
+  const evaluationContext = await buildEvaluationContext(challengeVersion, queryExecution);
+  const evaluation = evaluateAttempt(
+    challengeVersion,
+    queryExecution,
+    sessionExecutions,
+    evaluationContext,
+  );
 
   const attempt = await challengesRepository.createAttempt({
     learningSessionId: data.learningSessionId,

@@ -31,14 +31,14 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 
 ### 4. Hệ thống Thử Thách & Đánh Giá (Challenge Engine)
 - [x] Là tính năng tùy chọn (không bắt buộc): Người dùng có thể tự do chọn các Thử thách (Challenge) để thực hành nâng cao và kiếm điểm.
-- [x] So khớp kết quả truy vấn (Result-set Validation) của học viên với kết quả chuẩn để tự động chấm điểm đúng/sai.
+- [x] So khớp kết quả truy vấn (Result-set Validation) của học viên với kết quả chuẩn để tự động chấm điểm đúng/sai. Hệ thống hiện chạy `referenceSolution` trên đúng sandbox của session và so sánh full result-set (columns, row count, row values) trước khi chấm điểm.
 - [x] Có trang Challenge nằm trong ngữ cảnh Lesson, hỗ trợ xem mô tả, lịch sử attempt, best score và leaderboard cơ bản.
-- [ ] Hỗ trợ đóng góp nội dung: Bất kỳ User nào cũng có thể tự tạo Thử thách mới. Sau khi được duyệt (Admin approve), Thử thách sẽ lập tức hiển thị công khai (public) cho cộng đồng cùng tham gia giải.
-- [ ] Các challenge nên có point và so sánh để đánh giá xem query của ai tối ưu nhất. Không chỉ sql mà cả đánh index so với base database ban đầu.
+- [x] Hỗ trợ đóng góp nội dung: User đã đăng nhập có thể tự tạo Thử thách mới ở dạng draft. Sau khi được Admin duyệt (approve/publish), Thử thách sẽ lập tức hiển thị công khai (public) trong lesson context cho cộng đồng cùng tham gia giải.
+- [x] Các challenge có point và so sánh để đánh giá query tối ưu. Điểm hiện được tách theo correctness + performance baseline + index optimization; index score chỉ được cộng khi có cả lịch sử tạo index trong session và `EXPLAIN ANALYZE` chứng minh plan thật sự dùng index. Baseline hiệu năng được tác giả challenge cấu hình từ base database ban đầu qua `validatorConfig.baselineDurationMs`.
 
 ### 5. Quản trị Sandbox An Toàn (Sandbox Isolation)
-- [ ] Cấp phát một Database độc lập (PostgreSQL Container) cho từng người học trong một phiên thực hành (Session) để cô lập dữ liệu.
-- [ ] Worker tự động dọn dẹp Sandbox khi người dùng kết thúc phiên học hoặc quá thời gian (Timeout/Cleanup).
+- [x] Cấp phát một Database độc lập (PostgreSQL Container) cho từng người học trong một phiên thực hành (Session) để cô lập dữ liệu. Worker hiện tạo container PostgreSQL riêng cho từng sandbox/session, gắn vào Docker network nội bộ và dùng `container_ref` làm host kết nối nội bộ.
+- [x] Worker tự động dọn dẹp Sandbox khi người dùng kết thúc phiên học hoặc quá thời gian (Timeout/Cleanup).
 
 ---
 
