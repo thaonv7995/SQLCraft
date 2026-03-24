@@ -4,17 +4,80 @@ import type {
   ChallengeAttemptsQuery,
   ChallengeLeaderboardQuery,
   ChallengeVersionParams,
+  CreateChallengeBody,
   SubmitAttemptBody,
 } from './challenges.schema';
 import {
+  createChallengeHandler,
   submitAttemptHandler,
   getAttemptHandler,
   getChallengeVersionHandler,
+  listPublishedChallengesHandler,
+  listReviewChallengesHandler,
+  listUserChallengesHandler,
   listUserAttemptsHandler,
   getChallengeLeaderboardHandler,
 } from './challenges.handler';
 
 export default async function challengesRouter(fastify: FastifyInstance): Promise<void> {
+  fastify.get(
+    '/v1/challenges',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'List published challenges',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    listPublishedChallengesHandler,
+  );
+
+  fastify.get(
+    '/v1/challenges/mine',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'List the current user challenge drafts and submissions',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    listUserChallengesHandler,
+  );
+
+  fastify.post<{ Body: CreateChallengeBody }>(
+    '/v1/challenges',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Create a challenge draft with an initial version',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['lessonId', 'slug', 'title', 'problemStatement'],
+          properties: {
+            lessonId: { type: 'string', format: 'uuid' },
+            slug: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
+            sortOrder: { type: 'integer', default: 0 },
+            points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
+            problemStatement: { type: 'string' },
+            hintText: { type: 'string' },
+            expectedResultColumns: { type: 'array', items: { type: 'string' } },
+            referenceSolution: { type: 'string' },
+            validatorType: { type: 'string', default: 'result_set' },
+            validatorConfig: { type: 'object', additionalProperties: true },
+          },
+        },
+      },
+    },
+    createChallengeHandler,
+  );
+
   fastify.get<{ Params: ChallengeVersionParams }>(
     '/v1/challenge-versions/:id',
     {
@@ -123,5 +186,18 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
       },
     },
     getChallengeLeaderboardHandler,
+  );
+
+  fastify.get(
+    '/v1/admin/challenges',
+    {
+      onRequest: [fastify.authenticate, fastify.authorize(['admin'])],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'List draft challenges pending review',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    listReviewChallengesHandler,
   );
 }

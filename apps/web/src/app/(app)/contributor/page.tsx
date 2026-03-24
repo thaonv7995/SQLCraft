@@ -1,9 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { Badge, StatusBadge } from '@/components/ui/badge';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { Badge, DifficultyBadge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, StatCard } from '@/components/ui/card';
+import { Input, Select, Textarea } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -13,303 +17,312 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import type { Lesson, Track } from '@/lib/api';
+import { challengesApi, tracksApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
-import { cn, formatRelativeTime } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/utils';
 
-const KPI_CARDS = [
-  {
-    label: 'Merged This Quarter',
-    value: '18',
-    delta: '+4 vs last sprint',
-    icon: 'merge',
-    accent: 'border-secondary',
-    tone: 'text-secondary',
-  },
-  {
-    label: 'Active Drafts',
-    value: '06',
-    delta: '2 awaiting review',
-    icon: 'edit_note',
-    accent: 'border-primary',
-    tone: 'text-primary',
-  },
-  {
-    label: 'Average Review SLA',
-    value: '31h',
-    delta: 'steady in the green',
-    icon: 'timer',
-    accent: 'border-tertiary',
-    tone: 'text-tertiary',
-  },
-  {
-    label: 'Issue Coverage',
-    value: '92%',
-    delta: 'high priority queue stable',
-    icon: 'query_stats',
-    accent: 'border-error',
-    tone: 'text-error',
-  },
-];
+type TrackWithLessons = Track & { lessons?: Lesson[] };
 
-const ACTIVE_DRAFTS = [
-  {
-    id: 'draft-1',
-    title: 'Retention Cohorts for Subscription Rescue',
-    domain: 'Analytics',
-    updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    status: 'draft',
-  },
-  {
-    id: 'draft-2',
-    title: 'Chargeback Investigation Drill',
-    domain: 'Fintech',
-    updatedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-    status: 'pending',
-  },
-  {
-    id: 'draft-3',
-    title: 'Healthcare Claims Reconciliation Lab',
-    domain: 'Health Systems',
-    updatedAt: new Date(Date.now() - 28 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-  },
-  {
-    id: 'draft-4',
-    title: 'Warehouse Order Velocity Benchmark',
-    domain: 'E-Commerce',
-    updatedAt: new Date(Date.now() - 52 * 60 * 60 * 1000).toISOString(),
-    status: 'draft',
-  },
-];
+const DEFAULT_FORM = {
+  lessonId: '',
+  title: '',
+  slug: '',
+  description: '',
+  difficulty: 'beginner' as const,
+  points: '100',
+  problemStatement: '',
+  hintText: '',
+};
 
-const HIGH_PRIORITY_REQUESTS = [
-  {
-    title: 'Recursive CTE mission pack',
-    detail: 'Leaderboard demand is climbing after three consecutive advanced track completions.',
-    signal: 'High urgency',
-  },
-  {
-    title: 'Fraud analytics sandbox refresh',
-    detail: 'Contributors are asking for fresher fintech data with clearer anomaly labels.',
-    signal: 'New brief',
-  },
-  {
-    title: 'Postgres 16 query plan snapshots',
-    detail: 'Need updated execution plan screenshots for the optimizer lessons.',
-    signal: 'Review needed',
-  },
-];
-
-const TRENDING_DOMAINS = [
-  { name: 'Fintech', growth: '+18%', note: 'Fraud ops and ledger balancing missions lead the queue.' },
-  { name: 'Analytics', growth: '+12%', note: 'Demand is centered on cohorting, rollups, and materialized views.' },
-  { name: 'Health Systems', growth: '+9%', note: 'Interest is shifting toward claims joins and encounter timelines.' },
-];
-
-function MetricCard({
-  label,
-  value,
-  delta,
-  icon,
-  accent,
-  tone,
-}: (typeof KPI_CARDS)[number]) {
-  return (
-    <div
-      className={cn(
-        'rounded-2xl border border-outline-variant/10 border-l-4 bg-surface-container-low p-5 shadow-[0_10px_30px_rgba(0,0,0,0.12)]',
-        accent,
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-outline">{label}</p>
-          <p className={cn('mt-3 font-headline text-3xl font-bold', tone)}>{value}</p>
-          <p className="mt-2 text-sm text-on-surface-variant">{delta}</p>
-        </div>
-        <div
-          className={cn(
-            'flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-container-high',
-            tone,
-          )}
-        >
-          <span className="material-symbols-outlined text-2xl">{icon}</span>
-        </div>
-      </div>
-    </div>
-  );
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }
 
 export default function ContributorPage() {
+  const queryClient = useQueryClient();
   const { user } = useAuthStore();
   const displayName = user?.displayName ?? user?.username ?? 'Contributor';
+  const [form, setForm] = useState(DEFAULT_FORM);
+
+  const tracksQuery = useQuery({
+    queryKey: ['contributor-track-list'],
+    queryFn: () => tracksApi.list({ limit: 50 }),
+    staleTime: 60_000,
+  });
+
+  const trackIds = tracksQuery.data?.items.map((track) => track.id) ?? [];
+
+  const lessonsQuery = useQuery({
+    queryKey: ['contributor-track-details', trackIds],
+    enabled: trackIds.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const tracks = await Promise.all(trackIds.map((trackId) => tracksApi.get(trackId)));
+      return tracks as TrackWithLessons[];
+    },
+  });
+
+  const myChallengesQuery = useQuery({
+    queryKey: ['contributor-challenges'],
+    queryFn: () => challengesApi.listMine(),
+    staleTime: 30_000,
+  });
+
+  const lessonOptions = useMemo(() => {
+    const tracks = lessonsQuery.data ?? [];
+
+    return tracks.flatMap((track) =>
+      (track.lessons ?? []).map((lesson) => ({
+        value: lesson.id,
+        label: `${track.title} / ${lesson.title}`,
+      })),
+    );
+  }, [lessonsQuery.data]);
+
+  const myChallenges = myChallengesQuery.data ?? [];
+  const draftCount = myChallenges.filter((challenge) => challenge.status === 'draft').length;
+  const publishedCount = myChallenges.filter((challenge) => challenge.status === 'published').length;
+
+  const createChallengeMutation = useMutation({
+    mutationFn: () =>
+      challengesApi.create({
+        lessonId: form.lessonId,
+        title: form.title.trim(),
+        slug: form.slug.trim(),
+        description: form.description.trim() || undefined,
+        difficulty: form.difficulty,
+        points: Number(form.points),
+        problemStatement: form.problemStatement.trim(),
+        hintText: form.hintText.trim() || undefined,
+        validatorType: 'result_set',
+      }),
+    onSuccess: () => {
+      toast.success('Challenge draft created');
+      setForm((current) => ({
+        ...DEFAULT_FORM,
+        lessonId: current.lessonId,
+      }));
+      void queryClient.invalidateQueries({ queryKey: ['contributor-challenges'] });
+    },
+    onError: () => {
+      toast.error('Could not create challenge draft');
+    },
+  });
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!form.lessonId || !form.title.trim() || !form.slug.trim() || !form.problemStatement.trim()) {
+      toast.error('Lesson, title, slug, and problem statement are required');
+      return;
+    }
+
+    createChallengeMutation.mutate();
+  };
 
   return (
-    <>
-      <div className="page-shell page-stack">
-        <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-8 py-8">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-            <div className="border-l-2 border-primary pl-5">
-              <p className="text-xs uppercase tracking-[0.24em] text-outline">
-                Contributor command board
-              </p>
-              <h1 className="mt-3 font-headline text-4xl font-bold tracking-tight text-on-surface">
-                {displayName}
-              </h1>
-              <p className="mt-3 max-w-3xl text-base leading-7 text-on-surface-variant">
-                Review pipeline pressure, keep high-priority drafts moving, and respond to what the
-                catalog needs next before demand overtakes supply.
-              </p>
+    <div className="page-shell page-stack">
+      <section className="flex flex-col gap-5 rounded-[28px] border border-outline-variant/10 bg-surface-container-low px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-3">
+          <p className="text-xs uppercase tracking-[0.24em] text-outline">Contributor workflow</p>
+          <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface">
+            Build Challenge Drafts
+          </h1>
+          <p className="max-w-3xl text-base leading-7 text-on-surface-variant">
+            {displayName}, ship new challenge drafts against live lessons, keep the review queue
+            visible, and hand clean publish-ready versions to the admin lane.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge className="bg-secondary/10 text-secondary">{draftCount} drafts open</Badge>
+          <Badge className="bg-primary/10 text-primary">{publishedCount} published</Badge>
+          <Link href="/admin/content">
+            <Button variant="secondary">Open Admin Queue</Button>
+          </Link>
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <StatCard label="My Drafts" value={draftCount} accent="primary" />
+        <StatCard label="Published Challenges" value={publishedCount} accent="secondary" />
+        <StatCard
+          label="Available Lessons"
+          value={lessonOptions.length}
+          accent="tertiary"
+        />
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[1.2fr_1.8fr]">
+        <Card className="rounded-[28px] border border-outline-variant/10">
+          <CardHeader className="flex-col items-start gap-2 px-6 py-5">
+            <div>
+              <CardTitle>Create a New Draft</CardTitle>
+              <CardDescription className="mt-1">
+                Draft against an existing lesson so the challenge can inherit the right learning
+                context immediately.
+              </CardDescription>
             </div>
+          </CardHeader>
+          <CardContent className="px-6 pb-6 pt-0">
+            <form className="space-y-4" onSubmit={handleSubmit}>
+              <Select
+                label="Lesson"
+                value={form.lessonId}
+                onChange={(event) => setForm((current) => ({ ...current, lessonId: event.target.value }))}
+                options={[
+                  { value: '', label: lessonOptions.length > 0 ? 'Select a lesson' : 'No lessons available' },
+                  ...lessonOptions,
+                ]}
+              />
 
-            <div className="flex flex-wrap items-center gap-3">
-              <Badge className="bg-surface-container-high text-on-surface-variant">
-                Review lane healthy
-              </Badge>
-              <Badge className="bg-secondary/10 text-secondary">6 drafts in motion</Badge>
-              <Link href="/admin/content">
-                <Button
-                  leftIcon={<span className="material-symbols-outlined text-sm">add</span>}
-                >
-                  New Mission
-                </Button>
-              </Link>
+              <Input
+                label="Title"
+                value={form.title}
+                onChange={(event) => {
+                  const title = event.target.value;
+                  setForm((current) => ({
+                    ...current,
+                    title,
+                    slug: current.slug === '' || current.slug === slugify(current.title) ? slugify(title) : current.slug,
+                  }));
+                }}
+                placeholder="Index active users"
+              />
+
+              <Input
+                label="Slug"
+                value={form.slug}
+                onChange={(event) => setForm((current) => ({ ...current, slug: slugify(event.target.value) }))}
+                placeholder="index-active-users"
+              />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Select
+                  label="Difficulty"
+                  value={form.difficulty}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      difficulty: event.target.value as typeof DEFAULT_FORM.difficulty,
+                    }))
+                  }
+                  options={[
+                    { value: 'beginner', label: 'Beginner' },
+                    { value: 'intermediate', label: 'Intermediate' },
+                    { value: 'advanced', label: 'Advanced' },
+                  ]}
+                />
+
+                <Input
+                  label="Points"
+                  type="number"
+                  min={10}
+                  max={1000}
+                  value={form.points}
+                  onChange={(event) => setForm((current) => ({ ...current, points: event.target.value }))}
+                />
+              </div>
+
+              <Textarea
+                label="Description"
+                value={form.description}
+                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+                placeholder="What is this challenge teaching?"
+              />
+
+              <Textarea
+                label="Problem Statement"
+                value={form.problemStatement}
+                onChange={(event) => setForm((current) => ({ ...current, problemStatement: event.target.value }))}
+                placeholder="Return active users quickly and reward indexed solutions."
+              />
+
+              <Textarea
+                label="Hint Text"
+                value={form.hintText}
+                onChange={(event) => setForm((current) => ({ ...current, hintText: event.target.value }))}
+                placeholder="Optional hint for the learner."
+              />
+
+              <Button
+                type="submit"
+                loading={createChallengeMutation.isPending}
+                disabled={lessonOptions.length === 0}
+              >
+                Create Draft
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-[28px] border border-outline-variant/10">
+          <CardHeader className="flex-col items-start gap-2 px-6 py-5">
+            <div>
+              <CardTitle>My Challenge Drafts</CardTitle>
+              <CardDescription className="mt-1">
+                Every draft you own, with lesson context and the latest review surface.
+              </CardDescription>
             </div>
-          </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {KPI_CARDS.map((metric) => (
-            <MetricCard key={metric.label} {...metric} />
-          ))}
-        </section>
-
-        <section className="grid gap-6 xl:grid-cols-12">
-          <div className="space-y-6 xl:col-span-8">
-            <Card className="rounded-[28px] border border-outline-variant/10">
-              <CardHeader className="px-6 py-5">
-                <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                  <div>
-                    <CardTitle className="text-xl">Active Drafts</CardTitle>
-                    <CardDescription className="mt-1 max-w-2xl">
-                      Content in motion right now. Keep these artifacts flowing through review,
-                      validation, and launch.
-                    </CardDescription>
-                  </div>
-                  <Link href="/admin/content">
-                    <Button variant="secondary" size="sm">
-                      Open content queue
-                    </Button>
-                  </Link>
-                </div>
-              </CardHeader>
-              <CardContent className="px-0 pb-2 pt-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Title</TableHead>
-                      <TableHead>Domain</TableHead>
-                      <TableHead>Last Updated</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ACTIVE_DRAFTS.length === 0 ? (
-                      <TableEmpty colSpan={4} message="No active drafts right now." />
-                    ) : (
-                      ACTIVE_DRAFTS.map((draft) => (
-                        <TableRow key={draft.id}>
-                          <TableCell>
-                            <div className="space-y-1">
-                              <p className="font-medium text-on-surface">{draft.title}</p>
-                              <p className="text-xs uppercase tracking-[0.18em] text-outline">
-                                Draft {draft.id}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
+          </CardHeader>
+          <CardContent className="px-0 pb-2 pt-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Challenge</TableHead>
+                  <TableHead>Lesson</TableHead>
+                  <TableHead>Points</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Updated</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {myChallengesQuery.isLoading ? (
+                  <TableEmpty colSpan={5} message="Loading your challenge drafts..." />
+                ) : myChallenges.length === 0 ? (
+                  <TableEmpty colSpan={5} message="No challenge drafts yet." />
+                ) : (
+                  myChallenges.map((challenge) => (
+                    <TableRow key={challenge.id}>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <p className="font-medium text-on-surface">{challenge.title}</p>
+                          <div className="flex items-center gap-2">
+                            <DifficultyBadge difficulty={challenge.difficulty} />
                             <Badge className="bg-surface-container-high text-on-surface-variant">
-                              {draft.domain}
+                              {challenge.validatorType ?? 'result_set'}
                             </Badge>
-                          </TableCell>
-                          <TableCell className="text-on-surface-variant">
-                            {formatRelativeTime(draft.updatedAt)}
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge status={draft.status} />
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="space-y-6 xl:col-span-4">
-            <Card className="rounded-[28px] border border-outline-variant/10">
-              <CardHeader className="px-6 py-5">
-                <div>
-                  <CardTitle className="text-xl">Market Intelligence</CardTitle>
-                  <CardDescription className="mt-1">
-                    Signals that should shape the next contributor sprint.
-                  </CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4 px-6 pb-6 pt-0">
-                <div className="space-y-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-outline">
-                    High Priority Requests
-                  </p>
-                  {HIGH_PRIORITY_REQUESTS.map((request) => (
-                    <div
-                      key={request.title}
-                      className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4"
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <p className="font-medium text-on-surface">{request.title}</p>
-                        <Badge className="bg-error/10 text-error">{request.signal}</Badge>
-                      </div>
-                      <p className="text-sm leading-6 text-on-surface-variant">
-                        {request.detail}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-xs uppercase tracking-[0.18em] text-outline">
-                    Trending Domains
-                  </p>
-                  {TRENDING_DOMAINS.map((domain) => (
-                    <div
-                      key={domain.name}
-                      className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4"
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <p className="font-medium text-on-surface">{domain.name}</p>
-                        <span className="font-mono text-sm text-secondary">{domain.growth}</span>
-                      </div>
-                      <p className="text-sm leading-6 text-on-surface-variant">{domain.note}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
-      </div>
-
-      <Link href="/admin/content" className="fixed bottom-8 right-8 z-30">
-        <Button
-          size="lg"
-          className="shadow-[0_18px_40px_rgba(68,83,167,0.35)]"
-          leftIcon={<span className="material-symbols-outlined">add_circle</span>}
-        >
-          New Mission
-        </Button>
-      </Link>
-    </>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <p className="text-sm text-on-surface">{challenge.lessonTitle}</p>
+                          <p className="text-xs uppercase tracking-[0.18em] text-outline">
+                            {challenge.trackTitle}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-on-surface">{challenge.points}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={challenge.status} />
+                      </TableCell>
+                      <TableCell className="text-on-surface-variant">
+                        {formatRelativeTime(challenge.updatedAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </section>
+    </div>
   );
 }
