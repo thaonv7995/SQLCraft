@@ -1,4 +1,4 @@
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, desc, ilike, or, sql, count } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -129,15 +129,48 @@ export class UsersRepository {
   async listUsers(
     page: number,
     limit: number,
-    status?: 'active' | 'disabled' | 'invited',
+    options?: {
+      status?: 'active' | 'disabled' | 'invited';
+      search?: string;
+      role?: string;
+    },
   ): Promise<{
-    items: Pick<UserRow, 'id' | 'email' | 'username' | 'displayName' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'>[];
+    items: (Pick<UserRow, 'id' | 'email' | 'username' | 'displayName' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'> & { roles: string[] })[];
     total: number;
   }> {
     const offset = (page - 1) * limit;
-    const where = status ? eq(schema.users.status, status) : undefined;
 
-    const [items, countRows] = await Promise.all([
+    const conditions: ReturnType<typeof eq>[] = [];
+    if (options?.status) conditions.push(eq(schema.users.status, options.status));
+    if (options?.search) {
+      const pattern = `%${options.search}%`;
+      conditions.push(
+        or(
+          ilike(schema.users.email, pattern),
+          ilike(schema.users.username, pattern),
+          ilike(schema.users.displayName, pattern),
+        ) as ReturnType<typeof eq>,
+      );
+    }
+
+    // Role filter: only include users that have the given role
+    let userIdsWithRole: string[] | undefined;
+    if (options?.role) {
+      const roleRows = await this.db
+        .select({ userId: schema.userRoles.userId })
+        .from(schema.userRoles)
+        .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+        .where(eq(schema.roles.name, options.role));
+      userIdsWithRole = roleRows.map((r) => r.userId);
+      if (userIdsWithRole.length === 0) return { items: [], total: 0 };
+      conditions.push(
+        sql`${schema.users.id} = ANY(ARRAY[${sql.raw(userIdsWithRole.map((id) => `'${id}'`).join(','))}]::uuid[])` as unknown as ReturnType<typeof eq>,
+      );
+    }
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, countRows] = await Promise.all([
       this.db
         .select({
           id: schema.users.id,
@@ -155,12 +188,39 @@ export class UsersRepository {
         .limit(limit)
         .offset(offset),
       this.db
-        .select({ count: schema.users.id })
+        .select({ total: count() })
         .from(schema.users)
         .where(where),
     ]);
 
-    return { items, total: countRows.length };
+    // Fetch roles for all returned users in one query
+    const ids = rows.map((r) => r.id);
+    let rolesMap: Record<string, string[]> = {};
+    if (ids.length > 0) {
+      const roleRows = await this.db
+        .select({ userId: schema.userRoles.userId, roleName: schema.roles.name })
+        .from(schema.userRoles)
+        .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+        .where(sql`${schema.userRoles.userId} = ANY(ARRAY[${sql.raw(ids.map((id) => `'${id}'`).join(','))}]::uuid[])`);
+      rolesMap = roleRows.reduce<Record<string, string[]>>((acc, r) => {
+        (acc[r.userId] ??= []).push(r.roleName);
+        return acc;
+      }, {});
+    }
+
+    const items = rows.map((r) => ({ ...r, roles: rolesMap[r.id] ?? [] }));
+    return { items, total: countRows[0]?.total ?? 0 };
+  }
+
+  async clearUserRoles(userId: string): Promise<void> {
+    await this.db.delete(schema.userRoles).where(eq(schema.userRoles.userId, userId));
+  }
+
+  async setUserRole(userId: string, roleName: string): Promise<void> {
+    const role = await this.findRoleByName(roleName);
+    if (!role) throw new Error(`Role '${roleName}' not found`);
+    await this.clearUserRoles(userId);
+    await this.assignRole(userId, role.id);
   }
 
   async updateStatus(id: string, status: 'active' | 'disabled' | 'invited'): Promise<Pick<UserRow, 'id' | 'email' | 'username' | 'status' | 'updatedAt'> | null> {

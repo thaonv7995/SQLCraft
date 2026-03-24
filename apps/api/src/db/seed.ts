@@ -18,6 +18,7 @@ async function seed() {
 
   let adminRole = existingRoles.find((r) => r.name === 'admin');
   let learnerRole = existingRoles.find((r) => r.name === 'learner');
+  let contributorRole = existingRoles.find((r) => r.name === 'contributor');
 
   if (!adminRole) {
     const [r] = await db
@@ -35,6 +36,15 @@ async function seed() {
       .returning();
     learnerRole = r;
     console.log('  Created learner role');
+  }
+
+  if (!contributorRole) {
+    const [r] = await db
+      .insert(schema.roles)
+      .values({ name: 'contributor', description: 'Content contributor — can submit lessons, databases, and challenges for review' })
+      .returning();
+    contributorRole = r;
+    console.log('  Created contributor role');
   }
 
   // 2. Create admin user

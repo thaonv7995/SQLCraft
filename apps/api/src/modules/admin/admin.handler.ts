@@ -9,6 +9,7 @@ import type {
   CreateChallengeBody,
   ListUsersQuery,
   UpdateUserStatusBody,
+  UpdateUserRoleBody,
   AdminIdParams,
 } from './admin.schema';
 import {
@@ -21,6 +22,7 @@ import {
   publishChallengeVersion,
   listUsers,
   updateUserStatus,
+  updateUserRole,
   getSystemHealth,
 } from './admin.service';
 
@@ -106,6 +108,14 @@ export async function updateUserStatusHandler(
 ): Promise<void> {
   const result = await updateUserStatus(request.params.id, request.body);
   reply.send(success(result, 'User status updated successfully'));
+}
+
+export async function updateUserRoleHandler(
+  request: FastifyRequest<{ Params: AdminIdParams; Body: UpdateUserRoleBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await updateUserRole(request.params.id, request.body);
+  reply.send(success(result, 'User role updated successfully'));
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────
