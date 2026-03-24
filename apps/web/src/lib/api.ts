@@ -339,77 +339,41 @@ function toNumber(value: unknown): number | undefined {
 }
 
 function normalizeQueryResultPreview(
-  item: Record<string, unknown>,
+  preview: unknown,
 ): QueryExecution['result'] {
-  const preview = (
-    item.result && typeof item.result === 'object'
-      ? item.result
-      : item.resultPreview && typeof item.resultPreview === 'object'
-        ? item.resultPreview
-        : null
-  ) as Record<string, unknown> | null;
+  const normalizedPreview =
+    preview && typeof preview === 'object'
+      ? (preview as Record<string, unknown>)
+      : null;
 
-  if (!preview) {
+  if (!normalizedPreview) {
     return undefined;
   }
 
-  const columns = Array.isArray(preview.columns) ? preview.columns : [];
-  const rows = Array.isArray(preview.rows) ? preview.rows : [];
+  const columns = Array.isArray(normalizedPreview.columns) ? normalizedPreview.columns : [];
+  const rows = Array.isArray(normalizedPreview.rows) ? normalizedPreview.rows : [];
 
-  if (columns.every((column) => typeof column === 'object' && column !== null && 'name' in column)) {
+  if (
+    columns.every((column) => typeof column === 'object' && column !== null && 'name' in column) &&
+    rows.every((row) => row != null && typeof row === 'object' && !Array.isArray(row))
+  ) {
     return {
       columns: columns as QueryResultPreview['columns'],
       rows: rows as QueryResultPreview['rows'],
-      totalRows:
-        toNumber(preview.totalRows) ??
-        toNumber(item.rowCount) ??
-        toNumber(item.rowsReturned) ??
-        rows.length,
-      truncated: Boolean(preview.truncated),
+      totalRows: toNumber(normalizedPreview.totalRows) ?? rows.length,
+      truncated: Boolean(normalizedPreview.truncated),
     };
   }
 
-  if (!columns.every((column) => typeof column === 'string')) {
-    return undefined;
-  }
-
-  const columnNames = columns as string[];
-  const normalizedRows = rows.map((row) => {
-    if (row && typeof row === 'object' && !Array.isArray(row)) {
-      return row as Record<string, unknown>;
-    }
-
-    if (Array.isArray(row)) {
-      return Object.fromEntries(
-        columnNames.map((columnName, index) => [columnName, row[index] ?? null]),
-      );
-    }
-
-    return Object.fromEntries(columnNames.map((columnName) => [columnName, null]));
-  });
-
-  return {
-    columns: columnNames.map((name) => ({
-      name,
-      dataType: 'unknown',
-      nullable: true,
-    })),
-    rows: normalizedRows,
-    totalRows:
-      toNumber(preview.totalRows) ??
-      toNumber(item.rowCount) ??
-      toNumber(item.rowsReturned) ??
-      normalizedRows.length,
-    truncated: Boolean(preview.truncated),
-  };
+  return undefined;
 }
 
 function normalizeExecutionPlanFromPayload(
-  payload: Record<string, unknown>,
+  executionPlan: unknown,
 ): QueryExecution['executionPlan'] {
   const directPlan =
-    payload.executionPlan && typeof payload.executionPlan === 'object'
-      ? (payload.executionPlan as Record<string, unknown>)
+    executionPlan && typeof executionPlan === 'object'
+      ? (executionPlan as Record<string, unknown>)
       : null;
 
   if (directPlan && 'plan' in directPlan) {
@@ -425,61 +389,11 @@ function normalizeExecutionPlanFromPayload(
     };
   }
 
-  const plans = Array.isArray(payload.plans)
-    ? (payload.plans.filter(
-        (plan): plan is Record<string, unknown> => typeof plan === 'object' && plan !== null,
-      ) as Record<string, unknown>[])
-    : [];
-
-  if (plans.length === 0) {
-    return undefined;
-  }
-
-  const selectedPlan = plans.reduce<Record<string, unknown> | null>((best, current) => {
-    const currentMode = current.planMode === 'explain_analyze' ? 2 : current.planMode === 'explain' ? 1 : 0;
-    const bestMode = best?.planMode === 'explain_analyze' ? 2 : best?.planMode === 'explain' ? 1 : 0;
-
-    if (currentMode > bestMode) {
-      return current;
-    }
-
-    if (currentMode < bestMode) {
-      return best;
-    }
-
-    const currentCreatedAt = Date.parse(String(current.createdAt ?? ''));
-    const bestCreatedAt = Date.parse(String(best?.createdAt ?? ''));
-
-    if (Number.isFinite(currentCreatedAt) && (!Number.isFinite(bestCreatedAt) || currentCreatedAt > bestCreatedAt)) {
-      return current;
-    }
-
-    return best ?? current;
-  }, null);
-
-  if (!selectedPlan) {
-    return undefined;
-  }
-
-  const summary =
-    selectedPlan.planSummary && typeof selectedPlan.planSummary === 'object'
-      ? (selectedPlan.planSummary as Record<string, unknown>)
-      : {};
-
-  return {
-    type: 'json',
-    plan: selectedPlan.rawPlan,
-    totalCost: toNumber(summary.totalCost),
-    actualTime: toNumber(summary.actualTime),
-    mode:
-      selectedPlan.planMode === 'explain' || selectedPlan.planMode === 'explain_analyze'
-        ? selectedPlan.planMode
-        : undefined,
-  };
+  return undefined;
 }
 
 /** Normalize API rows that may use sqlText / learningSessionId / submittedAt. */
-function normalizeQueryExecutionItem(item: Record<string, unknown>): QueryExecution {
+export function normalizeQueryExecutionItem(item: Record<string, unknown>): QueryExecution {
   const sql =
     (typeof item.sql === 'string' ? item.sql : null) ??
     (typeof item.sqlText === 'string' ? item.sqlText : '') ??
@@ -504,8 +418,8 @@ function normalizeQueryExecutionItem(item: Record<string, unknown>): QueryExecut
           ? item.rowsReturned
           : undefined,
     errorMessage: typeof item.errorMessage === 'string' ? item.errorMessage : undefined,
-    result: normalizeQueryResultPreview(item),
-    executionPlan: normalizeExecutionPlanFromPayload(item),
+    result: normalizeQueryResultPreview(item.result),
+    executionPlan: normalizeExecutionPlanFromPayload(item.executionPlan),
     createdAt,
   };
 }

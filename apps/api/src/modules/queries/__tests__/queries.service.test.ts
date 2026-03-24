@@ -28,7 +28,12 @@ import * as queue from '../../../lib/queue';
 import { submitQuery, getQueryExecution, getSandboxStatus } from '../queries.service';
 import { NotFoundError, ForbiddenError } from '../../../lib/errors';
 import { ApiCode } from '@sqlcraft/types';
-import type { SessionRow, SandboxRow, QueryExecutionRow } from '../../../db/repositories';
+import type {
+  SessionRow,
+  SandboxRow,
+  QueryExecutionRow,
+  QueryExecutionPlanRow,
+} from '../../../db/repositories';
 
 const makeSession = (overrides = {}): SessionRow => ({
   id: 'session-1',
@@ -72,6 +77,16 @@ const makeExecution = (overrides = {}): QueryExecutionRow => ({
   errorMessage: null,
   errorCode: null,
   submittedAt: new Date(),
+  ...overrides,
+});
+
+const makeExecutionPlan = (overrides = {}): QueryExecutionPlanRow => ({
+  id: 'plan-1',
+  queryExecutionId: 'exec-1',
+  planMode: 'explain',
+  rawPlan: { Plan: { 'Node Type': 'Seq Scan', 'Total Cost': 12 } },
+  planSummary: { totalCost: 12, actualTime: 2.5 },
+  createdAt: new Date(),
   ...overrides,
 });
 
@@ -123,12 +138,11 @@ describe('submitQuery()', () => {
   });
 
   it('returns non-blocked outcome for a valid SQL', async () => {
+    const execution = makeExecution({ status: 'accepted' });
     vi.mocked(validateSql).mockReturnValue({ valid: true });
     vi.mocked(queriesRepository.findSessionById).mockResolvedValue(makeSession());
     vi.mocked(queriesRepository.findSandboxBySessionId).mockResolvedValue(makeSandbox());
-    vi.mocked(queriesRepository.createExecution).mockResolvedValue(
-      makeExecution({ status: 'accepted' })
-    );
+    vi.mocked(queriesRepository.createExecution).mockResolvedValue(execution);
     vi.mocked(queriesRepository.updateSessionActivity).mockResolvedValue(undefined);
     vi.mocked(queue.enqueueExecuteQuery).mockResolvedValue(undefined);
 
@@ -136,6 +150,9 @@ describe('submitQuery()', () => {
     expect(outcome.blocked).toBe(false);
     if (!outcome.blocked) {
       expect(outcome.data.status).toBe('accepted');
+      expect(outcome.data.sessionId).toBe('session-1');
+      expect(outcome.data.sql).toBe('SELECT 1');
+      expect(outcome.data.createdAt).toBe(execution.submittedAt.toISOString());
     }
   });
 
@@ -165,6 +182,62 @@ describe('getQueryExecution()', () => {
 
     const result = await getQueryExecution('exec-1', 'user-1', false);
     expect(result.id).toBe('exec-1');
+  });
+
+  it('normalizes result preview and exposes the preferred execution plan', async () => {
+    vi.mocked(queriesRepository.findById).mockResolvedValue(
+      makeExecution({
+        status: 'succeeded',
+        rowsReturned: 2,
+        resultPreview: {
+          columns: ['id', 'email'],
+          rows: [
+            [1, 'a@example.com'],
+            [2, 'b@example.com'],
+          ],
+          truncated: false,
+        },
+      }),
+    );
+    vi.mocked(queriesRepository.getExecutionPlans).mockResolvedValue([
+      makeExecutionPlan({
+        id: 'plan-explain',
+        planMode: 'explain',
+        rawPlan: { Plan: { 'Node Type': 'Seq Scan', 'Total Cost': 80 } },
+        planSummary: { totalCost: 80 },
+        createdAt: new Date('2026-03-24T01:00:00.000Z'),
+      }),
+      makeExecutionPlan({
+        id: 'plan-analyze',
+        planMode: 'explain_analyze',
+        rawPlan: { Plan: { 'Node Type': 'Index Scan', 'Total Cost': 20 } },
+        planSummary: { totalCost: 20, actualTime: 4.5 },
+        createdAt: new Date('2026-03-24T01:05:00.000Z'),
+      }),
+    ]);
+
+    const result = await getQueryExecution('exec-1', 'user-1', false);
+
+    expect(result.result).toEqual({
+      columns: [
+        { name: 'id', dataType: 'unknown', nullable: true },
+        { name: 'email', dataType: 'unknown', nullable: true },
+      ],
+      rows: [
+        { id: 1, email: 'a@example.com' },
+        { id: 2, email: 'b@example.com' },
+      ],
+      totalRows: 2,
+      truncated: false,
+    });
+    expect(result.executionPlan).toEqual({
+      type: 'json',
+      plan: { Plan: { 'Node Type': 'Index Scan', 'Total Cost': 20 } },
+      totalCost: 20,
+      actualTime: 4.5,
+      mode: 'explain_analyze',
+    });
+    expect(result.plans).toHaveLength(2);
   });
 
   it('throws NotFoundError when execution does not exist', async () => {

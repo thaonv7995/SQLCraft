@@ -3,12 +3,36 @@ import type { QueryExecutionRow, QueryExecutionPlanRow } from '../../db/reposito
 export interface SubmitQueryResult {
   id: string;
   status: QueryExecutionRow['status'];
-  sqlText: string;
-  submittedAt: Date | null;
+  sessionId: string;
+  sql: string;
+  createdAt: string;
+}
+
+export interface QueryResultColumnItem {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+}
+
+export interface QueryExecutionResultPreview {
+  columns: QueryResultColumnItem[];
+  rows: Record<string, unknown>[];
+  totalRows: number;
+  truncated: boolean;
+}
+
+export interface QueryExecutionPlanView {
+  type: 'json' | 'text';
+  plan: unknown;
+  totalCost?: number;
+  actualTime?: number;
+  mode?: 'explain' | 'explain_analyze';
 }
 
 export interface GetQueryResult extends QueryExecutionRow {
   plans: QueryExecutionPlanRow[];
+  result?: QueryExecutionResultPreview;
+  executionPlan?: QueryExecutionPlanView;
 }
 
 /** List row shape aligned with web `QueryExecution` (sql, sessionId, UI status). */

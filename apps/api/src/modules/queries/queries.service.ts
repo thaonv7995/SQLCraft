@@ -12,6 +12,8 @@ import type {
   GlobalQueryHistoryResult,
   QueryHistoryItem,
   BlockedQueryResult,
+  QueryExecutionPlanView,
+  QueryExecutionResultPreview,
 } from './queries.types';
 
 export interface SubmitQueryServiceResult {
@@ -74,6 +76,121 @@ function toListItem(
     rowCount: row.rowsReturned ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
     createdAt,
+  };
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeExecutionResultPreview(raw: unknown): QueryExecutionResultPreview | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+
+  const preview = raw as Record<string, unknown>;
+  const columns = Array.isArray(preview.columns) ? preview.columns : [];
+  const rows = Array.isArray(preview.rows) ? preview.rows : [];
+
+  if (!columns.every((column) => typeof column === 'string')) {
+    return undefined;
+  }
+
+  const columnNames = columns as string[];
+  const normalizedRows = rows.map((row) => {
+    if (row && typeof row === 'object' && !Array.isArray(row)) {
+      return row as Record<string, unknown>;
+    }
+
+    if (Array.isArray(row)) {
+      return Object.fromEntries(
+        columnNames.map((columnName, index) => [columnName, row[index] ?? null]),
+      );
+    }
+
+    return Object.fromEntries(columnNames.map((columnName) => [columnName, null]));
+  });
+
+  return {
+    columns: columnNames.map((name) => ({
+      name,
+      dataType: 'unknown',
+      nullable: true,
+    })),
+    rows: normalizedRows,
+    totalRows: normalizedRows.length,
+    truncated: Boolean(preview.truncated),
+  };
+}
+
+function selectExecutionPlan(plans: Array<{ planMode: string | null; createdAt: Date | string | null }>): number {
+  return plans.reduce((bestIndex, currentPlan, currentIndex, allPlans) => {
+    if (bestIndex === -1) {
+      return currentIndex;
+    }
+
+    const bestPlan = allPlans[bestIndex];
+    const currentRank = currentPlan.planMode === 'explain_analyze' ? 2 : currentPlan.planMode === 'explain' ? 1 : 0;
+    const bestRank = bestPlan.planMode === 'explain_analyze' ? 2 : bestPlan.planMode === 'explain' ? 1 : 0;
+
+    if (currentRank > bestRank) {
+      return currentIndex;
+    }
+
+    if (currentRank < bestRank) {
+      return bestIndex;
+    }
+
+    const currentCreatedAt =
+      currentPlan.createdAt instanceof Date
+        ? currentPlan.createdAt.getTime()
+        : Date.parse(String(currentPlan.createdAt ?? ''));
+    const bestCreatedAt =
+      bestPlan.createdAt instanceof Date
+        ? bestPlan.createdAt.getTime()
+        : Date.parse(String(bestPlan.createdAt ?? ''));
+
+    if (Number.isFinite(currentCreatedAt) && (!Number.isFinite(bestCreatedAt) || currentCreatedAt > bestCreatedAt)) {
+      return currentIndex;
+    }
+
+    return bestIndex;
+  }, -1);
+}
+
+function normalizeExecutionPlan(
+  plans: Array<{
+    planMode: string | null;
+    rawPlan: unknown;
+    planSummary: unknown;
+    createdAt: Date | string | null;
+  }>,
+): QueryExecutionPlanView | undefined {
+  if (plans.length === 0) {
+    return undefined;
+  }
+
+  const selectedIndex = selectExecutionPlan(plans);
+  const selectedPlan = selectedIndex >= 0 ? plans[selectedIndex] : null;
+
+  if (!selectedPlan) {
+    return undefined;
+  }
+
+  const summary =
+    selectedPlan.planSummary && typeof selectedPlan.planSummary === 'object'
+      ? (selectedPlan.planSummary as Record<string, unknown>)
+      : {};
+
+  return {
+    type: 'json',
+    plan: selectedPlan.rawPlan,
+    totalCost: toFiniteNumber(summary.totalCost),
+    actualTime: toFiniteNumber(summary.actualTime),
+    mode:
+      selectedPlan.planMode === 'explain' || selectedPlan.planMode === 'explain_analyze'
+        ? selectedPlan.planMode
+        : undefined,
   };
 }
 
@@ -162,8 +279,14 @@ export async function submitQuery(
     data: {
       id: execution.id,
       status: execution.status,
-      sqlText: execution.sqlText,
-      submittedAt: execution.submittedAt,
+      sessionId: execution.learningSessionId,
+      sql: execution.sqlText,
+      createdAt:
+        execution.submittedAt instanceof Date
+          ? execution.submittedAt.toISOString()
+          : execution.submittedAt
+            ? String(execution.submittedAt)
+            : new Date().toISOString(),
     },
   };
 }
@@ -185,7 +308,12 @@ export async function getQueryExecution(
 
   const plans = await queriesRepository.getExecutionPlans(id);
 
-  return { ...execution, plans };
+  return {
+    ...execution,
+    plans,
+    result: normalizeExecutionResultPreview(execution.resultPreview),
+    executionPlan: normalizeExecutionPlan(plans),
+  };
 }
 
 export async function getQueryHistory(
