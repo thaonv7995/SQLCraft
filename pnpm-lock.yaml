@@ -123,9 +123,6 @@ importers:
       '@codemirror/view':
         specifier: ^6.40.0
         version: 6.40.0
-      '@fontsource/material-symbols-outlined':
-        specifier: ^5.2.38
-        version: 5.2.38
       '@hookform/resolvers':
         specifier: ^3.4.2
         version: 3.10.0(react-hook-form@7.72.0(react@19.2.4))
@@ -1022,9 +1019,6 @@ packages:
 
   '@fastify/swagger@8.15.0':
     resolution: {integrity: sha512-zy+HEEKFqPMS2sFUsQU5X0MHplhKJvWeohBwTCkBAJA/GDYGLGUWQaETEhptiqxK7Hs0fQB9B4MDb3pbwIiCwA==}
-
-  '@fontsource/material-symbols-outlined@5.2.38':
-    resolution: {integrity: sha512-l5Zi7Kvli6b/470daUpEnS2Ngm19NkNmnk+6kAKRHR9QX+kYTWq1koTFTUELKt4U9tLIfcKaPKPxyxXUuRrSYQ==}
 
   '@hookform/resolvers@3.10.0':
     resolution: {integrity: sha512-79Dv+3mDF7i+2ajj7SkypSKHhl1cbln1OGavqrsF7p6mbUv11xpqpacPsGDCTRvCSjEEIez2ef1NveSVL3b0Ag==}
@@ -4750,8 +4744,6 @@ snapshots:
       yaml: 2.8.3
     transitivePeerDependencies:
       - supports-color
-
-  '@fontsource/material-symbols-outlined@5.2.38': {}
 
   '@hookform/resolvers@3.10.0(react-hook-form@7.72.0(react@19.2.4))':
     dependencies:

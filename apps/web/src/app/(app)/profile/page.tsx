@@ -2,12 +2,23 @@
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { useMounted } from '@/hooks/use-mounted';
 import { useAuthStore } from '@/stores/auth';
 import { generateInitials } from '@/lib/utils';
 
 export default function ProfilePage() {
   const { user, isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const mounted = useMounted();
+  const authed = mounted && isAuthenticated();
+
+  if (!mounted) {
+    return (
+      <div className="page-shell-narrow page-stack" aria-busy="true">
+        <div className="h-9 w-40 rounded bg-surface-container-highest/40 animate-pulse" />
+        <div className="mt-4 h-4 w-full max-w-md rounded bg-surface-container-highest/30 animate-pulse" />
+      </div>
+    );
+  }
 
   if (!authed || !user) {
     return (

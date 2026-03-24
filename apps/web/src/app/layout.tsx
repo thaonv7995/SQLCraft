@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
-import '@fontsource/material-symbols-outlined';
 import { AppToaster } from '@/components/app-toaster';
 import { Providers } from '@/components/providers';
 import './globals.css';

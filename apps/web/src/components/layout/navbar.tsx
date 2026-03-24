@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { User } from '@/lib/api';
+import { useMounted } from '@/hooks/use-mounted';
 import { useAuthStore } from '@/stores/auth';
 import { generateInitials } from '@/lib/utils';
 
@@ -120,7 +121,8 @@ function UserAvatar({
 export function Navbar() {
   const router = useRouter();
   const { user, isAuthenticated } = useAuthStore();
-  const authed = isAuthenticated();
+  const mounted = useMounted();
+  const authed = mounted && isAuthenticated();
 
   return (
     <nav
