@@ -1,9 +1,58 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  authApi,
   normalizeAvailableDatasetScales,
   normalizeQueryExecutionItem,
   resolveDatasetScaleContext,
 } from './api';
+import api from './api';
+
+function makeAxiosError(
+  status: number,
+  message: string,
+): {
+  isAxiosError: true;
+  message: string;
+  config: Record<string, unknown>;
+  response: {
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    config: Record<string, unknown>;
+    data: {
+      success: false;
+      code: string;
+      message: string;
+      data: null;
+    };
+  };
+} {
+  const config: Record<string, unknown> = {};
+
+  return {
+    isAxiosError: true,
+    message: `Request failed with status code ${status}`,
+    config,
+    response: {
+      status,
+      statusText: status === 401 ? 'Unauthorized' : 'Error',
+      headers: {},
+      config,
+      data: {
+        success: false,
+        code: status === 401 ? '1005' : '0001',
+        message,
+        data: null,
+      },
+    },
+  };
+}
+
+afterEach(() => {
+  api.defaults.adapter = undefined;
+  localStorage.clear();
+  vi.restoreAllMocks();
+});
 
 describe('normalizeQueryExecutionItem', () => {
   it('maps the accepted submit-query payload using sessionId/sql/createdAt', () => {
@@ -178,5 +227,65 @@ describe('dataset scale context helpers', () => {
       rowCount: 10_000,
       sourceRowCount: 10_000_000,
     });
+  });
+});
+
+describe('auth redirect behavior', () => {
+  it('does not redirect the page when login returns 401', async () => {
+    localStorage.setItem(
+      'sqlcraft-auth',
+      JSON.stringify({ state: { tokens: { accessToken: 'stale-token' } } }),
+    );
+
+    api.defaults.adapter = async (config) =>
+      Promise.reject({
+        ...makeAxiosError(401, 'Invalid email or password'),
+        config: {
+          ...config,
+          skipAuthRedirect: true,
+        },
+        response: {
+          ...makeAxiosError(401, 'Invalid email or password').response,
+          config: {
+            ...config,
+            skipAuthRedirect: true,
+          },
+        },
+      });
+
+    await expect(
+      authApi.login({ email: 'admin@sqlcraft.dev', password: 'wrong-pass' }),
+    ).rejects.toMatchObject({
+      message: 'Invalid email or password',
+      status: 401,
+    });
+
+    expect(localStorage.getItem('sqlcraft-auth')).not.toBeNull();
+  });
+
+  it('still redirects to login on 401 for protected requests', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    localStorage.setItem(
+      'sqlcraft-auth',
+      JSON.stringify({ state: { tokens: { accessToken: 'expired-token' } } }),
+    );
+
+    api.defaults.adapter = async (config) =>
+      Promise.reject({
+        ...makeAxiosError(401, 'Unauthorized'),
+        config,
+        response: {
+          ...makeAxiosError(401, 'Unauthorized').response,
+          config,
+        },
+      });
+
+    await expect(authApi.me()).rejects.toMatchObject({
+      message: 'Unauthorized',
+      status: 401,
+    });
+
+    expect(localStorage.getItem('sqlcraft-auth')).toBeNull();
+    consoleErrorSpy.mockRestore();
   });
 });

@@ -1,5 +1,22 @@
-import axios, { type AxiosInstance, type AxiosResponse, type AxiosError } from 'axios';
+import axios, {
+  type AxiosError,
+  type AxiosInstance,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios';
 import { getExplainPlanMode } from './utils';
+
+declare module 'axios' {
+  interface AxiosRequestConfig<D = any> {
+    skipAuthRedirect?: boolean;
+  }
+
+  interface InternalAxiosRequestConfig<D = any> {
+    skipAuthRedirect?: boolean;
+  }
+}
+
+type ApiInternalRequestConfig<D = unknown> = InternalAxiosRequestConfig<D>;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1009,6 +1026,8 @@ const api: AxiosInstance = axios.create({
 
 // Request interceptor – attach bearer token
 api.interceptors.request.use((config) => {
+  const nextConfig = config as ApiInternalRequestConfig;
+
   if (typeof window !== 'undefined') {
     try {
       const raw = localStorage.getItem('sqlcraft-auth');
@@ -1016,14 +1035,14 @@ api.interceptors.request.use((config) => {
         const parsed = JSON.parse(raw) as { state?: { tokens?: { accessToken?: string } } };
         const token = parsed?.state?.tokens?.accessToken;
         if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+          nextConfig.headers.Authorization = `Bearer ${token}`;
         }
       }
     } catch {
       // ignore parse errors
     }
   }
-  return config;
+  return nextConfig;
 });
 
 // Response interceptor – unwrap envelope & handle 401
@@ -1037,10 +1056,15 @@ api.interceptors.response.use(
   },
   (error: unknown) => {
     const axiosError = error as AxiosError<ApiResponse>;
+    const requestConfig = axiosError.config as ApiInternalRequestConfig | undefined;
 
-    if (axiosError.response?.status === 401 && typeof window !== 'undefined') {
+    if (
+      axiosError.response?.status === 401 &&
+      typeof window !== 'undefined' &&
+      !requestConfig?.skipAuthRedirect
+    ) {
       localStorage.removeItem('sqlcraft-auth');
-      window.location.href = '/login';
+      window.location.assign('/login');
     }
 
     // Extract backend error message if available
@@ -1066,7 +1090,11 @@ api.interceptors.response.use(
 export const authApi = {
   login: (payload: LoginPayload) =>
     api
-      .post<{ user: UserPayload; tokens: AuthTokens }>('/auth/login', payload)
+      .post<{ user: UserPayload; tokens: AuthTokens }>(
+        '/auth/login',
+        payload,
+        { skipAuthRedirect: true },
+      )
       .then((r) => ({
         ...r.data,
         user: normalizeUser(r.data.user),
@@ -1074,7 +1102,11 @@ export const authApi = {
 
   register: (payload: RegisterPayload) =>
     api
-      .post<{ user: UserPayload; tokens: AuthTokens }>('/auth/register', payload)
+      .post<{ user: UserPayload; tokens: AuthTokens }>(
+        '/auth/register',
+        payload,
+        { skipAuthRedirect: true },
+      )
       .then((r) => ({
         ...r.data,
         user: normalizeUser(r.data.user),
@@ -1083,11 +1115,18 @@ export const authApi = {
   logout: () => api.post('/auth/logout').then((r) => r.data),
 
   refreshToken: (refreshToken: string) =>
-    api.post<AuthTokens>('/auth/refresh', { refreshToken }).then((r) => r.data),
+    api
+      .post<AuthTokens>(
+        '/auth/refresh',
+        { refreshToken },
+        { skipAuthRedirect: true },
+      )
+      .then((r) => r.data),
 
   me: (accessToken?: string) =>
     api
       .get<UserPayload>('/auth/me', {
+        skipAuthRedirect: Boolean(accessToken),
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
       })
       .then((r) => normalizeUser(r.data)),
