@@ -1,6 +1,7 @@
 import { sessionsRepository } from '../../db/repositories';
 import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/repositories';
 import { NotFoundError, ForbiddenError } from '../../lib/errors';
+import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue';
 import type { CreateSessionBody } from './sessions.schema';
 
 // ─── Schema types ─────────────────────────────────────────────────────────────
@@ -133,7 +134,7 @@ export async function createSession(
     status: 'requested',
   });
 
-  await sessionsRepository.enqueueJob('provision_sandbox', {
+  await enqueueProvisionSandbox({
     sandboxInstanceId: sandbox.id,
     learningSessionId: session.id,
     schemaTemplateId: lessonVersion.schemaTemplateId ?? null,
@@ -226,6 +227,12 @@ export async function endSession(
   const updated = await sessionsRepository.endSession(sessionId);
 
   await sessionsRepository.expireSandboxBySessionId(sessionId);
+
+  // Get sandbox id to enqueue cleanup
+  const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
+  if (sandbox) {
+    await enqueueDestroySandbox({ sandboxInstanceId: sandbox.id, learningSessionId: sessionId });
+  }
 
   return {
     id: updated?.id ?? session.id,

@@ -11,12 +11,17 @@ vi.mock('../../../db/repositories', () => ({
     getSandboxBySessionId: vi.fn(),
     endSession: vi.fn(),
     expireSandboxBySessionId: vi.fn(),
-    enqueueJob: vi.fn(),
     updateActivity: vi.fn(),
   },
 }));
 
+vi.mock('../../../lib/queue', () => ({
+  enqueueProvisionSandbox: vi.fn(),
+  enqueueDestroySandbox: vi.fn(),
+}));
+
 import { sessionsRepository } from '../../../db/repositories';
+import * as queue from '../../../lib/queue';
 import { createSession, getSession, endSession, listUserSessions } from '../sessions.service';
 import { NotFoundError, ForbiddenError } from '../../../lib/errors';
 import type { SessionRow, SandboxRow } from '../../../db/repositories';
@@ -104,7 +109,7 @@ describe('createSession()', () => {
     vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(makeLessonVersion());
     vi.mocked(sessionsRepository.createSession).mockResolvedValue(makeSession());
     vi.mocked(sessionsRepository.createSandbox).mockResolvedValue(makeSandbox());
-    vi.mocked(sessionsRepository.enqueueJob).mockResolvedValue(undefined);
+    vi.mocked(queue.enqueueProvisionSandbox).mockResolvedValue(undefined);
 
     const result = await createSession('user-1', body);
     expect(result.session.userId).toBe('user-1');
@@ -123,7 +128,7 @@ describe('createSession()', () => {
     );
     vi.mocked(sessionsRepository.createSession).mockResolvedValue(makeSession());
     vi.mocked(sessionsRepository.createSandbox).mockResolvedValue(makeSandbox());
-    vi.mocked(sessionsRepository.enqueueJob).mockResolvedValue(undefined);
+    vi.mocked(queue.enqueueProvisionSandbox).mockResolvedValue(undefined);
 
     await createSession('user-1', body);
 
@@ -177,6 +182,8 @@ describe('endSession()', () => {
       endedAt: new Date(),
     });
     vi.mocked(sessionsRepository.expireSandboxBySessionId).mockResolvedValue(undefined);
+    vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(makeSandbox({ id: 'sandbox-1' }));
+    vi.mocked(queue.enqueueDestroySandbox).mockResolvedValue(undefined);
 
     const result = await endSession('session-1', 'user-1', false);
     expect(result.status).toBe('ended');

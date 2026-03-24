@@ -150,13 +150,6 @@ export class SessionsRepository {
     return row?.schemaTemplate ?? null;
   }
 
-  async enqueueJob(type: string, payload: Record<string, unknown>): Promise<void> {
-    await this.db.insert(schema.systemJobs).values({
-      type,
-      status: 'pending',
-      payload,
-    });
-  }
 }
 
 export const sessionsRepository = new SessionsRepository();

@@ -1,5 +1,6 @@
 import { sandboxesRepository } from '../../db/repositories';
 import { NotFoundError, ForbiddenError } from '../../lib/errors';
+import { enqueueResetSandbox } from '../../lib/queue';
 import type { GetSandboxResult, ResetSandboxResult } from './sandboxes.types';
 
 export async function getSandbox(
@@ -55,7 +56,7 @@ export async function resetSandbox(
 
   await sandboxesRepository.setResetting(sandbox.id);
 
-  await sandboxesRepository.enqueueJob('reset_sandbox', {
+  await enqueueResetSandbox({
     sandboxInstanceId: sandbox.id,
     learningSessionId: sessionId,
   });

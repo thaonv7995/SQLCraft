@@ -114,13 +114,6 @@ export class QueriesRepository {
       .where(eq(schema.learningSessions.id, sessionId));
   }
 
-  async enqueueJob(type: string, payload: Record<string, unknown>): Promise<void> {
-    await this.db.insert(schema.systemJobs).values({
-      type,
-      status: 'pending',
-      payload,
-    });
-  }
 }
 
 export const queriesRepository = new QueriesRepository();

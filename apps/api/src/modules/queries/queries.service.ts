@@ -2,6 +2,7 @@ import type { QueryExecutionRow } from '../../db/repositories';
 import { queriesRepository } from '../../db/repositories';
 import { NotFoundError, ForbiddenError, SessionNotReadyError } from '../../lib/errors';
 import { validateSql } from '../../services/query-executor';
+import { enqueueExecuteQuery } from '../../lib/queue';
 import { ApiCode } from '@sqlcraft/types';
 import type { SubmitQueryBody, QueryHistoryQuerystring } from './queries.schema';
 import type {
@@ -148,7 +149,7 @@ export async function submitQuery(
 
   await queriesRepository.updateSessionActivity(body.learningSessionId);
 
-  await queriesRepository.enqueueJob('execute_query', {
+  await enqueueExecuteQuery({
     queryExecutionId: execution.id,
     sandboxInstanceId: sandbox.id,
     sql: body.sql,

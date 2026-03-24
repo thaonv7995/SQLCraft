@@ -123,6 +123,8 @@ services:
       REDIS_URL: redis://redis:6379
       SANDBOX_DB_HOST: sandbox-postgres
       SANDBOX_DB_PORT: 5432
+      SANDBOX_DB_USER: sandbox
+      SANDBOX_DB_PASSWORD: sandbox
     volumes:
       - ./services/worker:/app/services/worker
       - ./packages:/app/packages

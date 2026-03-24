@@ -2,6 +2,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
 import { NotFoundError } from '../../lib/errors';
+import { enqueueProvisionSandbox } from '../../lib/queue';
 import type {
   CreateDatabaseSessionBody,
   ListDatabasesQuery,
@@ -379,7 +380,7 @@ export async function createDatabaseSession(
     status: 'requested',
   });
 
-  await sessionsRepository.enqueueJob('provision_sandbox', {
+  await enqueueProvisionSandbox({
     sandboxInstanceId: sandbox.id,
     learningSessionId: session.id,
     schemaTemplateId: database.schemaTemplateId,
