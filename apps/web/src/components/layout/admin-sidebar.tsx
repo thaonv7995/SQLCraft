@@ -69,7 +69,7 @@ export function AdminSidebar() {
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-sm',
                   active
-                    ? 'text-on-surface bg-surface-container-highest border-r-2 border-on-surface font-semibold'
+                    ? 'text-on-surface bg-surface-container-highest border-l-2 border-on-surface font-semibold'
                     : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50'
                 )}
               >

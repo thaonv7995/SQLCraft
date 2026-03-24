@@ -21,6 +21,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
+  if (!user) return false;
+  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+}
+
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const mounted = useMounted();
@@ -34,12 +39,12 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
 
     if (!isAuthenticated()) {
       router.replace('/login');
-    } else if (user && user.role !== 'admin') {
+    } else if (user && !isAdminUser(user)) {
       router.replace('/dashboard');
     }
   }, [isAuthenticated, mounted, user, router]);
 
-  if (!mounted || !isAuthenticated() || user?.role !== 'admin') return null;
+  if (!mounted || !isAuthenticated() || !isAdminUser(user)) return null;
 
   return <>{children}</>;
 }

@@ -31,7 +31,7 @@ export interface UserProfile extends UserPublic {
 }
 
 export interface AuthResult {
-  user: UserPublic;
+  user: UserPublic & { roles: string[] };
   tokens: AuthTokens;
 }
 

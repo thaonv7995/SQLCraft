@@ -2,6 +2,8 @@ import { eq, and, desc } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
+export type SchemaTemplateRow = InferSelectModel<typeof schema.schemaTemplates>;
+
 export type SessionRow = InferSelectModel<typeof schema.learningSessions>;
 export type SandboxRow = InferSelectModel<typeof schema.sandboxInstances>;
 export type InsertSession = InferInsertModel<typeof schema.learningSessions>;
@@ -129,6 +131,23 @@ export class SessionsRepository {
       .update(schema.sandboxInstances)
       .set({ status: 'expiring', updatedAt: new Date() })
       .where(eq(schema.sandboxInstances.learningSessionId, sessionId));
+  }
+
+  async getSchemaTemplateBySessionId(sessionId: string): Promise<SchemaTemplateRow | null> {
+    const [row] = await this.db
+      .select({ schemaTemplate: schema.schemaTemplates })
+      .from(schema.learningSessions)
+      .innerJoin(
+        schema.lessonVersions,
+        eq(schema.lessonVersions.id, schema.learningSessions.lessonVersionId),
+      )
+      .innerJoin(
+        schema.schemaTemplates,
+        eq(schema.schemaTemplates.id, schema.lessonVersions.schemaTemplateId),
+      )
+      .where(eq(schema.learningSessions.id, sessionId))
+      .limit(1);
+    return row?.schemaTemplate ?? null;
   }
 
   async enqueueJob(type: string, payload: Record<string, unknown>): Promise<void> {

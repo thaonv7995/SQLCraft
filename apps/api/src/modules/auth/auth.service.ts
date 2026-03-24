@@ -93,6 +93,7 @@ export async function registerUser(
       avatarUrl: newUser.avatarUrl,
       status: newUser.status,
       createdAt: newUser.createdAt,
+      roles,
     },
     tokens,
   };
@@ -133,6 +134,7 @@ export async function loginUser(
       avatarUrl,
       status: user.status,
       createdAt: user.createdAt,
+      roles,
     },
     tokens,
   };

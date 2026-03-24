@@ -22,9 +22,12 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 
 ### 3. Phòng Lab SQL Cơ Bản (Basic SQL Editor)
 - [x] Trình soạn thảo SQL tích hợp (dùng CodeMirror) có syntax highlighting và tự động gợi ý mã (SQL autocompletion).
-- [x] Chạy lệnh SQL trực tiếp trên trình duyệt.
-- [x] Hiển thị kết quả dưới dạng bảng (Data Table) và các thông báo lỗi cơ bản (Syntax Error).
-- [x] Giao diện xem Schema/Database để biết cấu trúc bảng hiện tại.
+- [x] Chạy lệnh SQL và nhận kết quả đồng bộ từ phía người dùng (frontend tự poll kết quả sau khi backend xử lý async qua job queue).
+- [x] Hiển thị kết quả dưới dạng bảng (Data Table) với row count, truncation indicator rõ ràng khi kết quả bị giới hạn, và nút copy kết quả/query ra clipboard.
+- [x] Hiển thị lỗi rõ ràng: phân biệt lỗi validation (SQL bị chặn) và lỗi runtime (lỗi PostgreSQL trả về).
+- [x] Giao diện xem Schema/Database lấy dữ liệu thực từ sandbox đang chạy (không dùng mock), hiển thị bảng, cột, kiểu dữ liệu, primary key, foreign key.
+- [x] Quản lý vòng đời phiên lab (Session Lifecycle): hiển thị rõ trạng thái provisioning / active / expired / failed, có nút "Start new session" khi phiên hết hạn hoặc lỗi.
+- [x] Nút Format SQL (làm đẹp code) và Clear Editor (xóa sạch editor về trạng thái ban đầu).
 
 ### 4. Hệ thống Thử Thách & Đánh Giá (Challenge Engine)
 - [x] Là tính năng tùy chọn (không bắt buộc): Người dùng có thể tự do chọn các Thử thách (Challenge) để thực hành nâng cao và kiếm điểm.
@@ -59,6 +62,7 @@ Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCr
 - [x] Hỗ trợ lưu lịch sử truy vấn (Query History) để dễ dàng nhìn lại quá trình làm bài.
 - [ ] Tính năng chạy so sánh trực tiếp song song (Side-by-side) 2 câu truy vấn.
 - [ ] Cấp quyền an toàn cho học viên tự tạo (`CREATE INDEX`) và xóa (`DROP INDEX`) để đo lường mức độ cải thiện tốc độ trực tiếp trên dữ liệu lớn.
+- [ ] **Schema Diff View**: Hiển thị những thay đổi học viên đã thực hiện trong sandbox so với schema gốc (base schema từ template), bao gồm: indexes thêm/xóa, partitions, views, materialized views, stored procedures/functions. Kèm nút **"Reset sandbox về base"** để hoàn tác toàn bộ thay đổi và bắt đầu lại.
 - [ ] Đánh giá bài làm bằng "Performance Score" thay vì chỉ đánh giá đúng/sai.
 
 ### 9. Công Cụ Đóng Góp Nội Dung (Contribution Tools)
