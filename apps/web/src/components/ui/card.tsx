@@ -111,30 +111,39 @@ export function StatCard({
   ...props
 }: StatCardProps) {
   return (
-    <Card className={cn('p-5', className)} {...props}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-2">
+    <Card className={cn('flex h-full min-h-[7.25rem] flex-col p-4 sm:p-5', className)} {...props}>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Label + icon share one row so the icon centers to the label band (not the whole card). */}
+        <div className="mb-2 flex min-h-[2.5rem] items-center justify-between gap-3 sm:min-h-[2.625rem]">
+          <p
+            className="min-w-0 flex-1 text-[11px] font-medium uppercase leading-snug tracking-wide text-on-surface-variant line-clamp-2 sm:text-xs sm:leading-snug"
+            title={label}
+          >
             {label}
           </p>
-          <p className={cn('text-2xl font-headline font-bold', accentMap[accent])}>
-            {value}
-          </p>
-          {delta && (
-            <p
+          {icon && (
+            <div
               className={cn(
-                'text-xs mt-1',
-                deltaPositive ? 'text-secondary' : 'text-error'
+                'flex h-8 w-8 shrink-0 items-center justify-center text-[20px] leading-none opacity-85 sm:h-9 sm:w-9 sm:text-[22px]',
+                accentMap[accent]
               )}
+              aria-hidden
             >
-              {deltaPositive ? '+' : ''}{delta}
-            </p>
+              {icon}
+            </div>
           )}
         </div>
-        {icon && (
-          <div className={cn('text-2xl opacity-60 shrink-0', accentMap[accent])}>
-            {icon}
-          </div>
+        <p className="text-2xl font-headline font-bold tabular-nums text-on-surface">{value}</p>
+        {delta && (
+          <p
+            className={cn(
+              'mt-1 text-xs',
+              deltaPositive ? 'text-secondary' : 'text-error'
+            )}
+          >
+            {deltaPositive ? '+' : ''}
+            {delta}
+          </p>
         )}
       </div>
     </Card>

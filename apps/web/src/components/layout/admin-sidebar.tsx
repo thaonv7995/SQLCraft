@@ -37,24 +37,22 @@ export function AdminSidebar() {
     exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <aside className="flex flex-col w-64 h-full bg-[#1c1b1b] border-r border-outline-variant/10">
+    <aside className="flex flex-col w-64 h-full bg-surface-container-low border-r border-outline-variant/10">
       {/* Brand */}
       <div className="mb-6 px-6 pt-6 flex items-center gap-3 shrink-0">
-        <div className="w-8 h-8 bg-primary rounded-sm flex items-center justify-center shrink-0">
+        <div className="w-8 h-8 bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center shrink-0">
           <span
-            className="material-symbols-outlined text-on-primary text-lg"
+            className="material-symbols-outlined text-on-surface text-lg"
             style={{ fontVariationSettings: "'FILL' 1" }}
           >
             architecture
           </span>
         </div>
         <div>
-          <h1 className="text-lg font-bold tracking-tighter text-[#bac3ff] font-headline leading-none">
-            Admin Engine
+          <h1 className="text-lg font-semibold tracking-tight text-on-surface font-headline leading-none">
+            Admin
           </h1>
-          <p className="text-[10px] text-outline uppercase tracking-widest opacity-70 mt-0.5">
-            Unified Infrastructure
-          </p>
+          <p className="text-[10px] text-on-surface-variant mt-0.5">Console</p>
         </div>
       </div>
 
@@ -71,8 +69,8 @@ export function AdminSidebar() {
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-sm',
                   active
-                    ? 'text-[#bac3ff] bg-[#353534] border-r-2 border-[#bac3ff] font-bold'
-                    : 'text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50'
+                    ? 'text-on-surface bg-surface-container-highest border-r-2 border-on-surface font-semibold'
+                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50'
                 )}
               >
                 <span
@@ -98,14 +96,14 @@ export function AdminSidebar() {
                         className={cn(
                           'flex items-center gap-3 px-3 py-1.5 rounded text-xs transition-colors duration-200',
                           childIsActive
-                            ? 'text-primary font-bold'
-                            : 'text-[#8f909e] hover:text-[#e5e2e1]'
+                            ? 'text-on-surface font-semibold'
+                            : 'text-on-surface-variant hover:text-on-surface'
                         )}
                       >
                         <span
                           className={cn(
                             'w-1.5 h-1.5 rounded-full',
-                            childIsActive ? 'bg-primary' : 'bg-[#8f909e]'
+                            childIsActive ? 'bg-on-surface' : 'bg-on-surface-variant'
                           )}
                         />
                         {child.label}
@@ -123,7 +121,7 @@ export function AdminSidebar() {
       <div className="mt-auto space-y-1 border-t border-outline-variant/10 pt-6 px-4 pb-6 shrink-0">
         <button
           onClick={() => toast.success('Deployment queued')}
-          className="w-full mb-4 bg-primary-container text-on-primary-container py-2.5 px-4 rounded font-bold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.99] transition-all"
+          className="w-full mb-4 border border-outline-variant bg-primary text-on-primary py-2.5 px-4 rounded font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.99] transition-all"
         >
           <span className="material-symbols-outlined text-sm">rocket_launch</span>
           Deploy Update
@@ -131,7 +129,7 @@ export function AdminSidebar() {
 
         <Link
           href="/admin/settings"
-          className="flex items-center gap-3 px-3 py-2 rounded text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 transition-colors text-sm"
+          className="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50 transition-colors text-sm"
         >
           <span className="material-symbols-outlined">settings</span>
           Settings
@@ -139,7 +137,7 @@ export function AdminSidebar() {
 
         <Link
           href="/admin/support"
-          className="flex items-center gap-3 px-3 py-2 rounded text-[#8f909e] hover:text-[#e5e2e1] hover:bg-[#353534]/50 transition-colors text-sm"
+          className="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50 transition-colors text-sm"
         >
           <span className="material-symbols-outlined">help_outline</span>
           Support

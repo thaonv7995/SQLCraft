@@ -1,24 +1,55 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import type { User } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { generateInitials } from '@/lib/utils';
 
-const NAV_LINKS = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/explore', label: 'Databases' },
-  { href: '/lab', label: 'Workspace' },
-  { href: '/docs', label: 'Documentation' },
-];
+function isAdminUser(user: User): boolean {
+  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+}
 
-function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl?: string | null }) {
+function canSeeContributorLink(user: User): boolean {
+  return (
+    user.role === 'contributor' ||
+    user.role === 'admin' ||
+    (user.roles?.includes('contributor') ?? false) ||
+    (user.roles?.includes('admin') ?? false)
+  );
+}
+
+function buildUserMenuItems(user: User) {
+  const items: { href: string; label: string; icon: string }[] = [
+    { href: '/profile', label: 'Profile', icon: 'person' },
+    { href: '/settings', label: 'Settings', icon: 'settings' },
+    { href: '/docs', label: 'Documentation', icon: 'menu_book' },
+    { href: '/history', label: 'Query History', icon: 'history' },
+  ];
+  if (canSeeContributorLink(user)) {
+    items.push({ href: '/contributor', label: 'Contributor', icon: 'code' });
+  }
+  if (isAdminUser(user)) {
+    items.push({ href: '/admin', label: 'Admin Panel', icon: 'admin_panel_settings' });
+  }
+  return items;
+}
+
+function UserAvatar({
+  displayName,
+  avatarUrl,
+  user,
+}: {
+  displayName: string;
+  avatarUrl?: string | null;
+  user: User;
+}) {
   const [open, setOpen] = useState(false);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const initials = generateInitials(displayName);
+  const menuItems = buildUserMenuItems(user);
 
   return (
     <div className="relative">
@@ -34,7 +65,7 @@ function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl
             className="w-7 h-7 rounded-full object-cover"
           />
         ) : (
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-[#4453a7] flex items-center justify-center text-[#00105b] text-xs font-bold font-headline">
+          <div className="w-7 h-7 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-on-surface text-xs font-bold font-headline">
             {initials}
           </div>
         )}
@@ -55,13 +86,7 @@ function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl
               <p className="text-sm font-medium text-on-surface truncate">{displayName}</p>
             </div>
             <nav className="py-1">
-              {[
-                { href: '/profile', label: 'Profile', icon: 'person' },
-                { href: '/settings', label: 'Settings', icon: 'settings' },
-                { href: '/history', label: 'Query History', icon: 'history' },
-                { href: '/contributor', label: 'Contributor', icon: 'code' },
-                { href: '/admin', label: 'Admin Panel', icon: 'admin_panel_settings' },
-              ].map((item) => (
+              {menuItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -93,52 +118,29 @@ function UserAvatar({ displayName, avatarUrl }: { displayName: string; avatarUrl
 }
 
 export function Navbar() {
-  const pathname = usePathname();
   const router = useRouter();
   const { user, isAuthenticated } = useAuthStore();
   const authed = isAuthenticated();
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 h-14 bg-surface flex items-center px-4 lg:px-6"
+      className="fixed top-0 left-0 right-0 z-50 flex h-14 w-full items-center justify-between gap-4 border-b border-outline-variant/20 bg-surface-container-low px-3 sm:px-4 lg:px-6"
+      aria-label="Primary"
     >
-      {/* Brand */}
+      {/* Brand — điều hướng chi tiết ở sidebar / bottom nav */}
       <Link
         href={authed ? '/dashboard' : '/'}
-        className="flex items-center gap-2.5 mr-8 shrink-0"
+        className="flex min-w-0 shrink-0 items-center gap-2.5"
       >
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-[#4453a7] flex items-center justify-center">
-          <span className="material-symbols-outlined text-sm text-[#00105b]">database</span>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-outline-variant/40 bg-surface-container-high">
+          <span className="material-symbols-outlined text-sm text-on-surface">database</span>
         </div>
-        <span className="font-headline font-bold text-sm uppercase tracking-widest text-on-surface hidden sm:block">
-          The Architectural Lab
+        <span className="hidden font-headline text-sm font-semibold tracking-tight text-on-surface sm:block">
+          SQLCraft
         </span>
       </Link>
 
-      {/* Nav links */}
-      {authed && (
-        <div className="hidden md:flex items-center gap-1 flex-1">
-          {NAV_LINKS.map((link) => {
-            const active = pathname.startsWith(link.href);
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn(
-                  'px-3 py-1.5 rounded-lg text-sm font-medium font-body transition-colors',
-                  active
-                    ? 'text-primary bg-primary/10'
-                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-                )}
-              >
-                {link.label}
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 ml-auto">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         {authed ? (
           <>
             <Button
@@ -146,7 +148,7 @@ export function Navbar() {
               size="sm"
               leftIcon={<span className="material-symbols-outlined text-sm">play_arrow</span>}
               onClick={() => router.push('/lab')}
-              className="hidden sm:inline-flex"
+              className="hidden md:inline-flex"
             >
               Execute Query
             </Button>
@@ -157,11 +159,12 @@ export function Navbar() {
               aria-label="Notifications"
             >
               <span className="material-symbols-outlined text-lg">notifications</span>
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-primary" />
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-on-surface-variant" />
             </button>
 
             {user && (
               <UserAvatar
+                user={user}
                 displayName={user.displayName ?? user.username}
                 avatarUrl={user.avatarUrl}
               />

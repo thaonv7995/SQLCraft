@@ -12,6 +12,7 @@ import {
   submitQuery,
   getQueryExecution,
   getQueryHistory,
+  getGlobalQueryHistory,
   getSandboxStatus,
 } from './queries.service';
 
@@ -46,6 +47,15 @@ export async function submitQueryHandler(
   }
 
   reply.status(201).send(created(outcome.data, MESSAGES.QUERY_SUBMITTED));
+}
+
+export async function getGlobalQueryHistoryHandler(
+  request: FastifyRequest<{ Querystring: QueryHistoryQuerystring }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const result = await getGlobalQueryHistory(userId, request.query);
+  reply.send(success(result, MESSAGES.QUERY_HISTORY_RETRIEVED));
 }
 
 export async function getQueryHandler(

@@ -16,7 +16,10 @@ export function formatRows(count: number): string {
   return count.toString();
 }
 
-export function truncateSql(sql: string, maxLen = 80): string {
+export function truncateSql(sql: string | null | undefined, maxLen = 80): string {
+  if (sql == null || typeof sql !== 'string') {
+    return '';
+  }
   const cleaned = sql.trim().replace(/\s+/g, ' ');
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '...' : cleaned;
 }
@@ -31,8 +34,14 @@ export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOpt
   }).format(d);
 }
 
-export function formatRelativeTime(date: string | Date): string {
+export function formatRelativeTime(date: string | Date | null | undefined): string {
+  if (date == null) {
+    return '—';
+  }
   const d = typeof date === 'string' ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) {
+    return '—';
+  }
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const diffSeconds = Math.floor(diffMs / 1000);
@@ -89,7 +98,10 @@ export function generateInitials(name: string): string {
     .toUpperCase();
 }
 
-export function classifyQueryType(sql: string): string {
+export function classifyQueryType(sql: string | null | undefined): string {
+  if (sql == null || typeof sql !== 'string') {
+    return 'QUERY';
+  }
   const trimmed = sql.trim().toUpperCase();
   if (trimmed.startsWith('SELECT')) return 'SELECT';
   if (trimmed.startsWith('INSERT')) return 'INSERT';

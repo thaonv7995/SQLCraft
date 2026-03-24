@@ -1,4 +1,4 @@
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, count } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -73,6 +73,14 @@ export class QueriesRepository {
       .orderBy(desc(schema.queryExecutions.submittedAt))
       .limit(limit)
       .offset(offset);
+  }
+
+  async countByUser(userId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ count: count() })
+      .from(schema.queryExecutions)
+      .where(eq(schema.queryExecutions.userId, userId));
+    return Number(row?.count ?? 0);
   }
 
   async listByUser(

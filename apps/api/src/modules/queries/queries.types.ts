@@ -11,11 +11,17 @@ export interface GetQueryResult extends QueryExecutionRow {
   plans: QueryExecutionPlanRow[];
 }
 
-export interface QueryHistoryItem
-  extends Pick<
-    QueryExecutionRow,
-    'id' | 'sqlText' | 'status' | 'durationMs' | 'rowsReturned' | 'errorMessage' | 'submittedAt'
-  > {}
+/** List row shape aligned with web `QueryExecution` (sql, sessionId, UI status). */
+export interface QueryHistoryItem {
+  id: string;
+  sessionId: string;
+  sql: string;
+  status: 'pending' | 'running' | 'success' | 'error';
+  durationMs?: number;
+  rowCount?: number;
+  errorMessage?: string;
+  createdAt: string;
+}
 
 export interface QueryHistoryResult {
   items: QueryHistoryItem[];
@@ -23,6 +29,14 @@ export interface QueryHistoryResult {
     page: number;
     limit: number;
   };
+}
+
+export interface GlobalQueryHistoryResult {
+  items: QueryHistoryItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 export interface BlockedQueryResult {

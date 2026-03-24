@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
-import { Toaster } from 'react-hot-toast';
+import { AppToaster } from '@/components/app-toaster';
 import { Providers } from '@/components/providers';
 import './globals.css';
 
@@ -49,32 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-surface text-on-surface font-body antialiased">
         <Providers>
           {children}
-          <Toaster
-            position="bottom-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: '#2a2a2a',
-                color: '#e5e2e1',
-                border: '1px solid #454652',
-                borderRadius: '8px',
-                fontFamily: 'var(--font-inter), sans-serif',
-                fontSize: '14px',
-              },
-              success: {
-                iconTheme: {
-                  primary: '#66d9cc',
-                  secondary: '#0e0e0e',
-                },
-              },
-              error: {
-                iconTheme: {
-                  primary: '#ffb4ab',
-                  secondary: '#0e0e0e',
-                },
-              },
-            }}
-          />
+          <AppToaster />
         </Providers>
       </body>
     </html>

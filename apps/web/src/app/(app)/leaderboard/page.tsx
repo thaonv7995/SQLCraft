@@ -46,7 +46,7 @@ function RankRow({ entry, isMe = false }: { entry: LeaderboardEntry; isMe?: bool
             alt={entry.displayName}
             className={cn(
               'w-8 h-8 rounded-full object-cover shrink-0',
-              isMe && 'ring-1 ring-primary/60'
+              isMe && 'ring-1 ring-outline'
             )}
           />
         ) : (
@@ -54,7 +54,7 @@ function RankRow({ entry, isMe = false }: { entry: LeaderboardEntry; isMe?: bool
             className={cn(
               'w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold font-headline shrink-0',
               isMe
-                ? 'bg-gradient-to-br from-primary to-[#4453a7] text-[#00105b] ring-1 ring-primary/60'
+                ? 'bg-surface-container-highest text-on-surface ring-1 ring-outline'
                 : 'bg-surface-container-highest text-on-surface-variant'
             )}
           >
@@ -99,7 +99,7 @@ export default function LeaderboardPage() {
   const top5 = entries.slice(0, 5);
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="page-shell page-stack">
       {/* Page header */}
       <div className="mb-10">
         <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface mb-2">
@@ -116,7 +116,7 @@ export default function LeaderboardPage() {
         <div className="xl:col-span-8 space-y-5">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-headline text-xl font-medium flex items-center gap-2">
-              <span className="w-1.5 h-6 bg-tertiary rounded-full shrink-0" />
+              <span className="w-1.5 h-6 bg-on-surface-variant rounded-full shrink-0" />
               Active Missions
             </h2>
             <div className="flex gap-2">

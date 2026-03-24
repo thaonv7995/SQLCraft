@@ -146,8 +146,8 @@ export default function ContributorPage() {
 
   return (
     <>
-      <div className="p-8 max-w-7xl mx-auto space-y-8">
-        <section className="rounded-[28px] border border-outline-variant/10 bg-[radial-gradient(circle_at_top_left,_rgba(68,216,241,0.12),_transparent_32%),linear-gradient(180deg,_rgba(255,255,255,0.03),_rgba(255,255,255,0))] px-8 py-8">
+      <div className="page-shell page-stack">
+        <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-8 py-8">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
             <div className="border-l-2 border-primary pl-5">
               <p className="text-xs uppercase tracking-[0.24em] text-outline">

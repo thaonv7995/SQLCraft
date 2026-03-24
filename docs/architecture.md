@@ -20,7 +20,7 @@ The V1 platform uses a **modular service-oriented architecture**:
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| Frontend | Next.js 14 (App Router) | SSR + RSC, strong typing, file-based routing |
+| Frontend | Next.js 16 (App Router) | SSR + RSC, strong typing, file-based routing |
 | Backend API | **Fastify v4** + TypeScript | 3× throughput vs Express/NestJS, low memory, plugin-based, built-in Swagger |
 | ORM | Drizzle ORM | Schema-as-code, types inferred from schema, lightweight migrations |
 | Queue | BullMQ (Redis-backed) | Durable job queue with retry, backoff, and deduplication |

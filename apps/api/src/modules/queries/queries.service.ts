@@ -1,3 +1,4 @@
+import type { QueryExecutionRow } from '../../db/repositories';
 import { queriesRepository } from '../../db/repositories';
 import { NotFoundError, ForbiddenError, SessionNotReadyError } from '../../lib/errors';
 import { validateSql } from '../../services/query-executor';
@@ -7,6 +8,8 @@ import type {
   SubmitQueryResult,
   GetQueryResult,
   QueryHistoryResult,
+  GlobalQueryHistoryResult,
+  QueryHistoryItem,
   BlockedQueryResult,
 } from './queries.types';
 
@@ -23,6 +26,72 @@ export interface BlockedQueryServiceResult {
 }
 
 export type SubmitQueryOutcome = SubmitQueryServiceResult | BlockedQueryServiceResult;
+
+function mapDbStatusToUi(
+  s: QueryExecutionRow['status'],
+): QueryHistoryItem['status'] {
+  switch (s) {
+    case 'succeeded':
+      return 'success';
+    case 'failed':
+    case 'timed_out':
+    case 'blocked':
+      return 'error';
+    case 'running':
+      return 'running';
+    case 'accepted':
+    default:
+      return 'pending';
+  }
+}
+
+function toListItem(
+  row: Pick<
+    QueryExecutionRow,
+    | 'id'
+    | 'learningSessionId'
+    | 'sqlText'
+    | 'status'
+    | 'durationMs'
+    | 'rowsReturned'
+    | 'errorMessage'
+    | 'submittedAt'
+  >,
+  sessionIdFallback?: string,
+): QueryHistoryItem {
+  const sessionId = row.learningSessionId ?? sessionIdFallback ?? '';
+  const submitted = row.submittedAt;
+  const createdAt =
+    submitted instanceof Date ? submitted.toISOString() : submitted ? String(submitted) : new Date().toISOString();
+
+  return {
+    id: row.id,
+    sessionId,
+    sql: row.sqlText,
+    status: mapDbStatusToUi(row.status),
+    durationMs: row.durationMs ?? undefined,
+    rowCount: row.rowsReturned ?? undefined,
+    errorMessage: row.errorMessage ?? undefined,
+    createdAt,
+  };
+}
+
+export async function getGlobalQueryHistory(
+  userId: string,
+  query: QueryHistoryQuerystring,
+): Promise<GlobalQueryHistoryResult> {
+  const total = await queriesRepository.countByUser(userId);
+  const rows = await queriesRepository.listByUser(userId, query.page, query.limit);
+  const totalPages = Math.max(1, Math.ceil(total / query.limit));
+  const items = rows.map((r) => toListItem(r));
+  return {
+    items,
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages,
+  };
+}
 
 export async function submitQuery(
   userId: string,
@@ -134,7 +203,8 @@ export async function getQueryHistory(
     throw new ForbiddenError('Access denied to this session');
   }
 
-  const items = await queriesRepository.listBySession(sessionId, query.page, query.limit);
+  const rows = await queriesRepository.listBySession(sessionId, query.page, query.limit);
+  const items = rows.map((r) => toListItem({ ...r, learningSessionId: sessionId }));
 
   return {
     items,

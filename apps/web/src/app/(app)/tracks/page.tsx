@@ -116,7 +116,7 @@ export default function TracksPage() {
       : tracks.filter((t) => t.difficulty === filter);
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="page-shell page-stack">
       {/* Page header */}
       <div className="mb-10">
         <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface mb-2">
@@ -224,7 +224,7 @@ export default function TracksPage() {
                           </div>
                           <div className="w-32 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-gradient-to-r from-primary to-[#4453a7] rounded-full"
+                              className="h-full bg-on-surface-variant rounded-full"
                               style={{ width: `${progress}%` }}
                             />
                           </div>

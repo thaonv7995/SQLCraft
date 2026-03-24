@@ -170,6 +170,60 @@ export interface QueryExecution {
   createdAt: string;
 }
 
+function mapQueryExecutionStatus(raw: unknown): QueryExecution['status'] {
+  if (raw == null) return 'pending';
+  const s = String(raw).toLowerCase();
+  if (s === 'succeeded' || s === 'success' || s === 'completed') return 'success';
+  if (s === 'failed' || s === 'timed_out' || s === 'blocked' || s === 'error') return 'error';
+  if (s === 'running') return 'running';
+  if (s === 'pending') return 'pending';
+  return 'pending';
+}
+
+/** Normalize API rows that may use sqlText / learningSessionId / submittedAt. */
+function normalizeQueryExecutionItem(item: Record<string, unknown>): QueryExecution {
+  const sql =
+    (typeof item.sql === 'string' ? item.sql : null) ??
+    (typeof item.sqlText === 'string' ? item.sqlText : '') ??
+    '';
+  const sessionId =
+    (typeof item.sessionId === 'string' ? item.sessionId : null) ??
+    (typeof item.learningSessionId === 'string' ? item.learningSessionId : '') ??
+    '';
+  const createdAt =
+    (typeof item.createdAt === 'string' ? item.createdAt : null) ??
+    (typeof item.submittedAt === 'string' ? item.submittedAt : new Date().toISOString());
+  return {
+    id: String(item.id ?? ''),
+    sessionId,
+    sql,
+    status: mapQueryExecutionStatus(item.status),
+    durationMs: typeof item.durationMs === 'number' ? item.durationMs : undefined,
+    rowCount:
+      typeof item.rowCount === 'number'
+        ? item.rowCount
+        : typeof item.rowsReturned === 'number'
+          ? item.rowsReturned
+          : undefined,
+    errorMessage: typeof item.errorMessage === 'string' ? item.errorMessage : undefined,
+    result: item.result as QueryExecution['result'],
+    executionPlan: item.executionPlan as QueryExecution['executionPlan'],
+    createdAt,
+  };
+}
+
+function normalizeQueryHistoryPage(
+  data: PaginatedResponse<QueryExecution>
+): PaginatedResponse<QueryExecution> {
+  const items = Array.isArray(data.items) ? data.items : [];
+  return {
+    ...data,
+    items: items.map((row) =>
+      normalizeQueryExecutionItem(row as unknown as Record<string, unknown>)
+    ),
+  };
+}
+
 // ─── Admin ────────────────────────────────────────────────────────────────────
 
 export interface SystemMetrics {
@@ -338,8 +392,18 @@ api.interceptors.response.use(
     // Extract backend error message if available
     const message =
       axiosError.response?.data?.message ?? axiosError.message ?? 'An unexpected error occurred';
+    const status = axiosError.response?.status;
 
-    return Promise.reject(new Error(message));
+    const normalizedError = new Error(message) as Error & {
+      status?: number;
+      code?: string;
+      details?: unknown;
+    };
+    normalizedError.status = status;
+    normalizedError.code = axiosError.code;
+    normalizedError.details = axiosError.response?.data;
+
+    return Promise.reject(normalizedError);
   }
 );
 
@@ -448,12 +512,27 @@ export const queryApi = {
   format: (sql: string) =>
     api.post<{ sql: string }>('/query/format', { sql }).then((r) => r.data),
 
-  history: (sessionId?: string, params?: { page?: number; limit?: number }) =>
-    api
-      .get<PaginatedResponse<QueryExecution>>('/query/history', {
-        params: { sessionId, ...params },
-      })
-      .then((r) => r.data),
+  history: async (sessionId?: string, params?: { page?: number; limit?: number }) => {
+    const pagination = { ...params };
+
+    const primaryPath = sessionId
+      ? `/learning-sessions/${sessionId}/query-executions`
+      : '/query-executions';
+    const legacyPath = '/query/history';
+
+    try {
+      const res = await api.get<PaginatedResponse<QueryExecution>>(primaryPath, {
+        params: pagination,
+      });
+      return normalizeQueryHistoryPage(res.data);
+    } catch (error) {
+      // Backward compatibility for older API servers.
+      const res = await api.get<PaginatedResponse<QueryExecution>>(legacyPath, {
+        params: { sessionId, ...pagination },
+      });
+      return normalizeQueryHistoryPage(res.data);
+    }
+  },
 };
 
 // ─── Users API ────────────────────────────────────────────────────────────────

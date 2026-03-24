@@ -47,42 +47,42 @@ const LOG_ENTRIES = [
 ];
 
 const SEVERITY_STYLES: Record<string, string> = {
-  info: 'bg-primary/10 text-primary',
-  warn: 'bg-tertiary/10 text-tertiary',
+  info: 'bg-surface-container-high text-on-surface-variant',
+  warn: 'bg-surface-container-high text-on-surface',
   error: 'bg-error/10 text-error',
 };
 
 export default function AdminSystemLogsPage() {
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-8">
+    <div className="page-shell-wide page-stack">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-outline">System Health</p>
-          <h1 className="mt-2 font-headline text-3xl font-bold text-on-surface">System Logs</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-on-surface-variant">
+          <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">System Health</p>
+          <h1 className="mt-2 page-title-lg">System Logs</h1>
+          <p className="page-lead mt-2 max-w-2xl">
             Audit trail for privileged actions, dataset operations, and infrastructure events.
             The observability design and SRS both require retained admin logs for publish,
             role, and runtime actions.
           </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
             <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Privileged</p>
             <p className="mt-2 text-xl font-semibold text-on-surface">42</p>
           </div>
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
             <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Warnings</p>
             <p className="mt-2 text-xl font-semibold text-tertiary">7</p>
           </div>
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
             <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Errors</p>
             <p className="mt-2 text-xl font-semibold text-error">2</p>
           </div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
+      <div className="section-card p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative max-w-md flex-1">
             <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-outline">
@@ -101,7 +101,7 @@ export default function AdminSystemLogsPage() {
                 key={filter}
                 className={`rounded-full px-3 py-1.5 text-xs font-medium ${
                   filter === 'All Events'
-                    ? 'bg-primary/10 text-primary'
+                    ? 'bg-surface-container-high text-on-surface'
                     : 'bg-surface text-on-surface-variant'
                 }`}
               >
@@ -112,9 +112,9 @@ export default function AdminSystemLogsPage() {
         </div>
       </div>
 
-      <div className="rounded-3xl border border-outline-variant/10 bg-[#151515] overflow-hidden">
+      <div className="overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-low">
         <div className="border-b border-outline-variant/10 px-5 py-4">
-          <h2 className="font-headline text-lg font-semibold text-on-surface">Console Output</h2>
+          <h2 className="page-section-title">Console Output</h2>
         </div>
         <div className="divide-y divide-outline-variant/10">
           {LOG_ENTRIES.map((entry) => (

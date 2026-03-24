@@ -163,15 +163,15 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
         ];
 
   return (
-    <div className="p-6 space-y-8 max-w-6xl mx-auto">
-      <div className="flex items-start justify-between gap-4">
+    <div className="page-shell-wide page-stack">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-headline text-2xl font-bold text-on-surface">{heading}</h1>
-          <p className="text-sm text-on-surface-variant mt-1">{description}</p>
+          <h1 className="page-title">{heading}</h1>
+          <p className="page-lead mt-1">{description}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs text-secondary">
-            <span className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse" />
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+            <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-pulse" />
             {statusLabel}
           </div>
         </div>
@@ -183,18 +183,20 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
             <Link
               key={card.href}
               href={card.href}
-              className="group rounded-2xl border border-outline-variant/10 bg-surface-container-low p-5 transition-all hover:border-primary/20 hover:bg-surface-container"
+              className="group rounded-xl border border-outline-variant/10 bg-surface-container-low p-5 transition-colors hover:border-outline-variant/30 hover:bg-surface-container"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors">
+                  <p className="text-sm font-semibold text-on-surface group-hover:text-on-surface transition-colors">
                     {card.label}
                   </p>
                   <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
                     {card.description}
                   </p>
                 </div>
-                <span className="material-symbols-outlined text-primary/80">{card.icon}</span>
+                <span className="material-symbols-outlined text-on-surface-variant group-hover:text-on-surface">
+                  {card.icon}
+                </span>
               </div>
             </Link>
           ))}
@@ -269,7 +271,7 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
           </div>
           <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-tertiary to-secondary rounded-full"
+              className="h-full bg-on-surface-variant rounded-full"
               style={{ width: metrics ? `${(metrics.activeSandboxes / 50) * 100}%` : '0%' }}
             />
           </div>

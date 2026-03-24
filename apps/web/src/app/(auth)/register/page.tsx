@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
+import { toastError } from '@/lib/toast-error';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { Button } from '@/components/ui/button';
@@ -65,24 +66,20 @@ export default function RegisterPage() {
       toast.success('Account created! Welcome to SQLCraft.');
       router.push('/dashboard');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Registration failed';
-      toast.error(message);
+      toastError('Registration failed', err);
     }
   };
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center p-4">
-      {/* Background gradient */}
-      <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(186,195,255,0.04)_0%,_transparent_60%)] pointer-events-none" />
-
       <div className="w-full max-w-sm relative">
         {/* Logo + Brand */}
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-[#4453a7] flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/20">
-            <span className="material-symbols-outlined text-2xl text-[#00105b]">database</span>
+          <div className="w-12 h-12 rounded-lg bg-surface-container-high border border-outline-variant flex items-center justify-center mx-auto mb-4">
+            <span className="material-symbols-outlined text-2xl text-on-surface">database</span>
           </div>
-          <h1 className="font-headline text-xl font-bold text-on-surface uppercase tracking-widest">
-            The Architectural Lab
+          <h1 className="font-headline text-xl font-semibold text-on-surface tracking-tight">
+            SQLCraft
           </h1>
           <p className="text-sm text-on-surface-variant mt-1">Create your account</p>
         </div>

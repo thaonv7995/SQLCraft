@@ -86,12 +86,12 @@ export default function AdminUsersPage() {
   const displayUsers: AdminUser[] = (data?.items as AdminUser[] | undefined) ?? [];
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="page-shell page-stack">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-headline text-2xl font-bold text-on-surface">User Management</h1>
-          <p className="text-sm text-on-surface-variant mt-1">
+          <h1 className="page-title">User Management</h1>
+          <p className="page-lead mt-1">
             {data?.total ?? 0} total users
           </p>
         </div>
@@ -158,7 +158,7 @@ export default function AdminUsersPage() {
                     {/* User cell */}
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/60 to-[#4453a7]/60 flex items-center justify-center text-xs font-bold font-headline text-[#00105b] shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-xs font-bold font-headline text-on-surface shrink-0">
                           {generateInitials(user.displayName ?? user.username)}
                         </div>
                         <div className="min-w-0">

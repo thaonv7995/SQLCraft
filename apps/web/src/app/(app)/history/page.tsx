@@ -217,7 +217,7 @@ export default function HistoryPage() {
   });
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="page-shell-narrow page-stack">
       {/* Page header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
         <div className="space-y-1.5">

@@ -23,12 +23,12 @@ export default function AdminContentPage() {
   const displayTracks = tracks?.items ?? [];
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl mx-auto">
+    <div className="page-shell-wide page-stack">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="font-headline text-2xl font-bold text-on-surface">Content Management</h1>
-          <p className="text-sm text-on-surface-variant mt-1">
+          <h1 className="page-title">Content Management</h1>
+          <p className="page-lead mt-1">
             Manage learning tracks and lessons.
           </p>
         </div>

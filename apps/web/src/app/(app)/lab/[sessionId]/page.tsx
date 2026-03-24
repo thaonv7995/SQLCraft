@@ -1,9 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLabStore } from '@/stores/lab';
-import { useExecuteQuery, useExplainQuery, useFormatSql, useSessionStatus } from '@/hooks/use-query-execution';
+import toast from 'react-hot-toast';
+import { useExecuteQuery, useExplainQuery, useSessionStatus } from '@/hooks/use-query-execution';
+import { formatSqlInBrowser } from '@/lib/format-sql';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,6 +22,17 @@ import { cn, formatDuration, formatRows, formatRelativeTime, truncateSql } from 
 import type { QueryResultColumn } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
 
+function sessionIdFromParams(params: { sessionId?: string | string[] }): string {
+  const raw = params.sessionId;
+  if (typeof raw === 'string' && raw.length > 0) {
+    return decodeURIComponent(raw);
+  }
+  if (Array.isArray(raw) && raw[0]) {
+    return decodeURIComponent(raw[0]);
+  }
+  return '';
+}
+
 // ─── Dataset Size Selector ────────────────────────────────────────────────────
 
 const DATASET_SIZES = [
@@ -31,16 +45,20 @@ const DATASET_SIZES = [
 function DatasetSizeSelector() {
   const { datasetSize, setDatasetSize } = useLabStore();
   return (
-    <div className="flex items-center gap-1 bg-surface-container rounded-lg p-0.5">
+    <div
+      className="flex items-center gap-0.5 rounded-lg border border-outline-variant/10 bg-surface-container-low p-0.5"
+      title="Dataset scale for query execution"
+    >
       {DATASET_SIZES.map((s) => (
         <button
           key={s.value}
+          type="button"
           onClick={() => setDatasetSize(s.value)}
           className={cn(
-            'px-2 py-1 rounded text-xs font-medium font-body transition-all',
+            'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
             datasetSize === s.value
-              ? 'bg-surface-container-high text-on-surface'
-              : 'text-on-surface-variant hover:text-on-surface'
+              ? 'bg-surface-container-high text-on-surface shadow-sm'
+              : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
           )}
           title={s.desc}
         >
@@ -55,7 +73,8 @@ function DatasetSizeSelector() {
 
 function SqlEditorPanel() {
   const { currentQuery, setQuery } = useLabStore();
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const params = useParams<{ sessionId?: string | string[] }>();
+  const sessionId = sessionIdFromParams(params);
   const { mutate: executeQuery } = useExecuteQuery();
 
   const handleExecute = useCallback(() => {
@@ -311,10 +330,9 @@ function SchemaPanel() {
             >
               <span
                 className={cn(
-                  'material-symbols-outlined text-base transition-transform',
+                  'material-symbols-outlined text-base transition-transform text-on-surface-variant',
                   isExpanded ? 'rotate-90' : ''
                 )}
-                style={{ color: '#bac3ff' }}
               >
                 chevron_right
               </span>
@@ -364,8 +382,54 @@ const TABS = [
 
 type TabId = typeof TABS[number]['id'];
 
+function LabSessionLoading() {
+  return (
+    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col bg-surface">
+      <div className="h-12 shrink-0 animate-pulse border-b border-outline-variant/10 bg-surface-container-low" />
+      <div className="flex flex-1 gap-0 overflow-hidden">
+        <div className="w-[55%] animate-pulse bg-surface-container-lowest" />
+        <div className="flex-1 animate-pulse bg-surface-container-low" />
+      </div>
+      <div className="h-6 shrink-0 animate-pulse border-t border-outline-variant/10 bg-surface-container-lowest" />
+    </div>
+  );
+}
+
+function LabSessionError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center gap-5 bg-surface px-4">
+      <span className="material-symbols-outlined text-5xl text-outline">cloud_off</span>
+      <div className="max-w-md text-center">
+        <h1 className="font-headline text-xl font-semibold text-on-surface">Không tải được phiên lab</h1>
+        <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{message}</p>
+        <p className="mt-3 text-xs text-outline">
+          Kiểm tra API đang chạy, bạn đã đăng nhập, và phiên còn tồn tại trên server.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button variant="primary" onClick={onRetry} leftIcon={<span className="material-symbols-outlined text-lg">refresh</span>}>
+          Thử lại
+        </Button>
+        <Link href="/lab">
+          <Button variant="secondary">Về SQL Lab</Button>
+        </Link>
+        <Link href="/explore">
+          <Button variant="ghost">Catalog</Button>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default function LabPage() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const params = useParams<{ sessionId?: string | string[] }>();
+  const sessionId = sessionIdFromParams(params);
   const {
     activeTab,
     setActiveTab,
@@ -375,17 +439,23 @@ export default function LabPage() {
     results,
     error,
     currentQuery,
+    setQuery,
   } = useLabStore();
 
   const { mutate: executeQuery } = useExecuteQuery();
   const { mutate: explainQuery } = useExplainQuery();
-  const { mutate: formatSql, isPending: isFormatting } = useFormatSql();
 
-  // Poll session status
-  const { data: session } = useSessionStatus(sessionId);
+  const {
+    data: session,
+    isLoading: sessionLoading,
+    isError: sessionError,
+    error: sessionFetchError,
+    refetch: refetchSession,
+  } = useSessionStatus(sessionId);
 
-  // Global keyboard shortcut: Ctrl+Enter to execute
+  // Global keyboard shortcut: Ctrl+Enter to execute (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
+    if (!sessionId) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -423,111 +493,112 @@ export default function LabPage() {
     document.addEventListener('mouseup', onMouseUp);
   }, []);
 
+  const handleFormatSql = useCallback(() => {
+    try {
+      setQuery(formatSqlInBrowser(currentQuery));
+      toast.success('Đã format SQL');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Không format được SQL');
+    }
+  }, [currentQuery, setQuery]);
+
+  if (!sessionId) {
+    return (
+      <div className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center gap-4 bg-surface px-4">
+        <p className="text-sm text-on-surface-variant">Đường dẫn phiên không hợp lệ.</p>
+        <Link href="/lab">
+          <Button variant="primary">Về SQL Lab</Button>
+        </Link>
+      </div>
+    );
+  }
+
+  if (sessionLoading) {
+    return <LabSessionLoading />;
+  }
+
+  if (sessionError) {
+    return (
+      <LabSessionError
+        message={sessionFetchError instanceof Error ? sessionFetchError.message : 'Lỗi không xác định'}
+        onRetry={() => void refetchSession()}
+      />
+    );
+  }
+
   return (
-    <div className="flex flex-col h-[calc(100vh-3.5rem)] bg-surface overflow-hidden">
-      {/* ── Toolbar ── */}
-      <div className="h-12 flex items-center justify-between px-4 bg-surface border-b border-outline-variant/10 shrink-0">
-        {/* Left: actions */}
-        <div className="flex items-center gap-1">
-          {/* RUN QUERY button */}
-          <button
-            disabled={!currentQuery.trim() || isExecuting || session?.status === 'provisioning'}
-            onClick={() => executeQuery({ sessionId, sql: currentQuery })}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 bg-primary text-on-primary rounded text-[11px] font-bold uppercase tracking-wide hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed'
-            )}
-          >
-            {isExecuting ? (
-              <div className="w-3.5 h-3.5 border border-on-primary/30 border-t-on-primary rounded-full animate-spin" />
-            ) : (
-              <span
-                className="material-symbols-outlined text-sm"
-                style={{ fontVariationSettings: "'FILL' 1" }}
+    <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-surface">
+      <header className="shrink-0 border-b border-outline-variant/10 bg-surface-container-low/90">
+        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <div className="scrollbar-none flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto">
+            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-outline-variant/10 bg-surface-container/70 p-1">
+              <Button
+                variant="primary"
+                size="sm"
+                loading={isExecuting}
+                disabled={!currentQuery.trim() || isExecuting || session?.status === 'provisioning'}
+                onClick={() => executeQuery({ sessionId, sql: currentQuery })}
+                leftIcon={
+                  <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                    play_arrow
+                  </span>
+                }
               >
-                play_arrow
-              </span>
-            )}
-            Run Query
-          </button>
-
-          <div className="h-6 w-px bg-outline-variant/20 mx-1.5" />
-
-          {/* EXPLAIN PLAN text button */}
-          <button
-            disabled={!currentQuery.trim() || isExplaining || session?.status === 'provisioning'}
-            onClick={() => explainQuery({ sessionId, sql: currentQuery })}
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-surface-container-highest transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isExplaining ? (
-              <div className="w-3 h-3 border border-outline/30 border-t-outline rounded-full animate-spin" />
-            ) : (
-              <span className="material-symbols-outlined text-sm text-outline group-hover:text-on-surface-variant transition-colors">
-                account_tree
-              </span>
-            )}
-            <span className="text-[11px] font-bold text-outline group-hover:text-on-surface-variant transition-colors uppercase tracking-wide">
-              Explain
-            </span>
-          </button>
-
-          {/* FORMAT text button */}
-          <button
-            disabled={isFormatting}
-            onClick={() => formatSql(currentQuery)}
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-surface-container-highest transition-colors group disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isFormatting ? (
-              <div className="w-3 h-3 border border-outline/30 border-t-outline rounded-full animate-spin" />
-            ) : (
-              <span className="material-symbols-outlined text-sm text-outline group-hover:text-on-surface-variant transition-colors">
-                format_align_left
-              </span>
-            )}
-            <span className="text-[11px] font-bold text-outline group-hover:text-on-surface-variant transition-colors uppercase tracking-wide">
-              Format
-            </span>
-          </button>
-
-          <div className="h-6 w-px bg-outline-variant/20 mx-1.5" />
-
-          {/* Dataset size */}
-          <DatasetSizeSelector />
-        </div>
-
-        {/* Right: ENV badge + session title */}
-        <div className="flex items-center gap-3">
-          {session?.lessonTitle && (
-            <span className="text-xs text-outline hidden sm:block truncate max-w-[160px]">
-              {session.lessonTitle}
-            </span>
-          )}
-
-          <span className="text-[10px] text-outline font-bold uppercase">ENV:</span>
-          <div className="flex items-center gap-1.5 px-2 py-0.5 bg-tertiary-container/20 rounded-full border border-tertiary/20">
-            <span
-              className={cn(
-                'w-1.5 h-1.5 rounded-full',
-                session?.status === 'active'
-                  ? 'bg-tertiary animate-pulse'
-                  : session?.status === 'provisioning'
-                  ? 'bg-tertiary/50 animate-pulse'
-                  : 'bg-outline'
-              )}
-            />
-            <span className="text-[10px] text-tertiary font-medium uppercase tracking-wide">
-              {session?.status === 'provisioning' ? 'Provisioning' : 'Prod-Read-Only'}
-            </span>
+                Run
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={isExplaining}
+                disabled={!currentQuery.trim() || isExplaining || session?.status === 'provisioning'}
+                onClick={() => explainQuery({ sessionId, sql: currentQuery })}
+                leftIcon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
+              >
+                Explain
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!currentQuery.trim()}
+                onClick={handleFormatSql}
+                title="Format SQL locally (no network)"
+                leftIcon={<span className="material-symbols-outlined text-[18px]">format_align_left</span>}
+              >
+                Format
+              </Button>
+            </div>
+            <DatasetSizeSelector />
           </div>
 
-          <button
-            onClick={() => {}}
-            className="p-1.5 rounded hover:bg-surface-container-highest text-outline hover:text-on-surface transition-colors"
-            title="Reset session"
-          >
-            <span className="material-symbols-outlined text-sm">restart_alt</span>
-          </button>
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+            {session?.lessonTitle && (
+              <span className="hidden max-w-[14rem] truncate text-xs text-on-surface-variant md:block">
+                {session.lessonTitle}
+              </span>
+            )}
+            <div className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-outline">Sandbox</span>
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full',
+                  session?.status === 'active'
+                    ? 'bg-secondary shadow-[0_0_8px_rgba(255,255,255,0.15)]'
+                    : session?.status === 'provisioning'
+                      ? 'animate-pulse bg-tertiary'
+                      : 'bg-outline',
+                )}
+              />
+              <span className="text-[11px] font-medium text-on-surface-variant">
+                {session?.status === 'provisioning'
+                  ? 'Provisioning'
+                  : session?.status === 'active'
+                    ? 'Ready'
+                    : session?.status ?? '—'}
+              </span>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
       {/* ── Main split pane ── */}
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
@@ -536,19 +607,18 @@ export default function LabPage() {
           className="flex flex-col overflow-hidden"
           style={{ width: `${leftWidth}%` }}
         >
-          <div className="flex items-center bg-surface-container-lowest border-b border-outline-variant/10">
-            {/* IDE-style file tab */}
-            <div className="flex items-center gap-1.5 px-4 py-1.5 bg-surface border-r border-outline-variant/10 border-t-2 border-t-primary">
-              <span className="material-symbols-outlined text-sm text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
+          <div className="flex items-center border-b border-outline-variant/10 bg-surface-container-low/80">
+            <div className="flex items-center gap-2 border-r border-outline-variant/10 bg-surface-container px-4 py-2">
+              <span className="material-symbols-outlined text-base text-tertiary" style={{ fontVariationSettings: "'FILL' 1" }}>
                 terminal
               </span>
-              <span className="text-xs text-on-surface font-mono">query.sql</span>
+              <span className="font-mono text-xs text-on-surface">query.sql</span>
             </div>
             <div className="ml-auto flex items-center gap-2 px-3">
-              <span className="text-[9px] text-outline font-mono uppercase">
-                {currentQuery.split('\n').length}L
+              <span className="font-mono text-[10px] uppercase text-outline">
+                {currentQuery.split('\n').length} lines
               </span>
-              <kbd className="text-[9px] bg-surface-container px-1.5 py-0.5 rounded text-outline font-mono hidden sm:inline tracking-wide">
+              <kbd className="hidden rounded border border-outline-variant/20 bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface-variant sm:inline">
                 Ctrl+Enter
               </kbd>
             </div>
@@ -558,7 +628,7 @@ export default function LabPage() {
 
         {/* Resize handle */}
         <div
-          className="resize-handle flex-none bg-transparent hover:bg-primary/50 transition-colors cursor-col-resize"
+          className="resize-handle flex-none bg-transparent hover:bg-outline/40 transition-colors cursor-col-resize"
           style={{ width: '4px' }}
           onMouseDown={handleResizeMouseDown}
         />
@@ -566,19 +636,25 @@ export default function LabPage() {
         {/* Right: Results */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Tabs */}
-          <div className="flex items-center gap-0 bg-surface-container-low shrink-0 overflow-x-auto">
+          <div
+            className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-outline-variant/10 bg-surface-container-low/90"
+            role="tablist"
+          >
             {TABS.map((tab) => (
               <button
                 key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
                 onClick={() => setActiveTab(tab.id as TabId)}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium font-body whitespace-nowrap transition-all border-b-2',
+                  'flex items-center gap-1.5 whitespace-nowrap px-4 py-2.5 font-body text-xs font-medium transition-colors',
                   activeTab === tab.id
-                    ? 'text-primary border-primary bg-primary/5'
-                    : 'text-on-surface-variant border-transparent hover:text-on-surface hover:bg-surface-container'
+                    ? 'border-b-2 border-primary text-on-surface bg-surface-container-high/80'
+                    : 'border-b-2 border-transparent text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
                 )}
               >
-                <span className="material-symbols-outlined text-sm">{tab.icon}</span>
+                <span className="material-symbols-outlined text-base opacity-90">{tab.icon}</span>
                 {tab.label}
               </button>
             ))}
@@ -595,7 +671,7 @@ export default function LabPage() {
       </div>
 
       {/* ── Status bar ── */}
-      <div className="h-6 flex items-center justify-between px-4 bg-surface-container-lowest border-t border-outline-variant/10 shrink-0">
+      <div className="flex h-7 shrink-0 items-center justify-between border-t border-outline-variant/10 bg-surface-container-low px-4 text-[10px]">
         {/* Left: system metrics */}
         <div className="flex items-center gap-3">
           {/* Connection indicator */}
@@ -604,9 +680,9 @@ export default function LabPage() {
               className={cn(
                 'w-1.5 h-1.5 rounded-full',
                 session?.status === 'active'
-                  ? 'bg-secondary'
+                  ? 'bg-on-surface-variant'
                   : session?.status === 'provisioning'
-                  ? 'bg-tertiary animate-pulse'
+                  ? 'bg-on-surface-variant/70 animate-pulse'
                   : 'bg-outline'
               )}
             />
@@ -625,7 +701,7 @@ export default function LabPage() {
           <div className="flex items-center gap-1.5">
             <span className="text-[9px] font-bold text-outline uppercase">CPU</span>
             <div className="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
-              <div className="w-[24%] h-full bg-tertiary rounded-full" />
+              <div className="w-[24%] h-full bg-on-surface-variant rounded-full" />
             </div>
           </div>
 
@@ -633,7 +709,7 @@ export default function LabPage() {
           <div className="flex items-center gap-1.5">
             <span className="text-[9px] font-bold text-outline uppercase">MEM</span>
             <div className="w-12 h-1 bg-surface-container-highest rounded-full overflow-hidden">
-              <div className="w-[41%] h-full bg-primary/60 rounded-full" />
+              <div className="w-[41%] h-full bg-outline rounded-full" />
             </div>
           </div>
 
@@ -663,7 +739,7 @@ export default function LabPage() {
           <span className="text-[9px] text-outline uppercase tracking-widest">UTF-8</span>
           <div className="h-3 w-px bg-outline-variant/20" />
           <span className="text-[9px] text-outline font-mono">
-            {sessionId.slice(0, 8)}…
+            {sessionId.length > 0 ? `${sessionId.slice(0, 8)}…` : '—'}
           </span>
         </div>
       </div>

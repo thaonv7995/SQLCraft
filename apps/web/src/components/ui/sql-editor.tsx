@@ -11,38 +11,38 @@ import { Prec } from '@codemirror/state';
 const sqlForgeTheme = EditorView.theme(
   {
     '&': {
-      backgroundColor: '#0e0e0e',
+      backgroundColor: '#1a1a1a',
       height: '100%',
-      color: '#e5e2e1',
+      color: '#ececec',
     },
     '.cm-content': {
       fontFamily: 'var(--font-jetbrains-mono), "JetBrains Mono", monospace',
       fontSize: '13px',
       lineHeight: '1.6',
-      caretColor: '#bac3ff',
+      caretColor: '#ececec',
       padding: '12px 0',
     },
     '.cm-line': {
       padding: '0 12px',
     },
     '.cm-cursor': {
-      borderLeftColor: '#bac3ff',
+      borderLeftColor: '#ececec',
       borderLeftWidth: '2px',
     },
     '.cm-selectionBackground, ::selection': {
-      backgroundColor: 'rgba(186, 195, 255, 0.18) !important',
+      backgroundColor: 'rgba(255, 255, 255, 0.12) !important',
     },
     '.cm-activeLine': {
       backgroundColor: 'rgba(255, 255, 255, 0.025)',
     },
     '.cm-activeLineGutter': {
       backgroundColor: 'rgba(255, 255, 255, 0.025)',
-      color: '#8f909e',
+      color: '#9ca3af',
     },
     '.cm-gutters': {
-      backgroundColor: '#0e0e0e',
+      backgroundColor: '#1a1a1a',
       borderRight: 'none',
-      color: '#454652',
+      color: '#6b7280',
       minWidth: '40px',
     },
     '.cm-lineNumbers .cm-gutterElement': {
@@ -57,19 +57,19 @@ const sqlForgeTheme = EditorView.theme(
       overflowX: 'auto',
     },
     // SQL syntax highlighting using design system colors
-    '.tok-keyword': { color: '#bac3ff', fontWeight: '600' },
-    '.tok-string': { color: '#66d9cc' },
-    '.tok-number': { color: '#ffb4ab' },
-    '.tok-comment': { color: '#8f909e', fontStyle: 'italic' },
-    '.tok-name': { color: '#e5e2e1' },
-    '.tok-typeName': { color: '#44d8f1' },
-    '.tok-variableName': { color: '#c5c5d4' },
-    '.tok-operator': { color: '#c5c5d4' },
-    '.tok-punctuation': { color: '#8f909e' },
-    '.tok-invalid': { color: '#ffb4ab', textDecoration: 'underline' },
+    '.tok-keyword': { color: '#ececec', fontWeight: '600' },
+    '.tok-string': { color: '#a3a3a3' },
+    '.tok-number': { color: '#9ca3af' },
+    '.tok-comment': { color: '#6b7280', fontStyle: 'italic' },
+    '.tok-name': { color: '#ececec' },
+    '.tok-typeName': { color: '#c4c4c4' },
+    '.tok-variableName': { color: '#9ca3af' },
+    '.tok-operator': { color: '#9ca3af' },
+    '.tok-punctuation': { color: '#6b7280' },
+    '.tok-invalid': { color: '#c4a8a8', textDecoration: 'underline' },
     // Placeholder
     '.cm-placeholder': {
-      color: '#454652',
+      color: '#6b7280',
       fontStyle: 'italic',
     },
   },
@@ -126,7 +126,7 @@ export function SqlEditor({
   }, [onExecute]);
 
   return (
-    <div className={`h-full bg-[#0e0e0e] overflow-hidden ${className ?? ''}`}>
+    <div className={`h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
       <ReactCodeMirror
         ref={editorRef}
         value={value}

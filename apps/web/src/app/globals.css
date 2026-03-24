@@ -25,8 +25,8 @@
   input:-webkit-autofill:focus,
   input:-webkit-autofill:active {
     -webkit-box-shadow: 0 0 0 9999px #2a2a2a inset !important;
-    -webkit-text-fill-color: #e5e2e1 !important;
-    caret-color: #e5e2e1;
+    -webkit-text-fill-color: #ececec !important;
+    caret-color: #ececec;
     transition: background-color 0s 600000s;
   }
 
@@ -41,46 +41,46 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #454652;
+    background: #4d5566;
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #8f909e;
+    background: #8b93a3;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #454652 transparent;
+    scrollbar-color: #4d5566 transparent;
   }
 }
 
 @layer components {
-  /* SQL Syntax Highlighting */
+  /* SQL syntax — grayscale only, hierarchy by lightness */
   .sql-syntax-keyword {
-    color: #bac3ff;
+    color: #e5e5e5;
     font-weight: 600;
   }
 
   .sql-syntax-string {
-    color: #66d9cc;
+    color: #a3a3a3;
   }
 
   .sql-syntax-function {
-    color: #44d8f1;
+    color: #c4c4c4;
   }
 
   .sql-syntax-comment {
-    color: #8f909e;
+    color: #6b7280;
     font-style: italic;
   }
 
   .sql-syntax-number {
-    color: #ffb4ab;
+    color: #9ca3af;
   }
 
   .sql-syntax-operator {
-    color: #c5c5d4;
+    color: #9ca3af;
   }
 
   /* Material Symbols */
@@ -103,7 +103,7 @@
 
   /* CodeMirror theme overrides */
   .cm-editor {
-    background-color: #0e0e0e !important;
+    background-color: #1a1a1a !important;
     height: 100%;
   }
 
@@ -114,21 +114,21 @@
   .cm-content {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 13px;
-    color: #e5e2e1;
+    color: #ececec;
   }
 
   .cm-gutters {
-    background-color: #0e0e0e !important;
-    border-right: 1px solid #2a2a2a !important;
-    color: #454652 !important;
+    background-color: #1a1a1a !important;
+    border-right: 1px solid #3d3d3d !important;
+    color: #6b7280 !important;
   }
 
   .cm-cursor {
-    border-left-color: #bac3ff !important;
+    border-left-color: #e5e5e5 !important;
   }
 
   .cm-selectionBackground {
-    background: rgba(186, 195, 255, 0.2) !important;
+    background: rgba(255, 255, 255, 0.12) !important;
   }
 
   .cm-activeLine {
@@ -136,8 +136,8 @@
   }
 
   .cm-activeLineGutter {
-    background: rgba(255, 255, 255, 0.03) !important;
-    color: #8f909e !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: #9ca3af !important;
   }
 
   /* Resizable panel handle */
@@ -151,16 +151,17 @@
 
   .resize-handle:hover,
   .resize-handle.dragging {
-    background: #bac3ff;
+    background: #737373;
   }
 
-  /* Pulsing animation for provisioning state */
+  /* Subtle pulse for loading states (no colored glow) */
   @keyframes pulse-glow {
-    0%, 100% {
-      box-shadow: 0 0 0 0 rgba(68, 216, 241, 0.4);
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.06);
     }
     50% {
-      box-shadow: 0 0 0 6px rgba(68, 216, 241, 0);
+      box-shadow: 0 0 0 4px rgba(255, 255, 255, 0);
     }
   }
 
@@ -174,15 +175,64 @@
   }
 
   .contribution-bar:hover {
-    @apply bg-primary opacity-80;
+    @apply bg-on-surface-variant;
   }
 }
 
 @layer utilities {
+  /* Layout shells — max width + horizontal padding + vertical rhythm */
+  .page-shell {
+    @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
+  }
+
+  .page-shell-narrow {
+    @apply mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
+  }
+
+  .page-shell-wide {
+    @apply mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
+  }
+
+  .page-stack {
+    @apply space-y-6 lg:space-y-8;
+  }
+
+  .section-card {
+    @apply rounded-xl border border-outline-variant/10 bg-surface-container-low;
+  }
+
+  /* Typography scale — dùng chung cho page headers */
+  .page-title {
+    @apply font-headline text-2xl font-bold tracking-tight text-on-surface sm:text-3xl;
+  }
+
+  .page-title-lg {
+    @apply font-headline text-3xl font-bold tracking-tight text-on-surface sm:text-4xl;
+  }
+
+  .page-lead {
+    @apply text-sm leading-relaxed text-on-surface-variant sm:text-base max-w-2xl;
+  }
+
+  .page-section-title {
+    @apply font-headline text-lg font-semibold text-on-surface;
+  }
+
+  /* Card density */
+  .card-padding {
+    @apply p-4 sm:p-5 lg:p-6;
+  }
+
+  /* Ẩn scrollbar nhưng vẫn cuộn (toolbar mobile) */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
   .text-gradient-primary {
-    background: linear-gradient(135deg, #bac3ff, #4453a7);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    @apply text-on-surface;
   }
 }

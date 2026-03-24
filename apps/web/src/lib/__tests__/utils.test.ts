@@ -85,6 +85,12 @@ describe('truncateSql()', () => {
   it('trims leading/trailing whitespace', () => {
     expect(truncateSql('  SELECT 1  ')).toBe('SELECT 1');
   });
+
+  it('returns empty string for null, undefined, or non-string', () => {
+    expect(truncateSql(null)).toBe('');
+    expect(truncateSql(undefined)).toBe('');
+    expect(truncateSql(123 as unknown as string)).toBe('');
+  });
 });
 
 // ─── formatRelativeTime() ────────────────────────────────────────────────────

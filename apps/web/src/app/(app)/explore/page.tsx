@@ -162,7 +162,7 @@ export default function ExplorePage() {
       });
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="page-shell page-stack">
       {/* Page header */}
       <div className="mb-10">
         <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface mb-2">

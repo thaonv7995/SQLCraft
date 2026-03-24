@@ -60,7 +60,7 @@ export default function TrackDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto space-y-6">
+      <div className="page-shell-narrow page-stack">
         <div className="h-32 bg-surface-container-low rounded-xl animate-pulse" />
         <div className="space-y-3">
           {[1, 2, 3, 4, 5].map((i) => (
@@ -102,7 +102,7 @@ export default function TrackDetailPage() {
   const completedCount = displayLessons.filter((l) => l.status === 'completed').length;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="page-shell-narrow page-stack">
       {/* Track header */}
       <div className="bg-surface-container-low rounded-xl p-6">
         <div className="flex items-start justify-between gap-4">
@@ -161,13 +161,13 @@ export default function TrackDetailPage() {
                 />
                 <defs>
                   <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#bac3ff" />
-                    <stop offset="100%" stopColor="#4453a7" />
+                    <stop offset="0%" stopColor="#a3a3a3" />
+                    <stop offset="100%" stopColor="#737373" />
                   </linearGradient>
                 </defs>
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="font-headline font-bold text-sm text-primary">{progress}%</span>
+                <span className="font-headline font-bold text-sm text-on-surface">{progress}%</span>
               </div>
             </div>
             <p className="text-xs text-on-surface-variant mt-1">

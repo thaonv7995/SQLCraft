@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { sessionsApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/badge';
-import { formatRelativeTime } from '@/lib/utils';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn, formatRelativeTime } from '@/lib/utils';
 
 export default function LabIndexPage() {
   const { data: sessions, isLoading } = useQuery({
@@ -19,83 +20,120 @@ export default function LabIndexPage() {
   );
 
   return (
-    <div className="min-h-full flex items-center justify-center p-6">
-      <div className="w-full max-w-lg space-y-6">
-        {/* Header */}
-        <div className="text-center">
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-primary to-[#4453a7] flex items-center justify-center mx-auto mb-4">
-            <span className="material-symbols-outlined text-3xl text-[#00105b]">terminal</span>
+    <div className="page-shell">
+      <div className="page-stack mx-auto w-full max-w-4xl">
+        {/* Hero — aligned with dashboard / explore */}
+        <section
+        className="overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-low"
+          aria-labelledby="lab-title"
+        >
+          <div className="flex flex-col gap-6 p-5 sm:p-6 lg:flex-row lg:items-center lg:justify-between lg:gap-10 lg:p-8">
+            <div className="flex min-w-0 flex-1 items-start gap-4">
+              <div
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-outline-variant/10 bg-surface-container-high"
+                aria-hidden
+              >
+                <span
+                  className="material-symbols-outlined text-2xl text-tertiary"
+                  style={{ fontVariationSettings: "'FILL' 1" }}
+                >
+                  terminal
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-outline">
+                  Workspace
+                </p>
+                <h1
+                  id="lab-title"
+                  className="font-headline mt-1 text-2xl font-bold tracking-tight text-on-surface sm:text-3xl"
+                >
+                  SQL Lab
+                </h1>
+                <p className="mt-2 max-w-xl text-sm leading-relaxed text-on-surface-variant">
+                  Isolated Postgres sandboxes for practice. Pick a database from the catalog to start
+                  fresh, or resume an open session below.
+                </p>
+              </div>
+            </div>
+            <div className="w-full shrink-0 lg:w-auto lg:min-w-[200px]">
+              <Link href="/explore" className="block">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  className="lg:min-w-[200px]"
+                  leftIcon={<span className="material-symbols-outlined text-xl">travel_explore</span>}
+                >
+                  Browse databases
+                </Button>
+              </Link>
+            </div>
           </div>
-          <h1 className="font-headline text-2xl font-bold text-on-surface">SQL Lab</h1>
-          <p className="text-sm text-on-surface-variant mt-2">
-            Launch or resume a sandbox workspace from the database catalog.
-          </p>
-        </div>
+        </section>
 
-        {/* Active sessions */}
+        {/* Sessions */}
         {isLoading ? (
-          <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
-            <div className="h-4 w-32 bg-surface-container rounded animate-pulse" />
-            {[1, 2].map((i) => (
-              <div key={i} className="h-14 bg-surface-container rounded-xl animate-pulse" />
-            ))}
-          </div>
-        ) : activeSessions.length > 0 ? (
-          <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
-            <h2 className="text-sm font-semibold text-on-surface">Resume a Session</h2>
+          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-5 sm:p-6">
+            <div className="mb-4 h-4 w-44 animate-pulse rounded bg-surface-container" />
             <div className="space-y-2">
-              {activeSessions.map((s) => (
-                <Link key={s.id} href={`/lab/${s.id}`}>
-                  <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors cursor-pointer">
-                    <span className="material-symbols-outlined text-xl text-primary shrink-0">
-                      terminal
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-on-surface truncate">
-                        {s.lessonTitle ?? 'Lab Session'}
-                      </p>
-                      <p className="text-xs text-on-surface-variant">
-                        {s.lastActivityAt
-                          ? formatRelativeTime(s.lastActivityAt)
-                          : formatRelativeTime(s.startedAt)}
-                      </p>
-                    </div>
-                    <StatusBadge status={s.status} />
-                  </div>
-                </Link>
+              {[1, 2].map((i) => (
+                <div key={i} className="h-[52px] animate-pulse rounded-xl bg-surface-container" />
               ))}
             </div>
           </div>
+        ) : activeSessions.length > 0 ? (
+          <Card className="rounded-2xl border border-outline-variant/10 bg-surface-container-low">
+            <CardHeader className="flex flex-col items-stretch gap-1 border-b border-outline-variant/10 px-5 py-4 sm:px-6 sm:py-5">
+              <CardTitle className="text-lg">Resume a session</CardTitle>
+              <CardDescription>Open a sandbox you already have running.</CardDescription>
+            </CardHeader>
+            <CardContent className="px-3 pb-4 pt-2 sm:px-4 sm:pb-5">
+              <ul className="space-y-1.5">
+                {activeSessions.map((s) => (
+                  <li key={s.id}>
+                    <Link
+                      href={`/lab/${s.id}`}
+                      className={cn(
+                        'group flex items-center gap-3 rounded-xl border border-outline-variant/10 bg-surface-container/60 px-3 py-2.5 transition-colors',
+                        'hover:border-outline-variant/25 hover:bg-surface-container-high sm:px-4 sm:py-3',
+                      )}
+                    >
+                      <span
+                        className="material-symbols-outlined shrink-0 text-lg text-on-surface-variant group-hover:text-on-surface"
+                        aria-hidden
+                      >
+                        terminal
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-on-surface">
+                          {s.lessonTitle ?? 'Lab session'}
+                        </p>
+                        <p className="text-[11px] text-on-surface-variant">
+                          {s.lastActivityAt
+                            ? formatRelativeTime(s.lastActivityAt)
+                            : formatRelativeTime(s.startedAt)}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <StatusBadge status={s.status} />
+                        <span
+                          className="material-symbols-outlined text-lg text-outline transition-colors group-hover:text-on-surface-variant"
+                          aria-hidden
+                        >
+                          chevron_right
+                        </span>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
         ) : null}
 
-        {/* CTA */}
-        <div className="bg-surface-container-low rounded-xl p-5 space-y-4">
-          <div className="flex items-start gap-3">
-            <span className="material-symbols-outlined text-2xl text-secondary mt-0.5 shrink-0">
-              database
-            </span>
-            <div>
-              <h2 className="text-sm font-semibold text-on-surface">Start from a Database</h2>
-              <p className="text-xs text-on-surface-variant mt-1 leading-relaxed">
-                Explore the catalog, inspect the schema, and launch a dedicated sandbox from the
-                database that matches the query problem you want to practice.
-              </p>
-            </div>
-          </div>
-          <Link href="/explore">
-            <Button
-              variant="primary"
-              fullWidth
-              size="lg"
-              leftIcon={<span className="material-symbols-outlined">travel_explore</span>}
-            >
-              Browse Databases
-            </Button>
-          </Link>
-        </div>
-
-        <p className="text-center text-xs text-outline">
-          Sandbox sessions auto-expire after 2 hours of inactivity
+        <p className="text-xs text-on-surface-variant">
+          Sandbox sessions auto-expire after 2 hours of inactivity.
         </p>
       </div>
     </div>

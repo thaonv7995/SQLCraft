@@ -17,20 +17,20 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: [
-    'bg-gradient-to-br from-[#bac3ff] to-[#4453a7]',
-    'text-[#00105b]',
+    'bg-primary',
+    'text-on-primary',
     'font-semibold',
-    'hover:opacity-90',
-    'active:opacity-80',
-    'shadow-sm',
-    'shadow-[#bac3ff]/10',
+    'hover:brightness-110',
+    'active:brightness-95',
+    'border border-outline-variant',
   ].join(' '),
 
   secondary: [
-    'bg-primary/10',
-    'text-primary',
-    'hover:bg-primary/15',
-    'active:bg-primary/20',
+    'bg-surface-container-high',
+    'text-on-surface',
+    'border border-outline-variant',
+    'hover:bg-surface-container-highest',
+    'active:bg-surface-bright',
   ].join(' '),
 
   ghost: [
@@ -112,7 +112,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           'rounded-lg',
           'font-body font-medium',
           'transition-all duration-150',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
           'select-none',
           // Disabled
           'disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none',

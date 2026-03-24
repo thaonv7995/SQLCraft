@@ -1,8 +1,34 @@
 import { FastifyInstance } from 'fastify';
 import type { SubmitQueryBody, QueryExecutionParams, QueryHistoryParams, QueryHistoryQuerystring } from './queries.schema';
-import { submitQueryHandler, getQueryHandler, getQueryHistoryHandler } from './queries.handler';
+import {
+  submitQueryHandler,
+  getGlobalQueryHistoryHandler,
+  getQueryHandler,
+  getQueryHistoryHandler,
+} from './queries.handler';
 
 export default async function queriesRouter(fastify: FastifyInstance): Promise<void> {
+  // GET /v1/query-executions — current user's query history (must be before /:id)
+  fastify.get<{ Querystring: QueryHistoryQuerystring }>(
+    '/v1/query-executions',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Queries'],
+        summary: 'List query executions for the current user',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        },
+      },
+    },
+    getGlobalQueryHistoryHandler,
+  );
+
   // POST /v1/query-executions
   fastify.post<{ Body: SubmitQueryBody }>(
     '/v1/query-executions',

@@ -29,14 +29,14 @@ export function AdminPlaceholderPage({
   note,
 }: AdminPlaceholderPageProps) {
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
-      <div className="rounded-3xl border border-outline-variant/10 bg-surface-container-low p-8">
+    <div className="page-shell-narrow page-stack">
+      <div className="section-card card-padding">
         <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
           <div className="max-w-2xl">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-surface-container-high border border-outline-variant text-on-surface">
               <span className="material-symbols-outlined">{icon}</span>
             </div>
-            <h1 className="font-headline text-3xl font-bold text-on-surface">{title}</h1>
+            <h1 className="page-title-lg">{title}</h1>
             <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
               {description}
             </p>
@@ -45,14 +45,14 @@ export function AdminPlaceholderPage({
           <div className="flex flex-wrap gap-3">
             <Link
               href={primaryHref}
-              className="inline-flex items-center justify-center rounded-lg bg-gradient-to-br from-[#bac3ff] to-[#4453a7] px-4 py-2 text-sm font-semibold text-[#00105b] transition-opacity hover:opacity-90"
+              className="inline-flex items-center justify-center rounded-lg border border-outline-variant bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition-colors hover:brightness-110"
             >
               {primaryLabel}
             </Link>
             {secondaryHref && secondaryLabel ? (
               <Link
                 href={secondaryHref}
-                className="inline-flex items-center justify-center rounded-lg bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/15"
+                className="inline-flex items-center justify-center rounded-lg border border-outline-variant bg-surface-container-high px-4 py-2 text-sm font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
               >
                 {secondaryLabel}
               </Link>
@@ -65,7 +65,7 @@ export function AdminPlaceholderPage({
         {highlights.map((item) => (
           <div
             key={item.label}
-            className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-5"
+            className="section-card p-5"
           >
             <p className="text-xs uppercase tracking-[0.18em] text-outline">{item.label}</p>
             <p className="mt-3 text-lg font-semibold text-on-surface">{item.value}</p>
