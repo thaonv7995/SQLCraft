@@ -6,12 +6,12 @@ SQLCraft is an open-source, interactive SQL learning platform that takes you bey
 
 ## Features
 
-- **Interactive SQL Lab** — Write and run SQL directly in the browser against a real PostgreSQL sandbox. Instant feedback, no setup required.
-- **Progressive Dataset Scaling** — Start with tiny datasets to understand query logic, then scale to millions of rows to see performance implications firsthand.
-- **Query Optimization Labs** — Structured challenges that teach you to improve slow queries using indexes, rewrites, and query planning techniques.
-- **Execution Plan Viewer** — Visual, annotated `EXPLAIN ANALYZE` output that demystifies query plans and helps you spot bottlenecks at a glance.
-- **Structured Learning Tracks** — Curated tracks from SQL fundamentals through advanced window functions, CTEs, and performance tuning.
-- **Challenge System** — Solve problems with automated evaluation — correctness is checked, and performance is scored.
+- **Interactive SQL Lab** — Write and run SQL directly in the browser. View tabular results, query duration, scanned rows, and visual `EXPLAIN ANALYZE` execution plans to spot bottlenecks.
+- **Progressive Dataset Scaling** — Practice with the same schema across multiple data scales (Tiny: 100 rows ➔ Small: 100K ➔ Medium: 5M ➔ Large: 10M-100M+ rows) to see real performance implications.
+- **Query Optimization Labs** — Compare entirely different queries for the same problem. Create and drop indexes safely to observe immediate changes in execution plans and execution time.
+- **User Sandbox Isolation** — Every learning session provisions a dedicated, ephemeral PostgreSQL container. Test destructive DDL/DML queries (like `DROP TABLE`) with zero risk to the platform or other learners.
+- **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically for both **correctness** and **performance/cost**.
+- **Admin & Contributor Tools** — Built-in tools for async dataset generation, tracking query history, and a robust authoring workflow for community lesson creation.
 
 ## Tech Stack
 
@@ -94,7 +94,12 @@ sqlcraft/
 
 ## Documentation
 
-- [Architecture Overview](./docs/)
+The `docs/` directory contains comprehensive specifications and architecture decisions. Key entry points include:
+
+- [Product Requirements (PRD)](./docs/PRD.md)
+- [Architecture Overview](./docs/architecture.md)
+- [Database Design](./docs/database-design.md)
+- [API Specification](./docs/api-spec.md)
 - [Contributing Guide](./CONTRIBUTING.md)
 - [Environment Variables](./.env.example)
 
