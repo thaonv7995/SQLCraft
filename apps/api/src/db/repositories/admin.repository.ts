@@ -13,9 +13,11 @@ export interface SystemHealthStats {
 export type SchemaTemplateRow = InferSelectModel<typeof schema.schemaTemplates>;
 export type DatasetTemplateRow = InferSelectModel<typeof schema.datasetTemplates>;
 export type SystemJobRow = InferSelectModel<typeof schema.systemJobs>;
+export type AdminConfigRow = InferSelectModel<typeof schema.adminConfigs>;
 export type InsertSchemaTemplate = InferInsertModel<typeof schema.schemaTemplates>;
 export type InsertDatasetTemplate = InferInsertModel<typeof schema.datasetTemplates>;
 export type InsertSystemJob = InferInsertModel<typeof schema.systemJobs>;
+export type InsertAdminConfig = InferInsertModel<typeof schema.adminConfigs>;
 
 export class AdminRepository {
   private get db() {
@@ -113,6 +115,39 @@ export class AdminRepository {
   ): Promise<SystemJobRow> {
     const [row] = await this.db.insert(schema.systemJobs).values(data).returning();
     return row;
+  }
+
+  async findAdminConfig(scope: string): Promise<AdminConfigRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.adminConfigs)
+      .where(eq(schema.adminConfigs.scope, scope))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async createAdminConfig(
+    data: Omit<InsertAdminConfig, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<AdminConfigRow> {
+    const [row] = await this.db.insert(schema.adminConfigs).values(data).returning();
+    return row;
+  }
+
+  async updateAdminConfig(
+    scope: string,
+    data: Partial<Pick<InsertAdminConfig, 'config' | 'updatedBy'>>,
+  ): Promise<AdminConfigRow | null> {
+    const [row] = await this.db
+      .update(schema.adminConfigs)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.adminConfigs.scope, scope))
+      .returning();
+
+    return row ?? null;
   }
 
   async listSystemJobs(options: {

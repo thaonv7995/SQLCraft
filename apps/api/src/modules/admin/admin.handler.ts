@@ -3,6 +3,7 @@ import { success, created, MESSAGES } from '../../lib/response';
 import { ValidationError } from '../../lib/errors';
 import type { JwtPayload } from '../../plugins/auth';
 import type {
+  AdminConfigBody,
   CreateTrackBody,
   UpdateTrackBody,
   CreateLessonBody,
@@ -14,6 +15,11 @@ import type {
   ImportCanonicalDatabaseBody,
   ListSystemJobsQuery,
   AdminIdParams,
+} from './admin.schema';
+import {
+  AdminConfigSchema,
+  ImportCanonicalDatabaseSchema,
+  ListSystemJobsQuerySchema,
 } from './admin.schema';
 import {
   createTrack,
@@ -29,9 +35,12 @@ import {
   updateUserStatus,
   updateUserRole,
   getSystemHealth,
+  getAdminConfig,
   importCanonicalDatabase,
   listSystemJobs,
+  resetAdminConfig,
   scanSqlDump,
+  updateAdminConfig,
 } from './admin.service';
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
@@ -152,12 +161,40 @@ export async function systemHealthHandler(
   reply.send(success(result, 'System health retrieved'));
 }
 
+export async function getAdminConfigHandler(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await getAdminConfig();
+  reply.send(success(result, 'Admin config retrieved successfully'));
+}
+
+export async function updateAdminConfigHandler(
+  request: FastifyRequest<{ Body: AdminConfigBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const body = AdminConfigSchema.parse(request.body);
+  const result = await updateAdminConfig(userId, body);
+  reply.send(success(result, 'Admin config updated successfully'));
+}
+
+export async function resetAdminConfigHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const result = await resetAdminConfig(userId);
+  reply.send(success(result, 'Admin config reset successfully'));
+}
+
 export async function importCanonicalDatabaseHandler(
   request: FastifyRequest<{ Body: ImportCanonicalDatabaseBody }>,
   reply: FastifyReply,
 ): Promise<void> {
   const userId = (request.user as JwtPayload).sub;
-  const result = await importCanonicalDatabase(userId, request.body);
+  const body = ImportCanonicalDatabaseSchema.parse(request.body);
+  const result = await importCanonicalDatabase(userId, body);
   reply.status(201).send(created(result, 'Canonical database imported successfully'));
 }
 
@@ -188,6 +225,7 @@ export async function listSystemJobsHandler(
   request: FastifyRequest<{ Querystring: ListSystemJobsQuery }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const result = await listSystemJobs(request.query);
+  const query = ListSystemJobsQuerySchema.parse(request.query);
+  const result = await listSystemJobs(query);
   reply.send(success(result, 'System jobs retrieved successfully'));
 }

@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import toast from 'react-hot-toast';
 
 interface NavItem {
   href: string;
@@ -19,7 +18,6 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/users', label: 'Users', icon: 'group' },
   { href: '/admin/rankings', label: 'Rankings', icon: 'leaderboard' },
   { href: '/admin/system', label: 'System', icon: 'dns' },
-  { href: '/admin/settings', label: 'Settings', icon: 'settings' },
 ];
 
 export function AdminSidebar() {
@@ -30,26 +28,8 @@ export function AdminSidebar() {
 
   return (
     <aside className="flex flex-col w-64 h-full bg-surface-container-low border-r border-outline-variant/10">
-      {/* Brand */}
-      <div className="mb-6 px-6 pt-6 flex items-center gap-3 shrink-0">
-        <div className="w-8 h-8 bg-surface-container-high border border-outline-variant rounded-md flex items-center justify-center shrink-0">
-          <span
-            className="material-symbols-outlined text-on-surface text-lg"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            architecture
-          </span>
-        </div>
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight text-on-surface font-headline leading-none">
-            Admin
-          </h1>
-          <p className="text-[10px] text-on-surface-variant mt-0.5">Console</p>
-        </div>
-      </div>
-
       {/* Nav */}
-      <nav className="flex-1 px-4 space-y-0.5">
+      <nav className="flex-1 px-4 py-6 space-y-0.5">
         {ADMIN_NAV.map((item) => {
           const active = isActiveRoute(item.href, item.exact);
 
@@ -77,25 +57,6 @@ export function AdminSidebar() {
           );
         })}
       </nav>
-
-      {/* Bottom */}
-      <div className="mt-auto space-y-1 border-t border-outline-variant/10 pt-6 px-4 pb-6 shrink-0">
-        <button
-          onClick={() => toast.success('Deployment queued')}
-          className="w-full mb-4 border border-outline-variant bg-primary text-on-primary py-2.5 px-4 rounded font-semibold text-sm flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.99] transition-all"
-        >
-          <span className="material-symbols-outlined text-sm">rocket_launch</span>
-          Deploy Update
-        </button>
-
-        <Link
-          href="/docs"
-          className="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50 transition-colors text-sm"
-        >
-          <span className="material-symbols-outlined">menu_book</span>
-          Docs
-        </Link>
-      </div>
     </aside>
   );
 }

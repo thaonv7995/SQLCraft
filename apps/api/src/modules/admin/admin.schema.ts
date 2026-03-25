@@ -133,6 +133,115 @@ export const ListSystemJobsQuerySchema = z.object({
   type: z.string().min(1).max(100).optional(),
 });
 
+// ─── Admin Config ────────────────────────────────────────────────────────────
+
+const AdminPlatformConfigSchema = z.object({
+  defaultDialect: z.enum(['postgresql-16', 'mysql-8', 'sqlite-3']),
+  defaultChallengePoints: z.string().min(1).max(20),
+  sessionTimeoutMinutes: z.string().min(1).max(20),
+  dailyQueryBudget: z.string().min(1).max(20),
+  starterSchemaVisibility: z.enum(['schema-only', 'schema-and-sample', 'delayed-sample']),
+  enableExplainHints: z.boolean(),
+  allowSampleDataDownloads: z.boolean(),
+  operatorNote: z.string().max(2000),
+});
+
+const AdminRankingConfigSchema = z.object({
+  globalWindow: z.enum(['all-time', 'seasonal', 'rolling-30']),
+  globalLeaderboardSize: z.string().min(1).max(20),
+  challengeLeaderboardSize: z.string().min(1).max(20),
+  tieBreaker: z.enum(['completion-speed', 'accuracy-first', 'recent-activity']),
+  refreshInterval: z.enum(['1m', '5m', '15m']),
+  displayProvisionalRanks: z.boolean(),
+  highlightRecentMovers: z.boolean(),
+});
+
+const AdminModerationConfigSchema = z.object({
+  requireDraftValidation: z.boolean(),
+  blockDangerousSql: z.boolean(),
+  autoHoldHighPointSubmissions: z.boolean(),
+  manualReviewSlaHours: z.string().min(1).max(20),
+  publishChecklist: z.string().max(4000),
+  rejectionTemplate: z.string().max(4000),
+});
+
+const AdminInfrastructureConfigSchema = z.object({
+  queryWorkerConcurrency: z.string().min(1).max(20),
+  evaluationWorkerConcurrency: z.string().min(1).max(20),
+  sandboxWarmPool: z.string().min(1).max(20),
+  runRetentionDays: z.string().min(1).max(20),
+  objectStorageClass: z.enum(['standard', 'infrequent', 'archive']),
+  warningThresholdGb: z.string().min(1).max(20),
+  keepExecutionSnapshots: z.boolean(),
+  enableNightlyExports: z.boolean(),
+});
+
+const AdminFeatureFlagsSchema = z.object({
+  globalRankings: z.boolean(),
+  challengeRankings: z.boolean(),
+  submissionQueue: z.boolean(),
+  explanationPanel: z.boolean(),
+  snapshotExports: z.boolean(),
+});
+
+export const AdminConfigSchema = z.object({
+  platform: AdminPlatformConfigSchema,
+  rankings: AdminRankingConfigSchema,
+  moderation: AdminModerationConfigSchema,
+  infrastructure: AdminInfrastructureConfigSchema,
+  flags: AdminFeatureFlagsSchema,
+});
+
+export const DEFAULT_ADMIN_CONFIG = {
+  platform: {
+    defaultDialect: 'postgresql-16',
+    defaultChallengePoints: '100',
+    sessionTimeoutMinutes: '35',
+    dailyQueryBudget: '800',
+    starterSchemaVisibility: 'schema-only',
+    enableExplainHints: true,
+    allowSampleDataDownloads: false,
+    operatorNote:
+      'Keep the default SQL practice experience stable for new users and admins.',
+  },
+  rankings: {
+    globalWindow: 'all-time',
+    globalLeaderboardSize: '100',
+    challengeLeaderboardSize: '50',
+    tieBreaker: 'completion-speed',
+    refreshInterval: '5m',
+    displayProvisionalRanks: true,
+    highlightRecentMovers: true,
+  },
+  moderation: {
+    requireDraftValidation: true,
+    blockDangerousSql: true,
+    autoHoldHighPointSubmissions: true,
+    manualReviewSlaHours: '24',
+    publishChecklist:
+      'Reference SQL returns stable rows.\nFixed points match challenge difficulty.\nReview leaderboard impact before publishing.',
+    rejectionTemplate:
+      'Please run draft validation again, confirm fixed points, and resubmit after resolving review notes.',
+  },
+  infrastructure: {
+    queryWorkerConcurrency: '12',
+    evaluationWorkerConcurrency: '6',
+    sandboxWarmPool: '8',
+    runRetentionDays: '14',
+    objectStorageClass: 'standard',
+    warningThresholdGb: '120',
+    keepExecutionSnapshots: true,
+    enableNightlyExports: true,
+  },
+  flags: {
+    globalRankings: true,
+    challengeRankings: true,
+    submissionQueue: true,
+    explanationPanel: false,
+    snapshotExports: true,
+  },
+} satisfies z.infer<typeof AdminConfigSchema>;
+
 // ─── Params ───────────────────────────────────────────────────────────────────
 
 export const AdminIdParamsSchema = z.object({
@@ -153,4 +262,5 @@ export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabase
 export type DirectCanonicalDatabaseImportBody = z.infer<typeof DirectCanonicalDatabaseImportSchema>;
 export type SqlDumpScanImportBody = z.infer<typeof SqlDumpScanImportSchema>;
 export type ListSystemJobsQuery = z.infer<typeof ListSystemJobsQuerySchema>;
+export type AdminConfigBody = z.infer<typeof AdminConfigSchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;

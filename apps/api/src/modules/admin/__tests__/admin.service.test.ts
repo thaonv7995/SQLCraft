@@ -36,13 +36,24 @@ vi.mock('../../../db/repositories', () => ({
     updateDatasetTemplate: vi.fn(),
     createSystemJob: vi.fn(),
     listSystemJobs: vi.fn(),
+    findAdminConfig: vi.fn(),
+    createAdminConfig: vi.fn(),
+    updateAdminConfig: vi.fn(),
   },
 }));
 
 import { adminRepository } from '../../../db/repositories';
 import { ValidationError } from '../../../lib/errors';
-import { importCanonicalDatabase, listSystemJobs } from '../admin.service';
+import {
+  getAdminConfig,
+  importCanonicalDatabase,
+  listSystemJobs,
+  resetAdminConfig,
+  updateAdminConfig,
+} from '../admin.service';
+import type { AdminConfigBody } from '../admin.schema';
 import type {
+  AdminConfigRow,
   SchemaTemplateRow,
   DatasetTemplateRow,
   SystemJobRow,
@@ -94,6 +105,63 @@ const makeSystemJob = (overrides: Partial<SystemJobRow> = {}): SystemJobRow => (
   ...overrides,
 });
 
+const makeAdminConfigState = (): AdminConfigBody => ({
+  platform: {
+    defaultDialect: 'postgresql-16',
+    defaultChallengePoints: '100',
+    sessionTimeoutMinutes: '35',
+    dailyQueryBudget: '800',
+    starterSchemaVisibility: 'schema-only',
+    enableExplainHints: true,
+    allowSampleDataDownloads: false,
+    operatorNote: 'Keep the default SQL practice experience stable.',
+  },
+  rankings: {
+    globalWindow: 'all-time',
+    globalLeaderboardSize: '100',
+    challengeLeaderboardSize: '50',
+    tieBreaker: 'completion-speed',
+    refreshInterval: '5m',
+    displayProvisionalRanks: true,
+    highlightRecentMovers: true,
+  },
+  moderation: {
+    requireDraftValidation: true,
+    blockDangerousSql: true,
+    autoHoldHighPointSubmissions: true,
+    manualReviewSlaHours: '24',
+    publishChecklist: 'Validate reference SQL before publishing.',
+    rejectionTemplate: 'Resolve review notes and resubmit.',
+  },
+  infrastructure: {
+    queryWorkerConcurrency: '12',
+    evaluationWorkerConcurrency: '6',
+    sandboxWarmPool: '8',
+    runRetentionDays: '14',
+    objectStorageClass: 'standard',
+    warningThresholdGb: '120',
+    keepExecutionSnapshots: true,
+    enableNightlyExports: true,
+  },
+  flags: {
+    globalRankings: true,
+    challengeRankings: true,
+    submissionQueue: true,
+    explanationPanel: false,
+    snapshotExports: true,
+  },
+});
+
+const makeAdminConfigRow = (overrides: Partial<AdminConfigRow> = {}): AdminConfigRow => ({
+  id: 'admin-config-1',
+  scope: 'global',
+  config: makeAdminConfigState(),
+  updatedBy: null,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  updatedAt: new Date('2026-01-01T00:00:00Z'),
+  ...overrides,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(adminRepository.findLatestSchemaTemplateByName).mockResolvedValue(null);
@@ -107,6 +175,13 @@ beforeEach(() => {
     makeSystemJob(data),
   );
   vi.mocked(adminRepository.listSystemJobs).mockResolvedValue([makeSystemJob()]);
+  vi.mocked(adminRepository.findAdminConfig).mockResolvedValue(null);
+  vi.mocked(adminRepository.createAdminConfig).mockImplementation(async (data: any) =>
+    makeAdminConfigRow(data),
+  );
+  vi.mocked(adminRepository.updateAdminConfig).mockImplementation(async (_scope: string, data: any) =>
+    makeAdminConfigRow({ scope: 'global', ...data }),
+  );
 });
 
 describe('importCanonicalDatabase()', () => {
@@ -222,5 +297,101 @@ describe('listSystemJobs()', () => {
       type: 'canonical-dataset-import',
     });
     expect(result.items).toHaveLength(1);
+  });
+});
+
+describe('getAdminConfig()', () => {
+  it('bootstraps the default config when no persisted row exists yet', async () => {
+    const result = await getAdminConfig();
+
+    expect(adminRepository.findAdminConfig).toHaveBeenCalledWith('global');
+    expect(adminRepository.createAdminConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: 'global',
+        updatedBy: null,
+        config: expect.objectContaining({
+          rankings: expect.objectContaining({
+            globalWindow: 'all-time',
+            tieBreaker: 'completion-speed',
+          }),
+          flags: expect.objectContaining({
+            globalRankings: true,
+            challengeRankings: true,
+          }),
+        }),
+      }),
+    );
+    expect(result.scope).toBe('global');
+  });
+
+  it('returns the persisted row when config already exists', async () => {
+    vi.mocked(adminRepository.findAdminConfig).mockResolvedValue(
+      makeAdminConfigRow({
+        updatedBy: 'admin-1',
+        config: {
+          ...makeAdminConfigState(),
+          rankings: {
+            ...makeAdminConfigState().rankings,
+            refreshInterval: '1m',
+          },
+        },
+      }),
+    );
+
+    const result = await getAdminConfig();
+
+    expect(adminRepository.createAdminConfig).not.toHaveBeenCalled();
+    expect(result.config.rankings.refreshInterval).toBe('1m');
+  });
+});
+
+describe('updateAdminConfig()', () => {
+  it('persists the provided config payload through the repository', async () => {
+    vi.mocked(adminRepository.findAdminConfig).mockResolvedValue(makeAdminConfigRow());
+
+    const payload = {
+      ...makeAdminConfigState(),
+      platform: {
+        ...makeAdminConfigState().platform,
+        dailyQueryBudget: '1200',
+      },
+      flags: {
+        ...makeAdminConfigState().flags,
+        explanationPanel: true,
+      },
+    };
+
+    const result = await updateAdminConfig('admin-9', payload);
+
+    expect(adminRepository.updateAdminConfig).toHaveBeenCalledWith('global', {
+      config: payload,
+      updatedBy: 'admin-9',
+    });
+    expect(result.config.platform.dailyQueryBudget).toBe('1200');
+    expect(result.config.flags.explanationPanel).toBe(true);
+  });
+});
+
+describe('resetAdminConfig()', () => {
+  it('restores the backend baseline config', async () => {
+    vi.mocked(adminRepository.findAdminConfig).mockResolvedValue(makeAdminConfigRow());
+
+    const result = await resetAdminConfig('admin-3');
+
+    expect(adminRepository.updateAdminConfig).toHaveBeenCalledWith(
+      'global',
+      expect.objectContaining({
+        updatedBy: 'admin-3',
+        config: expect.objectContaining({
+          infrastructure: expect.objectContaining({
+            sandboxWarmPool: '8',
+          }),
+          moderation: expect.objectContaining({
+            requireDraftValidation: true,
+          }),
+        }),
+      }),
+    );
+    expect(result.config.infrastructure.sandboxWarmPool).toBe('8');
   });
 });

@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import type {
+  AdminConfigBody,
   CreateTrackBody,
   UpdateTrackBody,
   CreateLessonBody,
@@ -26,9 +27,12 @@ import {
   updateUserStatusHandler,
   updateUserRoleHandler,
   systemHealthHandler,
+  getAdminConfigHandler,
   importCanonicalDatabaseHandler,
   listSystemJobsHandler,
+  resetAdminConfigHandler,
   scanSqlDumpHandler,
+  updateAdminConfigHandler,
 } from './admin.handler';
 
 export default async function adminRouter(fastify: FastifyInstance): Promise<void> {
@@ -402,6 +406,45 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
   );
 
   // ─── System ───────────────────────────────────────────────────────────────────
+
+  fastify.get(
+    '/v1/admin/config',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Get persisted admin configuration',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    getAdminConfigHandler,
+  );
+
+  fastify.put<{ Body: AdminConfigBody }>(
+    '/v1/admin/config',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Update persisted admin configuration',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    updateAdminConfigHandler,
+  );
+
+  fastify.post(
+    '/v1/admin/config/reset',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Reset admin configuration to the backend baseline',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    resetAdminConfigHandler,
+  );
 
   fastify.get<{ Querystring: ListSystemJobsQuery }>(
     '/v1/admin/system/jobs',

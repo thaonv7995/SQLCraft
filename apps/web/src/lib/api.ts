@@ -689,6 +689,62 @@ export interface AdminSystemHealth {
   };
 }
 
+export interface AdminConfig {
+  platform: {
+    defaultDialect: 'postgresql-16' | 'mysql-8' | 'sqlite-3';
+    defaultChallengePoints: string;
+    sessionTimeoutMinutes: string;
+    dailyQueryBudget: string;
+    starterSchemaVisibility: 'schema-only' | 'schema-and-sample' | 'delayed-sample';
+    enableExplainHints: boolean;
+    allowSampleDataDownloads: boolean;
+    operatorNote: string;
+  };
+  rankings: {
+    globalWindow: 'all-time' | 'seasonal' | 'rolling-30';
+    globalLeaderboardSize: string;
+    challengeLeaderboardSize: string;
+    tieBreaker: 'completion-speed' | 'accuracy-first' | 'recent-activity';
+    refreshInterval: '1m' | '5m' | '15m';
+    displayProvisionalRanks: boolean;
+    highlightRecentMovers: boolean;
+  };
+  moderation: {
+    requireDraftValidation: boolean;
+    blockDangerousSql: boolean;
+    autoHoldHighPointSubmissions: boolean;
+    manualReviewSlaHours: string;
+    publishChecklist: string;
+    rejectionTemplate: string;
+  };
+  infrastructure: {
+    queryWorkerConcurrency: string;
+    evaluationWorkerConcurrency: string;
+    sandboxWarmPool: string;
+    runRetentionDays: string;
+    objectStorageClass: 'standard' | 'infrequent' | 'archive';
+    warningThresholdGb: string;
+    keepExecutionSnapshots: boolean;
+    enableNightlyExports: boolean;
+  };
+  flags: {
+    globalRankings: boolean;
+    challengeRankings: boolean;
+    submissionQueue: boolean;
+    explanationPanel: boolean;
+    snapshotExports: boolean;
+  };
+}
+
+export interface AdminConfigRecord {
+  id: string;
+  scope: string;
+  config: AdminConfig;
+  updatedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface RawSystemJob {
   id: string;
   type: string;
@@ -1590,6 +1646,13 @@ export const usersApi = {
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
 export const adminApi = {
+  getConfig: () => api.get<AdminConfigRecord>('/admin/config').then((r) => r.data),
+
+  updateConfig: (config: AdminConfig) =>
+    api.put<AdminConfigRecord>('/admin/config', config).then((r) => r.data),
+
+  resetConfig: () => api.post<AdminConfigRecord>('/admin/config/reset').then((r) => r.data),
+
   systemHealth: () => api.get<AdminSystemHealth>('/admin/system/health').then((r) => r.data),
 
   systemJobs: (params?: {

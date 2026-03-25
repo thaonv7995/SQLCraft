@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api';
+import { AdminConfigPanel } from '@/components/admin/admin-config-panel';
 import { StatusBadge } from '@/components/ui/badge';
 import {
   Table,
@@ -18,7 +19,7 @@ import {
 } from '@/components/ui/table';
 import { formatRelativeTime } from '@/lib/utils';
 
-type SystemTab = 'health' | 'queues' | 'logs' | 'resources';
+type SystemTab = 'health' | 'queues' | 'logs' | 'resources' | 'config';
 type QueueFilter = 'all' | 'pending' | 'running' | 'completed' | 'failed' | 'retrying';
 
 const TAB_OPTIONS: Array<{ id: SystemTab; label: string; icon: string }> = [
@@ -26,6 +27,7 @@ const TAB_OPTIONS: Array<{ id: SystemTab; label: string; icon: string }> = [
   { id: 'queues', label: 'Queues', icon: 'account_tree' },
   { id: 'logs', label: 'Logs', icon: 'receipt_long' },
   { id: 'resources', label: 'Resources', icon: 'memory' },
+  { id: 'config', label: 'Config', icon: 'tune' },
 ];
 
 const FILTER_OPTIONS: QueueFilter[] = [
@@ -96,8 +98,8 @@ export default function AdminSystemPage() {
           <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">System</p>
           <h1 className="mt-2 page-title-lg">System Operations</h1>
           <p className="page-lead mt-2 max-w-3xl">
-            Operational console for platform health, queue execution, logs, and resource posture.
-            This page is frontend-only and uses currently available admin health/job endpoints.
+            Operational console for platform health, queue execution, logs, resource posture, and
+            persisted admin config.
           </p>
         </div>
 
@@ -326,6 +328,8 @@ export default function AdminSystemPage() {
           </div>
         </section>
       ) : null}
+
+      {activeTab === 'config' ? <AdminConfigPanel /> : null}
     </div>
   );
 }

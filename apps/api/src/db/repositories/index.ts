@@ -67,4 +67,4 @@ export type {
 } from './challenges.repository';
 
 // ─── Types: Admin ─────────────────────────────────────────────────────────────
-export type { SystemHealthStats } from './admin.repository';
+export type { SystemHealthStats, AdminConfigRow } from './admin.repository';

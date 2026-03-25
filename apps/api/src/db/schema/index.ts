@@ -401,3 +401,18 @@ export const systemJobs = pgTable('system_jobs', {
   completedAt: timestamp('completed_at'),
   createdAt: timestamp('created_at').notNull().default(sql`now()`),
 });
+
+export const adminConfigs = pgTable(
+  'admin_configs',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    scope: varchar('scope', { length: 50 }).notNull().default('global'),
+    config: jsonb('config').notNull(),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    scopeIdx: uniqueIndex('admin_configs_scope_idx').on(table.scope),
+  }),
+);

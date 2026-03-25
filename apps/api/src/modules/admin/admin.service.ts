@@ -12,7 +12,9 @@ import {
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
 import { NotFoundError, ValidationError } from '../../lib/errors';
+import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
+  AdminConfigBody,
   CreateTrackBody,
   UpdateTrackBody,
   CreateLessonBody,
@@ -27,6 +29,7 @@ import type {
   ListSystemJobsQuery,
 } from './admin.schema';
 import type {
+  AdminConfigResult,
   CreateTrackResult,
   UpdateTrackResult,
   CreateLessonResult,
@@ -48,6 +51,12 @@ import {
   createStoredSqlDumpScan,
   loadStoredSqlDumpScan,
 } from './sql-dump-scan';
+
+const ADMIN_CONFIG_SCOPE = 'global';
+
+function cloneAdminConfig(config: AdminConfigBody): AdminConfigBody {
+  return JSON.parse(JSON.stringify(config)) as AdminConfigBody;
+}
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
 
@@ -215,6 +224,65 @@ export async function getSystemHealth(): Promise<SystemHealthResult> {
     timestamp: new Date().toISOString(),
     stats,
   };
+}
+
+export async function getAdminConfig(): Promise<AdminConfigResult> {
+  const existing = await adminRepository.findAdminConfig(ADMIN_CONFIG_SCOPE);
+  if (existing) {
+    return {
+      ...existing,
+      config: existing.config as AdminConfigBody,
+    };
+  }
+
+  const created = await adminRepository.createAdminConfig({
+    scope: ADMIN_CONFIG_SCOPE,
+    config: cloneAdminConfig(DEFAULT_ADMIN_CONFIG),
+    updatedBy: null,
+  });
+
+  return {
+    ...created,
+    config: created.config as AdminConfigBody,
+  };
+}
+
+export async function updateAdminConfig(
+  userId: string,
+  config: AdminConfigBody,
+): Promise<AdminConfigResult> {
+  const existing = await adminRepository.findAdminConfig(ADMIN_CONFIG_SCOPE);
+
+  if (!existing) {
+    const created = await adminRepository.createAdminConfig({
+      scope: ADMIN_CONFIG_SCOPE,
+      config,
+      updatedBy: userId,
+    });
+
+    return {
+      ...created,
+      config: created.config as AdminConfigBody,
+    };
+  }
+
+  const updated = await adminRepository.updateAdminConfig(ADMIN_CONFIG_SCOPE, {
+    config,
+    updatedBy: userId,
+  });
+
+  if (!updated) {
+    throw new NotFoundError('Admin config not found');
+  }
+
+  return {
+    ...updated,
+    config: updated.config as AdminConfigBody,
+  };
+}
+
+export async function resetAdminConfig(userId: string): Promise<AdminConfigResult> {
+  return updateAdminConfig(userId, cloneAdminConfig(DEFAULT_ADMIN_CONFIG));
 }
 
 export async function listSystemJobs(

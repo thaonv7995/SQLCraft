@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { User } from '@/lib/api';
@@ -31,15 +31,17 @@ function UserAvatar({
   displayName,
   avatarUrl,
   user,
+  adminShell,
 }: {
   displayName: string;
   avatarUrl?: string | null;
   user: User;
+  adminShell: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const initials = generateInitials(displayName);
-  const menuItems = buildUserMenuItems(user);
+  const menuItems = adminShell ? [] : buildUserMenuItems(user);
 
   return (
     <div className="relative">
@@ -75,19 +77,21 @@ function UserAvatar({
             <div className="px-3 py-2.5 bg-surface-container-highest/50">
               <p className="text-sm font-medium text-on-surface truncate">{displayName}</p>
             </div>
-            <nav className="py-1">
-              {menuItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 px-3 py-2 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
-                >
-                  <span className="material-symbols-outlined text-base">{item.icon}</span>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+            {menuItems.length > 0 ? (
+              <nav className="py-1">
+                {menuItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-2.5 px-3 py-2 text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-base">{item.icon}</span>
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+            ) : null}
             <div className="bg-surface-container-highest/30 py-1">
               <button
                 onClick={() => {
@@ -108,10 +112,12 @@ function UserAvatar({
 }
 
 export function Navbar() {
+  const pathname = usePathname();
   const router = useRouter();
   const { user, isAuthenticated } = useAuthStore();
   const mounted = useMounted();
   const authed = mounted && isAuthenticated();
+  const inAdminShell = pathname.startsWith('/admin');
   const homeHref = authed && user && isAdminUser(user) ? '/admin' : authed ? '/dashboard' : '/';
 
   return (
@@ -135,15 +141,17 @@ export function Navbar() {
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         {authed ? (
           <>
-            <Button
-              variant="primary"
-              size="sm"
-              leftIcon={<span className="material-symbols-outlined text-sm">play_arrow</span>}
-              onClick={() => router.push('/lab')}
-              className="hidden md:inline-flex"
-            >
-              Execute Query
-            </Button>
+            {!inAdminShell ? (
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={<span className="material-symbols-outlined text-sm">play_arrow</span>}
+                onClick={() => router.push('/lab')}
+                className="hidden md:inline-flex"
+              >
+                Execute Query
+              </Button>
+            ) : null}
 
             {/* Notifications */}
             <button
@@ -159,6 +167,7 @@ export function Navbar() {
                 user={user}
                 displayName={user.displayName ?? user.username}
                 avatarUrl={user.avatarUrl}
+                adminShell={inAdminShell}
               />
             )}
           </>

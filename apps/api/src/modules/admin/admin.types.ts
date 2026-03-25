@@ -9,6 +9,7 @@ import type {
   UserRow,
 } from '../../db/repositories';
 import type {
+  AdminConfigRow as AdminConfigRecordRow,
   SchemaTemplateRow as AdminSchemaTemplateRow,
   DatasetTemplateRow as AdminDatasetTemplateRow,
   SystemJobRow as AdminSystemJobRow,
@@ -17,6 +18,7 @@ import type {
   AdminDatabaseDomain,
   SqlDumpScanResult as AdminSqlDumpScanResult,
 } from './sql-dump-scan';
+import type { AdminConfigBody } from './admin.schema';
 
 export interface CreateTrackResult extends TrackRow {}
 
@@ -73,6 +75,10 @@ export interface SystemHealthResult {
     activeSessions: number;
     pendingJobs: number;
   };
+}
+
+export interface AdminConfigResult extends Omit<AdminConfigRecordRow, 'config'> {
+  config: AdminConfigBody;
 }
 
 export type SqlDumpScanResult = AdminSqlDumpScanResult;

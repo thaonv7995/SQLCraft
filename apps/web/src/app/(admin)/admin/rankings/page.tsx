@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi, challengesApi } from '@/lib/api';
@@ -52,6 +53,12 @@ export default function AdminRankingsPage() {
     staleTime: 60_000,
   });
 
+  const configQuery = useQuery({
+    queryKey: ['admin-config'],
+    queryFn: adminApi.getConfig,
+    staleTime: 30_000,
+  });
+
   const challenges = challengesQuery.data ?? EMPTY_CHALLENGES;
   const selectedChallengeId = manualSelectedChallengeId ?? challenges[0]?.id ?? null;
 
@@ -69,6 +76,10 @@ export default function AdminRankingsPage() {
 
   const globalLeaders = globalQuery.data ?? EMPTY_GLOBAL;
   const challengeLeaders = challengeLeaderboardQuery.data ?? EMPTY_CHALLENGE_LEADERS;
+  const rankingConfig = configQuery.data?.config.rankings ?? null;
+  const platformConfig = configQuery.data?.config.platform ?? null;
+  const moderationConfig = configQuery.data?.config.moderation ?? null;
+  const featureFlags = configQuery.data?.config.flags ?? null;
 
   return (
     <div className="page-shell-wide page-stack">
@@ -93,7 +104,9 @@ export default function AdminRankingsPage() {
           </div>
           <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
             <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Scoring Rules</p>
-            <p className="mt-2 text-xl font-semibold text-on-surface">Policy-based</p>
+            <p className="mt-2 text-xl font-semibold text-on-surface">
+              {rankingConfig ? rankingConfig.tieBreaker : 'Loading'}
+            </p>
           </div>
         </div>
       </div>
@@ -307,34 +320,68 @@ export default function AdminRankingsPage() {
         <section className="section-card p-5">
           <h2 className="page-section-title">Point Rules</h2>
           <p className="mt-1 text-sm text-on-surface-variant">
-            Rules are policy-driven in the product, while admin-side rule configuration APIs are
-            still being staged.
+            This view reflects the persisted admin config that backs ranking and scoring behavior.
           </p>
 
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Base Points</p>
               <p className="mt-2 text-sm text-on-surface">
-                Each challenge contributes its declared `points` value to the user score.
+                {platformConfig
+                  ? `New challenges default to ${platformConfig.defaultChallengePoints} points.`
+                  : 'Loading persisted platform defaults.'}
               </p>
             </div>
             <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Pass Condition</p>
               <p className="mt-2 text-sm text-on-surface">
-                Challenge ranking status uses successful submissions from validator outcomes.
+                {moderationConfig
+                  ? moderationConfig.requireDraftValidation
+                    ? 'Draft validation is required before review and publish.'
+                    : 'Draft validation is currently optional in admin config.'
+                  : 'Loading moderation policy.'}
               </p>
             </div>
             <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Config Surface</p>
               <p className="mt-2 text-sm text-on-surface">
-                Dynamic multipliers and seasonal policies are planned and currently read-only.
+                {rankingConfig
+                  ? `${rankingConfig.globalWindow} window, ${rankingConfig.refreshInterval} refresh, tie-break by ${rankingConfig.tieBreaker}.`
+                  : 'Loading ranking config.'}
               </p>
             </div>
           </div>
 
-          <div className="mt-4 rounded-xl border border-outline-variant/10 bg-surface px-4 py-3 text-xs text-on-surface-variant">
-            Staged state: backend endpoints for point-rule CRUD are not wired in this phase, so this
-            section intentionally documents current behavior only.
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="rounded-xl border border-outline-variant/10 bg-surface px-4 py-3 text-xs text-on-surface-variant">
+              Global rows: {rankingConfig?.globalLeaderboardSize ?? '—'}
+            </div>
+            <div className="rounded-xl border border-outline-variant/10 bg-surface px-4 py-3 text-xs text-on-surface-variant">
+              Challenge rows: {rankingConfig?.challengeLeaderboardSize ?? '—'}
+            </div>
+            <div className="rounded-xl border border-outline-variant/10 bg-surface px-4 py-3 text-xs text-on-surface-variant">
+              Ranking surfaces:{' '}
+              {featureFlags
+                ? featureFlags.globalRankings && featureFlags.challengeRankings
+                  ? 'enabled'
+                  : 'partially disabled'
+                : 'loading'}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Link
+              href="/admin/system?tab=config"
+              className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-sm text-on-surface hover:bg-surface-container"
+            >
+              <span className="material-symbols-outlined text-sm">tune</span>
+              Open persisted config
+            </Link>
+            {configQuery.isError ? (
+              <span className="rounded-full bg-error/10 px-2 py-1 text-xs text-error">
+                config endpoint unavailable
+              </span>
+            ) : null}
           </div>
         </section>
       ) : null}
