@@ -90,7 +90,17 @@ export const UpdateUserRoleSchema = z.object({
 
 // ─── Database Imports & Jobs ─────────────────────────────────────────────────
 
-export const ImportCanonicalDatabaseSchema = z.object({
+export const AdminDatabaseDomainSchema = z.enum([
+  'ecommerce',
+  'fintech',
+  'health',
+  'iot',
+  'social',
+  'analytics',
+  'other',
+]);
+
+export const DirectCanonicalDatabaseImportSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().optional(),
   definition: z.record(z.unknown()),
@@ -102,6 +112,20 @@ export const ImportCanonicalDatabaseSchema = z.object({
   generateDerivedDatasets: z.boolean().default(true),
   status: z.enum(['draft', 'published', 'archived']).default('published'),
 });
+
+export const SqlDumpScanImportSchema = z.object({
+  scanId: z.string().uuid(),
+  schemaName: z.string().min(1).max(100),
+  domain: AdminDatabaseDomainSchema,
+  datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).optional().nullable(),
+  description: z.string().optional().nullable(),
+  tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+});
+
+export const ImportCanonicalDatabaseSchema = z.union([
+  DirectCanonicalDatabaseImportSchema,
+  SqlDumpScanImportSchema,
+]);
 
 export const ListSystemJobsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -126,5 +150,7 @@ export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
 export type UpdateUserStatusBody = z.infer<typeof UpdateUserStatusSchema>;
 export type UpdateUserRoleBody = z.infer<typeof UpdateUserRoleSchema>;
 export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabaseSchema>;
+export type DirectCanonicalDatabaseImportBody = z.infer<typeof DirectCanonicalDatabaseImportSchema>;
+export type SqlDumpScanImportBody = z.infer<typeof SqlDumpScanImportSchema>;
 export type ListSystemJobsQuery = z.infer<typeof ListSystemJobsQuerySchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;

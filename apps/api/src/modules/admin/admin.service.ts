@@ -22,6 +22,8 @@ import type {
   UpdateUserStatusBody,
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
+  DirectCanonicalDatabaseImportBody,
+  SqlDumpScanImportBody,
   ListSystemJobsQuery,
 } from './admin.schema';
 import type {
@@ -40,7 +42,12 @@ import type {
   SystemHealthResult,
   ImportCanonicalDatabaseResult,
   ListSystemJobsResult,
+  SqlDumpScanResult,
 } from './admin.types';
+import {
+  createStoredSqlDumpScan,
+  loadStoredSqlDumpScan,
+} from './sql-dump-scan';
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
 
@@ -221,9 +228,33 @@ function formatDatasetTemplateName(baseName: string, size: 'tiny' | 'small' | 'm
   return `${baseName} ${size.charAt(0).toUpperCase()}${size.slice(1)}`;
 }
 
-export async function importCanonicalDatabase(
-  userId: string,
+function isSqlDumpScanImport(
   body: ImportCanonicalDatabaseBody,
+): body is SqlDumpScanImportBody {
+  return 'scanId' in body;
+}
+
+function mergeDefinitionMetadata(
+  definition: Record<string, unknown>,
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const currentMetadata =
+    definition.metadata && typeof definition.metadata === 'object'
+      ? (definition.metadata as Record<string, unknown>)
+      : {};
+
+  return {
+    ...definition,
+    metadata: {
+      ...currentMetadata,
+      ...metadata,
+    },
+  };
+}
+
+async function persistCanonicalDatabaseImport(
+  userId: string,
+  body: DirectCanonicalDatabaseImportBody,
 ): Promise<ImportCanonicalDatabaseResult> {
   const normalizedRowCounts = normalizeDatasetRowCounts(body.canonicalDataset.rowCounts);
   const sourceTotalRows = sumDatasetRowCounts(normalizedRowCounts);
@@ -322,4 +353,53 @@ export async function importCanonicalDatabase(
       datasetGenerationJob,
     },
   };
+}
+
+export async function scanSqlDump(
+  fileName: string,
+  buffer: Buffer,
+): Promise<SqlDumpScanResult> {
+  if (!/\.sql$/i.test(fileName)) {
+    throw new ValidationError('Only .sql dump files are supported');
+  }
+
+  return createStoredSqlDumpScan(buffer, fileName);
+}
+
+export async function importCanonicalDatabase(
+  userId: string,
+  body: ImportCanonicalDatabaseBody,
+): Promise<ImportCanonicalDatabaseResult> {
+  if (!isSqlDumpScanImport(body)) {
+    return persistCanonicalDatabaseImport(userId, body);
+  }
+
+  const storedScan = await loadStoredSqlDumpScan(body.scanId);
+  if (!storedScan) {
+    throw new NotFoundError('SQL dump scan not found or has expired');
+  }
+
+  const sourceScale =
+    body.datasetScale ??
+    storedScan.inferredScale ??
+    classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(storedScan.rowCounts));
+
+  return persistCanonicalDatabaseImport(userId, {
+    name: body.schemaName,
+    description: body.description?.trim() || undefined,
+    definition: mergeDefinitionMetadata(storedScan.definition, {
+      reviewedDomain: body.domain,
+      reviewedScale: sourceScale,
+      tags: body.tags ?? [],
+      scanId: storedScan.scanId,
+      sourceArtifactUrl: storedScan.artifactUrl,
+    }),
+    canonicalDataset: {
+      name: `${body.schemaName} Canonical`,
+      rowCounts: storedScan.rowCounts,
+      artifactUrl: storedScan.artifactUrl,
+    },
+    generateDerivedDatasets: true,
+    status: 'published',
+  });
 }

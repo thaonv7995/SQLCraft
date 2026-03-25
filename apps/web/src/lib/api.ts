@@ -7,10 +7,13 @@ import axios, {
 import { getExplainPlanMode } from './utils';
 
 declare module 'axios' {
+  // Preserve Axios generics while extending request config with a local flag.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   interface AxiosRequestConfig<D = any> {
     skipAuthRedirect?: boolean;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   interface InternalAxiosRequestConfig<D = any> {
     skipAuthRedirect?: boolean;
   }
@@ -818,6 +821,51 @@ export interface DatabaseRelationship {
   label?: string;
 }
 
+export interface SqlDumpColumnSummary {
+  name: string;
+  type: string;
+  nullable: boolean;
+  isPrimary?: boolean;
+  isForeign?: boolean;
+}
+
+export interface SqlDumpTableSummary {
+  name: string;
+  rowCount: number;
+  columnCount: number;
+  columns: SqlDumpColumnSummary[];
+}
+
+export interface SqlDumpScanResult {
+  scanId: string;
+  fileName: string;
+  databaseName?: string | null;
+  schemaName?: string | null;
+  domain: DatabaseDomain;
+  inferredScale?: DatasetScale | null;
+  totalTables: number;
+  totalRows: number;
+  columnCount: number;
+  detectedPrimaryKeys: number;
+  detectedForeignKeys: number;
+  tables: SqlDumpTableSummary[];
+}
+
+export interface SqlDumpImportPayload {
+  scanId: string;
+  schemaName: string;
+  domain: DatabaseDomain;
+  datasetScale?: DatasetScale | null;
+  description?: string | null;
+  tags?: string[];
+}
+
+export interface SqlDumpImportResult {
+  schemaTemplateId: string;
+  datasetTemplateId?: string | null;
+  databaseId?: string;
+}
+
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
 
 export interface LeaderboardEntry {
@@ -1055,6 +1103,32 @@ function normalizeSystemJob(job: RawSystemJob): SystemJob {
     startedAt: job.startedAt ?? job.scheduledAt ?? job.createdAt,
     completedAt: job.completedAt ?? undefined,
     errorMessage: job.errorMessage ?? undefined,
+  };
+}
+
+function normalizeSqlDumpImportResult(payload: unknown): SqlDumpImportResult {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      schemaTemplateId: '',
+      datasetTemplateId: null,
+    };
+  }
+
+  const result = payload as {
+    schemaTemplateId?: string;
+    datasetTemplateId?: string | null;
+    databaseId?: string;
+    schemaTemplate?: { id?: string };
+    sourceDatasetTemplate?: { id?: string };
+  };
+
+  return {
+    schemaTemplateId: result.schemaTemplateId ?? result.schemaTemplate?.id ?? '',
+    datasetTemplateId:
+      result.datasetTemplateId ??
+      result.sourceDatasetTemplate?.id ??
+      null,
+    databaseId: result.databaseId,
   };
 }
 
@@ -1597,6 +1671,21 @@ export const databasesApi = {
         { databaseId, scale },
       )
       .then((r) => normalizeLearningSession(r.data.session)),
+
+  scanSqlDump: (file: File) => {
+    const form = new FormData();
+    form.append('dump', file);
+    return api
+      .post<SqlDumpScanResult>('/admin/databases/scan', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      .then((r) => r.data);
+  },
+
+  importFromScan: (payload: SqlDumpImportPayload) =>
+    api
+      .post<SqlDumpImportResult>('/admin/databases/import', payload)
+      .then((r) => normalizeSqlDumpImportResult(r.data)),
 };
 
 // ─── Leaderboard API ──────────────────────────────────────────────────────────

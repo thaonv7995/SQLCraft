@@ -28,6 +28,7 @@ import {
   systemHealthHandler,
   importCanonicalDatabaseHandler,
   listSystemJobsHandler,
+  scanSqlDumpHandler,
 } from './admin.handler';
 
 export default async function adminRouter(fastify: FastifyInstance): Promise<void> {
@@ -312,39 +313,89 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
 
   // ─── Database Imports ───────────────────────────────────────────────────────
 
+  fastify.post(
+    '/v1/admin/databases/scan',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Upload and scan a SQL dump before publishing',
+        security: [{ bearerAuth: [] }],
+        consumes: ['multipart/form-data'],
+        body: {
+          type: 'object',
+          required: ['dump'],
+          properties: {
+            dump: { type: 'string', format: 'binary' },
+          },
+        },
+      },
+    },
+    scanSqlDumpHandler,
+  );
+
   fastify.post<{ Body: ImportCanonicalDatabaseBody }>(
     '/v1/admin/databases/import',
     {
       onRequest: adminGuard,
       schema: {
         tags: ['Admin'],
-        summary: 'Import a canonical schema definition and dataset metadata',
+        summary: 'Import a canonical schema definition or publish a scanned SQL dump',
         security: [{ bearerAuth: [] }],
         body: {
-          type: 'object',
-          required: ['name', 'definition', 'canonicalDataset'],
-          properties: {
-            name: { type: 'string', minLength: 1, maxLength: 100 },
-            description: { type: 'string' },
-            definition: {
+          oneOf: [
+            {
               type: 'object',
-              additionalProperties: true,
-            },
-            canonicalDataset: {
-              type: 'object',
-              required: ['rowCounts'],
+              required: ['name', 'definition', 'canonicalDataset'],
               properties: {
                 name: { type: 'string', minLength: 1, maxLength: 100 },
-                rowCounts: {
+                description: { type: 'string' },
+                definition: {
                   type: 'object',
-                  additionalProperties: { type: 'integer', minimum: 0 },
+                  additionalProperties: true,
                 },
-                artifactUrl: { type: 'string', format: 'uri' },
+                canonicalDataset: {
+                  type: 'object',
+                  required: ['rowCounts'],
+                  properties: {
+                    name: { type: 'string', minLength: 1, maxLength: 100 },
+                    rowCounts: {
+                      type: 'object',
+                      additionalProperties: { type: 'integer', minimum: 0 },
+                    },
+                    artifactUrl: { type: 'string', format: 'uri' },
+                  },
+                },
+                generateDerivedDatasets: { type: 'boolean', default: true },
+                status: {
+                  type: 'string',
+                  enum: ['draft', 'published', 'archived'],
+                  default: 'published',
+                },
               },
             },
-            generateDerivedDatasets: { type: 'boolean', default: true },
-            status: { type: 'string', enum: ['draft', 'published', 'archived'], default: 'published' },
-          },
+            {
+              type: 'object',
+              required: ['scanId', 'schemaName', 'domain'],
+              properties: {
+                scanId: { type: 'string', format: 'uuid' },
+                schemaName: { type: 'string', minLength: 1, maxLength: 100 },
+                domain: {
+                  type: 'string',
+                  enum: ['ecommerce', 'fintech', 'health', 'iot', 'social', 'analytics', 'other'],
+                },
+                datasetScale: {
+                  type: 'string',
+                  enum: ['tiny', 'small', 'medium', 'large'],
+                },
+                description: { type: 'string' },
+                tags: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+            },
+          ],
         },
       },
     },

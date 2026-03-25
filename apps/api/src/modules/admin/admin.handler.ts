@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
+import { ValidationError } from '../../lib/errors';
 import type { JwtPayload } from '../../plugins/auth';
 import type {
   CreateTrackBody,
@@ -30,6 +31,7 @@ import {
   getSystemHealth,
   importCanonicalDatabase,
   listSystemJobs,
+  scanSqlDump,
 } from './admin.service';
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
@@ -157,6 +159,29 @@ export async function importCanonicalDatabaseHandler(
   const userId = (request.user as JwtPayload).sub;
   const result = await importCanonicalDatabase(userId, request.body);
   reply.status(201).send(created(result, 'Canonical database imported successfully'));
+}
+
+export async function scanSqlDumpHandler(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const file = await request.file({
+    limits: {
+      fileSize: 400 * 1024 * 1024,
+    },
+  });
+
+  if (!file) {
+    throw new ValidationError('No SQL dump uploaded');
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of file.file) {
+    chunks.push(chunk);
+  }
+
+  const result = await scanSqlDump(file.filename, Buffer.concat(chunks));
+  reply.send(success(result, 'SQL dump scanned successfully'));
 }
 
 export async function listSystemJobsHandler(

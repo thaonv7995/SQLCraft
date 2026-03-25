@@ -13,6 +13,10 @@ import type {
   DatasetTemplateRow as AdminDatasetTemplateRow,
   SystemJobRow as AdminSystemJobRow,
 } from '../../db/repositories/admin.repository';
+import type {
+  AdminDatabaseDomain,
+  SqlDumpScanResult as AdminSqlDumpScanResult,
+} from './sql-dump-scan';
 
 export interface CreateTrackResult extends TrackRow {}
 
@@ -70,6 +74,9 @@ export interface SystemHealthResult {
     pendingJobs: number;
   };
 }
+
+export type SqlDumpScanResult = AdminSqlDumpScanResult;
+export type AdminDatabaseDomainType = AdminDatabaseDomain;
 
 export interface ImportCanonicalDatabaseResult {
   schemaTemplate: AdminSchemaTemplateRow;

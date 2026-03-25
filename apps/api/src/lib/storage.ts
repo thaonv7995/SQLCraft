@@ -71,6 +71,16 @@ export async function getPresignedUrl(
   return getPublicClient().presignedGetObject(config.STORAGE_BUCKET, objectName, ttlSeconds);
 }
 
+export async function readFile(objectName: string): Promise<Buffer> {
+  const client = getClient();
+  const stream = await client.getObject(config.STORAGE_BUCKET, objectName);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function deleteFile(objectName: string): Promise<void> {
   const client = getClient();
   await client.removeObject(config.STORAGE_BUCKET, objectName);
