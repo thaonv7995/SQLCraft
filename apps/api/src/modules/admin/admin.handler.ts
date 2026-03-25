@@ -4,12 +4,14 @@ import { ValidationError } from '../../lib/errors';
 import type { JwtPayload } from '../../plugins/auth';
 import type {
   AdminConfigBody,
+  CreateAdminUserBody,
   CreateTrackBody,
   UpdateTrackBody,
   CreateLessonBody,
   CreateLessonVersionBody,
   CreateChallengeBody,
   ListUsersQuery,
+  UpdateAdminUserBody,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
@@ -18,11 +20,15 @@ import type {
 } from './admin.schema';
 import {
   AdminConfigSchema,
+  CreateAdminUserSchema,
   ImportCanonicalDatabaseSchema,
   ListSystemJobsQuerySchema,
+  UpdateAdminUserSchema,
 } from './admin.schema';
 import {
+  createAdminUser,
   createTrack,
+  deleteAdminUser,
   updateTrack,
   createLesson,
   createLessonVersion,
@@ -32,6 +38,7 @@ import {
   createChallenge,
   publishChallengeVersion,
   listUsers,
+  updateAdminUser,
   updateUserStatus,
   updateUserRole,
   getSystemHealth,
@@ -149,6 +156,33 @@ export async function updateUserRoleHandler(
 ): Promise<void> {
   const result = await updateUserRole(request.params.id, request.body);
   reply.send(success(result, 'User role updated successfully'));
+}
+
+export async function createAdminUserHandler(
+  request: FastifyRequest<{ Body: CreateAdminUserBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = CreateAdminUserSchema.parse(request.body);
+  const result = await createAdminUser(body);
+  reply.status(201).send(created(result, 'User created successfully'));
+}
+
+export async function updateAdminUserHandler(
+  request: FastifyRequest<{ Params: AdminIdParams; Body: UpdateAdminUserBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = UpdateAdminUserSchema.parse(request.body);
+  const result = await updateAdminUser(request.params.id, body);
+  reply.send(success(result, 'User updated successfully'));
+}
+
+export async function deleteAdminUserHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const actorUserId = (request.user as JwtPayload).sub;
+  const result = await deleteAdminUser(actorUserId, request.params.id);
+  reply.send(success(result, 'User deleted successfully'));
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────

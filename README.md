@@ -2,17 +2,27 @@
 
 **Master SQL — from correctness to performance.**
 
-SQLCraft is an open-source, interactive SQL learning platform that takes you beyond writing queries that merely return the right answer. Learn to write SQL that is correct, efficient, and production-ready — through hands-on labs, real execution plans, and progressive dataset scaling.
+SQLCraft is an open-source SQL platform for sandboxed query execution, realistic datasets, execution-plan analysis, and admin-reviewed content workflows.
 
 ## Features
 
 - **Interactive SQL Lab** — Write and run SQL directly in the browser. View tabular results, query duration, scanned rows, and visual `EXPLAIN ANALYZE` execution plans to spot bottlenecks.
 - **Progressive Dataset Scaling** — Practice with the same schema across multiple data scales (Tiny: 100 rows ➔ Small: 100K ➔ Medium: 5M ➔ Large: 10M-100M+ rows) to see real performance implications.
-- **Session Query History** — Every execution is stored within the active learning session so learners can reopen prior SQL, compare before/after runs, and reuse the strongest execution for challenge submission.
+- **Session Query History** — Every execution is stored within the active session so users can reopen prior SQL, compare before/after runs, and reuse the strongest execution for validation or review flows.
 - **Query Optimization Labs** — Run side-by-side query comparisons, create and drop indexes safely, inspect schema drift against the published base schema, and reset the sandbox back to base after experiments.
-- **User Sandbox Isolation** — Every learning session provisions a dedicated, ephemeral PostgreSQL container attached to the internal Docker network. Cleanup is automatic on session end and TTL expiry.
-- **Structured Lesson & Challenge Engine** — Curated tracks and versioned content. Challenges are evaluated automatically with weighted **correctness**, **performance**, and **index optimization** scoring where configured, using full result-set comparison plus EXPLAIN-backed index checks.
-- **Admin & Contributor Tools** — Built-in tools for async dataset generation plus a full content workflow: contributor draft editor with Markdown preview and SQL preflight validation, admin approve/request-changes/reject moderation, and lesson version management for safe content updates.
+- **User Sandbox Isolation** — Every SQL session provisions a dedicated, ephemeral PostgreSQL container attached to the internal Docker network. Cleanup is automatic on session end and TTL expiry.
+- **Versioned Content & Validation Engine** — Structured content and optional challenge-style validations are versioned and evaluated with weighted **correctness**, **performance**, and **index optimization** scoring where configured, using full result-set comparison plus EXPLAIN-backed index checks.
+- **Admin Tools & User Submission Workflow** — Built-in tools for async dataset generation plus a full content workflow: user-submitted drafts with Markdown preview and SQL preflight validation, admin approve/request-changes/reject moderation, and lesson version management for safe content updates.
+
+## Access Model
+
+- **Roles** — SQLCraft uses only two system roles: **User** and **Admin**.
+- **User contributions** — Content submission is a workflow available to signed-in users, not a separate RBAC role.
+
+## Legacy Naming Note
+
+- Some internal routes, tables, and components still use historical names such as `tracks`, `lessons`, `challenges`, and `learning_sessions`.
+- Those names are implementation debt, not the canonical product framing.
 
 ## Tech Stack
 

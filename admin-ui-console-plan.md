@@ -1,7 +1,13 @@
 # Admin UI Console Plan
 
 ## Goal
-Ship a UI-first admin console aligned with the current product: `user/admin` roles only, SQL practice content, fixed challenge points, user contributions, global rankings, and per-challenge rankings.
+Ship a UI-first admin console aligned with the current product: `user/admin` roles only, versioned SQL content, fixed challenge points, user contributions, global rankings, and per-challenge rankings.
+
+## Canonical Product Language
+- SQLCraft should be described as a SQL platform, not a learning platform.
+- The only system roles are `user` and `admin`.
+- Contribution is a workflow, not a role.
+- Legacy entity names such as `lessons` and `challenges` may remain in code until a separate rename track ships.
 
 ## Final IA
 - `/admin` → `Overview`
@@ -21,7 +27,7 @@ Ship a UI-first admin console aligned with the current product: `user/admin` rol
 ## Delivery Order
 - [ ] 1. Reshape admin shell and sidebar to the new IA → Verify: sidebar only shows `Overview`, `Content`, `Databases`, `Users`, `Rankings`, `System`, `Settings`
 - [ ] 2. Finish `Overview` as the control-plane home → Verify: `/admin` shows live KPI cards, review summary, ranking snapshot, and links into all admin domains
-- [ ] 3. Rebuild `Content` around lessons + challenges + review queue → Verify: admin can navigate tabs for `Lessons`, `Challenges`, and `Review Queue` without seeing LMS-only or contributor-role language
+- [ ] 3. Rebuild `Content` around lessons + challenges + review queue → Verify: admin can navigate tabs for `Lessons`, `Challenges`, and `Review Queue` without seeing LMS-only or role-confused language
 - [ ] 4. Replace schema placeholders with a real `Databases` console → Verify: `/admin/databases` shows tabs for `Schema Templates`, `Dataset Templates`, `SQL Imports`, and `Generation Jobs`
 - [ ] 5. Upgrade `Users` into a true moderation + stats surface → Verify: `/admin/users` shows account status, role, participation stats, and contribution history for real users
 - [ ] 6. Add `Rankings` management UI → Verify: `/admin/rankings` shows `Global Ranking`, `Challenge Rankings`, and `Point Rules`

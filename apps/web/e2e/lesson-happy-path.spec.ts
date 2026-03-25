@@ -109,8 +109,8 @@ test('opens a track, opens a lesson, starts a lab, and carries starter SQL into 
             username: 'testuser',
             email: 'user@sqlcraft.dev',
             displayName: 'SQLCraft User',
-            role: 'student',
-            roles: ['learner'],
+            role: 'user',
+            roles: ['user'],
             createdAt: '2026-03-24T09:00:00.000Z',
           },
           tokens: {

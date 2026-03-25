@@ -114,7 +114,7 @@ export default function TrackDetailPage() {
               <div>
                 <h1 className="font-headline text-xl font-semibold text-on-surface">Track unavailable</h1>
                 <p className="mt-1 text-sm text-on-surface-variant">
-                  {error instanceof Error ? error.message : 'This learning track could not be loaded.'}
+                  {error instanceof Error ? error.message : 'This track could not be loaded.'}
                 </p>
               </div>
             </div>

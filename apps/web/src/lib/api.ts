@@ -58,7 +58,7 @@ export interface AuthTokens {
   expiresIn: number;
 }
 
-export type UserRole = 'student' | 'contributor' | 'admin';
+export type UserRole = 'user' | 'admin';
 
 interface UserPayload {
   id: string;
@@ -953,19 +953,12 @@ interface PaginatedPayload<T> {
 }
 
 function normalizeRole(role?: string): UserRole {
-  if (role === 'admin' || role === 'contributor') {
-    return role;
-  }
-  return 'student';
+  return role === 'admin' ? 'admin' : 'user';
 }
 
 function normalizeUser(user: UserPayload): User {
-  const roles = user.roles ?? (user.role ? [user.role] : []);
-  const primaryRole = roles.includes('admin')
-    ? 'admin'
-    : roles.includes('contributor')
-      ? 'contributor'
-      : roles[0];
+  const sourceRoles = user.roles ?? (user.role ? [user.role] : []);
+  const role = sourceRoles.includes('admin') || user.role === 'admin' ? 'admin' : 'user';
 
   return {
     id: user.id,
@@ -973,8 +966,8 @@ function normalizeUser(user: UserPayload): User {
     email: user.email,
     displayName: user.displayName ?? user.username,
     avatarUrl: user.avatarUrl ?? null,
-    role: normalizeRole(primaryRole),
-    roles,
+    role: normalizeRole(role),
+    roles: [role],
     status: user.status,
     bio: user.bio ?? null,
     createdAt: user.createdAt,
@@ -1601,9 +1594,29 @@ export interface UpdateProfilePayload {
   avatarUrl?: string | null;
 }
 
+export interface AdminCreateUserPayload {
+  email: string;
+  username: string;
+  password: string;
+  displayName?: string;
+  bio?: string | null;
+  role: UserRole;
+  status?: 'active' | 'disabled' | 'invited';
+}
+
+export interface AdminUpdateUserPayload {
+  email?: string;
+  username?: string;
+  password?: string;
+  displayName?: string | null;
+  bio?: string | null;
+  role?: UserRole;
+  status?: 'active' | 'disabled' | 'invited';
+}
+
 export const usersApi = {
   // Admin-only: list all users
-  list: (params?: { search?: string; role?: string; status?: string; page?: number }) =>
+  list: (params?: { search?: string; role?: UserRole; status?: string; page?: number }) =>
     api
       .get<PaginatedResponse<UserPayload & { roles: string[] }>>('/admin/users', { params })
       .then((r) => ({
@@ -1614,8 +1627,16 @@ export const usersApi = {
   get: (id: string) => api.get<User>(`/users/${id}`).then((r) => r.data),
 
   // Admin-only: update a user's role
-  updateRole: (id: string, role: string) =>
+  updateRole: (id: string, role: UserRole) =>
     api.patch<User>(`/admin/users/${id}/role`, { role }).then((r) => r.data),
+
+  // Admin-only: create a user
+  createAdmin: (data: AdminCreateUserPayload) =>
+    api.post<UserPayload>('/admin/users', data).then((r) => normalizeUser(r.data)),
+
+  // Admin-only: update a user
+  updateAdmin: (id: string, data: AdminUpdateUserPayload) =>
+    api.patch<UserPayload>(`/admin/users/${id}`, data).then((r) => normalizeUser(r.data)),
 
   // Admin-only: disable a user
   disable: (id: string) =>
@@ -1624,6 +1645,10 @@ export const usersApi = {
   // Admin-only: enable a user
   enable: (id: string) =>
     api.patch(`/admin/users/${id}/status`, { status: 'active' }).then((r) => r.data),
+
+  // Admin-only: soft delete a user
+  deleteAdmin: (id: string) =>
+    api.delete<UserPayload>(`/admin/users/${id}`).then((r) => normalizeUser(r.data)),
 
   // Current user: update own profile
   updateMe: (data: UpdateProfilePayload) =>

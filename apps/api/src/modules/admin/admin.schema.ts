@@ -77,7 +77,7 @@ export const ListUsersQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   status: z.enum(['active', 'disabled', 'invited']).optional(),
   search: z.string().optional(),
-  role: z.enum(['learner', 'contributor', 'admin']).optional(),
+  role: z.enum(['user', 'admin']).optional(),
 });
 
 export const UpdateUserStatusSchema = z.object({
@@ -85,8 +85,42 @@ export const UpdateUserStatusSchema = z.object({
 });
 
 export const UpdateUserRoleSchema = z.object({
-  role: z.enum(['learner', 'contributor', 'admin']),
+  role: z.enum(['user', 'admin']),
 });
+
+export const CreateAdminUserSchema = z.object({
+  email: z.string().email(),
+  username: z.string().min(3).max(50),
+  password: z.string().min(8).max(100),
+  displayName: z.string().min(1).max(100).optional(),
+  bio: z.string().max(2000).optional().nullable(),
+  role: z.enum(['user', 'admin']).default('user'),
+  status: z.enum(['active', 'disabled', 'invited']).default('active'),
+});
+
+export const UpdateAdminUserSchema = z
+  .object({
+    email: z.string().email().optional(),
+    username: z.string().min(3).max(50).optional(),
+    password: z.string().min(8).max(100).optional(),
+    displayName: z.string().min(1).max(100).optional().nullable(),
+    bio: z.string().max(2000).optional().nullable(),
+    role: z.enum(['user', 'admin']).optional(),
+    status: z.enum(['active', 'disabled', 'invited']).optional(),
+  })
+  .refine(
+    (value) =>
+      value.email !== undefined ||
+      value.username !== undefined ||
+      value.password !== undefined ||
+      value.displayName !== undefined ||
+      value.bio !== undefined ||
+      value.role !== undefined ||
+      value.status !== undefined,
+    {
+      message: 'At least one field must be provided',
+    },
+  );
 
 // ─── Database Imports & Jobs ─────────────────────────────────────────────────
 
@@ -258,6 +292,8 @@ export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
 export type UpdateUserStatusBody = z.infer<typeof UpdateUserStatusSchema>;
 export type UpdateUserRoleBody = z.infer<typeof UpdateUserRoleSchema>;
+export type CreateAdminUserBody = z.infer<typeof CreateAdminUserSchema>;
+export type UpdateAdminUserBody = z.infer<typeof UpdateAdminUserSchema>;
 export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabaseSchema>;
 export type DirectCanonicalDatabaseImportBody = z.infer<typeof DirectCanonicalDatabaseImportSchema>;
 export type SqlDumpScanImportBody = z.infer<typeof SqlDumpScanImportSchema>;

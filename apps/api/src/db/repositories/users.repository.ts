@@ -126,6 +126,13 @@ export class UsersRepository {
       .where(and(eq(schema.refreshTokens.tokenHash, tokenHash), isNull(schema.refreshTokens.revokedAt)));
   }
 
+  async revokeRefreshTokensByUserId(userId: string): Promise<void> {
+    await this.db
+      .update(schema.refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(schema.refreshTokens.userId, userId), isNull(schema.refreshTokens.revokedAt)));
+  }
+
   async listUsers(
     page: number,
     limit: number,
@@ -153,19 +160,35 @@ export class UsersRepository {
       );
     }
 
-    // Role filter: only include users that have the given role
+    // Role filter: `user` means any non-admin account, including legacy rows that still
+    // carry old role names in the database.
     let userIdsWithRole: string[] | undefined;
     if (options?.role) {
-      const roleRows = await this.db
-        .select({ userId: schema.userRoles.userId })
-        .from(schema.userRoles)
-        .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
-        .where(eq(schema.roles.name, options.role));
-      userIdsWithRole = roleRows.map((r) => r.userId);
-      if (userIdsWithRole.length === 0) return { items: [], total: 0 };
-      conditions.push(
-        sql`${schema.users.id} = ANY(ARRAY[${sql.raw(userIdsWithRole.map((id) => `'${id}'`).join(','))}]::uuid[])` as unknown as ReturnType<typeof eq>,
-      );
+      if (options.role === 'admin') {
+        const roleRows = await this.db
+          .select({ userId: schema.userRoles.userId })
+          .from(schema.userRoles)
+          .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+          .where(eq(schema.roles.name, 'admin'));
+        userIdsWithRole = roleRows.map((r) => r.userId);
+        if (userIdsWithRole.length === 0) return { items: [], total: 0 };
+        conditions.push(
+          sql`${schema.users.id} = ANY(ARRAY[${sql.raw(userIdsWithRole.map((id) => `'${id}'`).join(','))}]::uuid[])` as unknown as ReturnType<typeof eq>,
+        );
+      } else if (options.role === 'user') {
+        const adminRoleRows = await this.db
+          .select({ userId: schema.userRoles.userId })
+          .from(schema.userRoles)
+          .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+          .where(eq(schema.roles.name, 'admin'));
+        const adminUserIds = adminRoleRows.map((r) => r.userId);
+
+        if (adminUserIds.length > 0) {
+          conditions.push(
+            sql`NOT (${schema.users.id} = ANY(ARRAY[${sql.raw(adminUserIds.map((id) => `'${id}'`).join(','))}]::uuid[]))` as unknown as ReturnType<typeof eq>,
+          );
+        }
+      }
     }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;

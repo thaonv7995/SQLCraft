@@ -31,7 +31,7 @@ function leadCopy(stats: UserStats): string {
     return `${stats.currentStreak}-day streak — keep the momentum.`;
   }
   if (stats.queriesRun > 0) {
-    return 'Your SQL journey continues. Open the Lab to keep practicing.';
+    return 'Your SQL work is active. Open the Lab to continue.';
   }
   return 'Open the Lab to run SQL and see your activity here.';
 }

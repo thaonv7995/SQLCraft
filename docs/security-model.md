@@ -13,8 +13,8 @@
 - privilege escalation from learner query path
 - sandbox breakout via filesystem or network
 - abuse via heavy query spam / denial of service
-- contributor mistakes exposing secrets
-- admin or maintainer misuse without auditability
+- mistakes in user-submitted content exposing secrets
+- admin misuse without auditability
 
 ## 3. Trust Boundaries
 1. Browser to Web/API boundary
@@ -24,8 +24,9 @@
 5. Runtime sandbox to infrastructure boundary
 
 ## 4. Identity and Access
-- role-based access control for admin and content operations
-- learner permissions limited to learner-facing APIs
+- role-based access control is limited to `user` and `admin`
+- signed-in users can access learner-facing APIs and submission workflows
+- publish, moderation, and system operations remain admin-only
 - service credentials separated by purpose
 - no direct learner credentials for infrastructure or metadata DB
 

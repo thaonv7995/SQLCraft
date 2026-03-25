@@ -1,12 +1,14 @@
 import { FastifyInstance } from 'fastify';
 import type {
   AdminConfigBody,
+  CreateAdminUserBody,
   CreateTrackBody,
   UpdateTrackBody,
   CreateLessonBody,
   CreateLessonVersionBody,
   CreateChallengeBody,
   ListUsersQuery,
+  UpdateAdminUserBody,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
@@ -14,7 +16,9 @@ import type {
   AdminIdParams,
 } from './admin.schema';
 import {
+  createAdminUserHandler,
   createTrackHandler,
+  deleteAdminUserHandler,
   updateTrackHandler,
   createLessonHandler,
   createLessonVersionHandler,
@@ -24,6 +28,7 @@ import {
   createChallengeHandler,
   publishChallengeVersionHandler,
   listUsersHandler,
+  updateAdminUserHandler,
   updateUserStatusHandler,
   updateUserRoleHandler,
   systemHealthHandler,
@@ -257,12 +262,38 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
             status: { type: 'string', enum: ['active', 'disabled', 'invited'] },
             search: { type: 'string' },
-            role: { type: 'string', enum: ['learner', 'contributor', 'admin'] },
+            role: { type: 'string', enum: ['user', 'admin'] },
           },
         },
       },
     },
     listUsersHandler,
+  );
+
+  fastify.post<{ Body: CreateAdminUserBody }>(
+    '/v1/admin/users',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Create a new user account',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['email', 'username', 'password', 'role'],
+          properties: {
+            email: { type: 'string', format: 'email' },
+            username: { type: 'string', minLength: 3, maxLength: 50 },
+            password: { type: 'string', minLength: 8, maxLength: 100 },
+            displayName: { type: 'string', maxLength: 100 },
+            bio: { type: 'string', maxLength: 2000, nullable: true },
+            role: { type: 'string', enum: ['user', 'admin'] },
+            status: { type: 'string', enum: ['active', 'disabled', 'invited'], default: 'active' },
+          },
+        },
+      },
+    },
+    createAdminUserHandler,
   );
 
   fastify.patch<{ Params: AdminIdParams; Body: UpdateUserStatusBody }>(
@@ -290,6 +321,36 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
     updateUserStatusHandler,
   );
 
+  fastify.patch<{ Params: AdminIdParams; Body: UpdateAdminUserBody }>(
+    '/v1/admin/users/:id',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Update an existing user account',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            email: { type: 'string', format: 'email' },
+            username: { type: 'string', minLength: 3, maxLength: 50 },
+            password: { type: 'string', minLength: 8, maxLength: 100 },
+            displayName: { type: 'string', maxLength: 100, nullable: true },
+            bio: { type: 'string', maxLength: 2000, nullable: true },
+            role: { type: 'string', enum: ['user', 'admin'] },
+            status: { type: 'string', enum: ['active', 'disabled', 'invited'] },
+          },
+        },
+      },
+    },
+    updateAdminUserHandler,
+  );
+
   fastify.patch<{ Params: AdminIdParams; Body: UpdateUserRoleBody }>(
     '/v1/admin/users/:id/role',
     {
@@ -307,12 +368,30 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
           type: 'object',
           required: ['role'],
           properties: {
-            role: { type: 'string', enum: ['learner', 'contributor', 'admin'] },
+            role: { type: 'string', enum: ['user', 'admin'] },
           },
         },
       },
     },
     updateUserRoleHandler,
+  );
+
+  fastify.delete<{ Params: AdminIdParams }>(
+    '/v1/admin/users/:id',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Soft delete a user account',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    deleteAdminUserHandler,
   );
 
   // ─── Database Imports ───────────────────────────────────────────────────────

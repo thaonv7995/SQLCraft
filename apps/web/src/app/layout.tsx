@@ -28,8 +28,8 @@ export const metadata: Metadata = {
     template: '%s | SQLCraft',
   },
   description:
-    'An open-source SQL learning platform. Master database querying through hands-on challenges and real-world datasets.',
-  keywords: ['SQL', 'learning', 'database', 'query', 'practice', 'challenges'],
+    'An open-source SQL platform for sandboxed execution, realistic datasets, admin-reviewed content, and execution-plan analysis.',
+  keywords: ['SQL', 'database', 'query', 'sandbox', 'datasets', 'execution plans'],
   authors: [{ name: 'SQLCraft' }],
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
   openGraph: {

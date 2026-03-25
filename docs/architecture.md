@@ -2,11 +2,16 @@
 
 ## 1. Architecture Goal
 Provide a modular architecture that supports:
-- learning content management
+- content management
 - sandbox provisioning
 - safe query execution
 - background operations
 - future extension to additional engines and collaboration features
+
+## 1.1 Canonical Product Language
+- SQLCraft is a SQL platform, not a guided learning system.
+- The only system roles are `user` and `admin`.
+- Legacy entity names such as `tracks`, `lessons`, `challenges`, and `learning_sessions` may still exist in code and schema.
 
 ## 2. Architectural Style
 The V1 platform uses a **modular service-oriented architecture**:
@@ -14,7 +19,7 @@ The V1 platform uses a **modular service-oriented architecture**:
 - multiple deployable services where needed
 - stateless API services
 - asynchronous workers for long-running operations
-- isolated stateful databases for metadata and learner sandboxes
+- isolated stateful databases for metadata and user sandboxes
 
 ## 2a. Tech Stack Decisions
 
@@ -83,7 +88,7 @@ Object Storage (artifacts / plans / datasets)
 ### 5.2 API Service
 - auth and permission checks
 - track/lesson/challenge retrieval
-- learning session orchestration
+- session orchestration
 - query submission
 - challenge evaluation requests
 - sandbox reset endpoints
@@ -113,7 +118,7 @@ Object Storage (artifacts / plans / datasets)
 ### 5.6 Metadata DB
 - all platform metadata
 - content versioning
-- learning sessions
+- session metadata
 - runtime audit trails
 - query execution records
 
@@ -141,9 +146,9 @@ Chosen for:
 - realistic production relevance
 - strong open-source ecosystem
 
-### AD-02 Separate metadata DB from learner sandbox DBs
+### AD-02 Separate metadata DB from user sandbox DBs
 This prevents:
-- learner actions affecting platform metadata
+- user actions affecting platform metadata
 - operational and security coupling
 - harder lifecycle cleanup
 
@@ -151,7 +156,7 @@ This prevents:
 Lessons/challenges/templates evolve frequently; versioning avoids breaking historical attempts and published tracks.
 
 ### AD-04 Session sandbox isolation
-Each learning session maps to a dedicated sandbox instance or equivalent isolated environment.
+Each session maps to a dedicated sandbox instance or equivalent isolated environment.
 
 ### AD-05 Async provisioning
 Sandbox creation can be slow relative to normal API calls, so jobs and status polling are first-class design concerns.
@@ -168,7 +173,5 @@ Sandbox creation can be slow relative to normal API calls, so jobs and status po
 
 ## 8. Future Architectural Extensions
 - multiple DB engines
-- instructor mode
 - collaborative sessions
-- classroom analytics
 - AI-assisted hint service

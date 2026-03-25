@@ -76,10 +76,7 @@ export async function registerUser(
     provider: 'email',
   });
 
-  const learnerRole = await usersRepository.findRoleByName('learner');
-  if (learnerRole) {
-    await usersRepository.assignRole(newUser.id, learnerRole.id);
-  }
+  await usersRepository.setUserRole(newUser.id, 'user');
 
   const roles = await usersRepository.getRoleNames(newUser.id);
   const tokens = await generateTokens(fastify, newUser, roles);

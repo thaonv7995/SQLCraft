@@ -1,11 +1,17 @@
 # Software Requirements Specification (SRS)
 
 ## 1. Introduction
-This document defines the functional and non-functional requirements for the V1 release of the Open Source SQL Learning Platform.
+This document defines the functional and non-functional requirements for the V1 release of the Open Source SQL Platform.
+
+## 1.1 Canonical Product Language
+- SQLCraft is a SQL platform, not a guided learning product.
+- The only system roles are `user` and `admin`.
+- User submissions are a workflow, not a role.
+- Legacy names such as `tracks`, `lessons`, `challenges`, and `learning_sessions` may remain in code and schema until a dedicated rename track is completed.
 
 ## 2. System Context
 The system provides:
-- a web application for learners
+- a web application for signed-in users
 - a backend API for content and session orchestration
 - a query execution subsystem
 - isolated sandbox databases
@@ -18,7 +24,8 @@ The system provides:
 The system shall:
 - allow users to register, sign in, sign out
 - support local auth and pluggable OAuth providers
-- maintain roles for admin, maintainer, contributor, learner
+- maintain only two system roles: user and admin
+- allow signed-in users to submit content for review without introducing extra RBAC roles
 
 ### FR-02 Learning Tracks
 The system shall:
@@ -96,8 +103,8 @@ The system shall:
 
 ### FR-12 Content Operations
 The system shall:
-- allow authorized maintainers to create and publish tracks, lessons, and challenge versions
-- prevent unpublished content from appearing in learner-facing APIs
+- allow authorized admins to create and publish tracks, lessons, and challenge versions
+- prevent unpublished content from appearing in user-facing APIs
 - keep audit logs for publish and content management actions
 
 ### FR-13 Observability and Operations
@@ -122,7 +129,7 @@ The system shall:
 
 ### NFR-03 Availability
 - target service availability: 99.5% for hosted deployments
-- degraded mode acceptable when sandbox capacity is limited; learner receives explicit error
+- degraded mode acceptable when sandbox capacity is limited; the user receives an explicit error
 
 ### NFR-04 Security
 - all sandbox connections are internal-only
@@ -148,7 +155,7 @@ The system shall:
 - traceability across session creation, sandbox creation, and query execution
 
 ## 5. Constraints
-- V1 uses PostgreSQL as the only learner-facing database engine
+- V1 uses PostgreSQL as the only user-facing database engine
 - V1 does not expose arbitrary DDL/DML beyond controlled allowlist
 - sandbox provisioning is bounded by infrastructure capacity
 

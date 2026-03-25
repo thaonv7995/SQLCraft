@@ -14,11 +14,9 @@ async function seed() {
   // 1. Create roles
   console.log('Creating roles...');
   const existingRoles = await db.select().from(schema.roles);
-  const roleNames = existingRoles.map((r) => r.name);
 
   let adminRole = existingRoles.find((r) => r.name === 'admin');
-  let learnerRole = existingRoles.find((r) => r.name === 'learner');
-  let contributorRole = existingRoles.find((r) => r.name === 'contributor');
+  let userRole = existingRoles.find((r) => r.name === 'user');
 
   if (!adminRole) {
     const [r] = await db
@@ -29,22 +27,13 @@ async function seed() {
     console.log('  Created admin role');
   }
 
-  if (!learnerRole) {
+  if (!userRole) {
     const [r] = await db
       .insert(schema.roles)
-      .values({ name: 'learner', description: 'SQL learner' })
+      .values({ name: 'user', description: 'Standard platform user' })
       .returning();
-    learnerRole = r;
-    console.log('  Created learner role');
-  }
-
-  if (!contributorRole) {
-    const [r] = await db
-      .insert(schema.roles)
-      .values({ name: 'contributor', description: 'Content contributor — can submit lessons, databases, and challenges for review' })
-      .returning();
-    contributorRole = r;
-    console.log('  Created contributor role');
+    userRole = r;
+    console.log('  Created user role');
   }
 
   // 2. Create admin user
@@ -91,23 +80,16 @@ async function seed() {
   }
 
   // Assign admin role
-  const existingAdminRole = await db
-    .select()
-    .from(schema.userRoles)
-    .where(eq(schema.userRoles.userId, adminUser.id))
-    .limit(1);
+  await db.delete(schema.userRoles).where(eq(schema.userRoles.userId, adminUser.id));
+  await db.insert(schema.userRoles).values({
+    userId: adminUser.id,
+    roleId: adminRole.id,
+  });
 
-  if (existingAdminRole.length === 0) {
-    await db.insert(schema.userRoles).values({
-      userId: adminUser.id,
-      roleId: adminRole.id,
-    });
-  }
-
-  // 3. Create learner test user
-  console.log('Creating learner test user...');
-  const learnerPasswordHash = await bcrypt.hash('user12345', 12);
-  let learnerUser = (
+  // 3. Create standard test user
+  console.log('Creating standard test user...');
+  const userPasswordHash = await bcrypt.hash('user12345', 12);
+  let standardUser = (
     await db
       .select()
       .from(schema.users)
@@ -115,50 +97,43 @@ async function seed() {
       .limit(1)
   )[0];
 
-  if (!learnerUser) {
+  if (!standardUser) {
     const [u] = await db
       .insert(schema.users)
       .values({
         email: 'user@sqlcraft.dev',
         username: 'testuser',
-        passwordHash: learnerPasswordHash,
+        passwordHash: userPasswordHash,
         displayName: 'SQLCraft User',
         status: 'active',
         provider: 'email',
       })
       .returning();
-    learnerUser = u;
-    console.log('  Created learner user: user@sqlcraft.dev / user12345');
+    standardUser = u;
+    console.log('  Created standard user: user@sqlcraft.dev / user12345');
   } else {
     const [u] = await db
       .update(schema.users)
       .set({
         email: 'user@sqlcraft.dev',
         username: 'testuser',
-        passwordHash: learnerPasswordHash,
+        passwordHash: userPasswordHash,
         displayName: 'SQLCraft User',
         status: 'active',
         provider: 'email',
         updatedAt: new Date(),
       })
-      .where(eq(schema.users.id, learnerUser.id))
+      .where(eq(schema.users.id, standardUser.id))
       .returning();
-    learnerUser = u;
-    console.log('  Updated learner user: user@sqlcraft.dev / user12345');
+    standardUser = u;
+    console.log('  Updated standard user: user@sqlcraft.dev / user12345');
   }
 
-  const existingLearnerRole = await db
-    .select()
-    .from(schema.userRoles)
-    .where(eq(schema.userRoles.userId, learnerUser.id))
-    .limit(1);
-
-  if (existingLearnerRole.length === 0) {
-    await db.insert(schema.userRoles).values({
-      userId: learnerUser.id,
-      roleId: learnerRole.id,
-    });
-  }
+  await db.delete(schema.userRoles).where(eq(schema.userRoles.userId, standardUser.id));
+  await db.insert(schema.userRoles).values({
+    userId: standardUser.id,
+    roleId: userRole.id,
+  });
 
   // 4. Create schema template for ecommerce
   console.log('Creating ecommerce schema template...');

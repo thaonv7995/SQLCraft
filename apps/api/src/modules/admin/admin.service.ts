@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs';
 import {
   tracksRepository,
   lessonsRepository,
@@ -11,16 +12,18 @@ import {
   normalizeDatasetRowCounts,
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
-import { NotFoundError, ValidationError } from '../../lib/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
   AdminConfigBody,
+  CreateAdminUserBody,
   CreateTrackBody,
   UpdateTrackBody,
   CreateLessonBody,
   CreateLessonVersionBody,
   CreateChallengeBody,
   ListUsersQuery,
+  UpdateAdminUserBody,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
@@ -40,6 +43,9 @@ import type {
   CreateChallengeResult,
   PublishChallengeVersionResult,
   ListUsersResult,
+  CreateAdminUserResult,
+  UpdateAdminUserResult,
+  DeleteAdminUserResult,
   UpdateUserStatusResult,
   UpdateUserRoleResult,
   SystemHealthResult,
@@ -56,6 +62,30 @@ const ADMIN_CONFIG_SCOPE = 'global';
 
 function cloneAdminConfig(config: AdminConfigBody): AdminConfigBody {
   return JSON.parse(JSON.stringify(config)) as AdminConfigBody;
+}
+
+async function buildAdminUserMutationResult(userId: string): Promise<CreateAdminUserResult> {
+  const user = await usersRepository.findById(userId);
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+
+  const roles = await usersRepository.getRoleNames(userId);
+
+  return {
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    bio: user.bio,
+    status: user.status,
+    provider: user.provider ?? null,
+    lastLoginAt: user.lastLoginAt,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    roles,
+  };
 }
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
@@ -213,6 +243,141 @@ export async function updateUserRole(
   await usersRepository.setUserRole(id, body.role);
   const roles = await usersRepository.getRoleNames(id);
   return { id: user.id, email: user.email, username: user.username, roles, updatedAt: user.updatedAt };
+}
+
+export async function createAdminUser(
+  body: CreateAdminUserBody,
+): Promise<CreateAdminUserResult> {
+  const normalizedEmail = body.email.trim().toLowerCase();
+  const normalizedUsername = body.username.trim();
+
+  const [emailTaken, usernameTaken] = await Promise.all([
+    usersRepository.emailExists(normalizedEmail),
+    usersRepository.usernameExists(normalizedUsername),
+  ]);
+
+  if (emailTaken) {
+    throw new ConflictError('Email already registered');
+  }
+
+  if (usernameTaken) {
+    throw new ConflictError('Username already taken');
+  }
+
+  const passwordHash = await bcrypt.hash(body.password, 12);
+
+  const createdUser = await usersRepository.create({
+    email: normalizedEmail,
+    username: normalizedUsername,
+    passwordHash,
+    displayName: body.displayName?.trim() || normalizedUsername,
+    bio: body.bio?.trim() || null,
+    status: body.status,
+    provider: 'email',
+  });
+
+  await usersRepository.setUserRole(createdUser.id, body.role);
+
+  return buildAdminUserMutationResult(createdUser.id);
+}
+
+export async function updateAdminUser(
+  id: string,
+  body: UpdateAdminUserBody,
+): Promise<UpdateAdminUserResult> {
+  const existingUser = await usersRepository.findById(id);
+  if (!existingUser) {
+    throw new NotFoundError('User not found');
+  }
+
+  if (body.email) {
+    const emailOwner = await usersRepository.findByEmail(body.email.trim().toLowerCase());
+    if (emailOwner && emailOwner.id !== id) {
+      throw new ConflictError('Email already registered');
+    }
+  }
+
+  if (body.username) {
+    const usernameOwner = await usersRepository.findByUsername(body.username.trim());
+    if (usernameOwner && usernameOwner.id !== id) {
+      throw new ConflictError('Username already taken');
+    }
+  }
+
+  const patch: Parameters<typeof usersRepository.update>[1] = {};
+
+  if (body.email !== undefined) {
+    patch.email = body.email.trim().toLowerCase();
+  }
+
+  if (body.username !== undefined) {
+    patch.username = body.username.trim();
+  }
+
+  if (body.displayName !== undefined) {
+    patch.displayName = body.displayName?.trim() || null;
+  }
+
+  if (body.bio !== undefined) {
+    patch.bio = body.bio?.trim() || null;
+  }
+
+  if (body.status !== undefined) {
+    patch.status = body.status;
+  }
+
+  if (body.password) {
+    patch.passwordHash = await bcrypt.hash(body.password, 12);
+  }
+
+  if (Object.keys(patch).length > 0) {
+    const updated = await usersRepository.update(id, patch);
+    if (!updated) {
+      throw new NotFoundError('User not found');
+    }
+  }
+
+  if (body.role) {
+    await usersRepository.setUserRole(id, body.role);
+  }
+
+  return buildAdminUserMutationResult(id);
+}
+
+export async function deleteAdminUser(
+  actorUserId: string,
+  id: string,
+): Promise<DeleteAdminUserResult> {
+  if (actorUserId === id) {
+    throw new ValidationError('You cannot delete your own account');
+  }
+
+  const existingUser = await usersRepository.findById(id);
+  if (!existingUser) {
+    throw new NotFoundError('User not found');
+  }
+
+  const userSuffix = id.replace(/-/g, '').slice(0, 12);
+
+  await usersRepository.clearUserRoles(id);
+  await usersRepository.revokeRefreshTokensByUserId(id);
+
+  const updated = await usersRepository.update(id, {
+    email: `deleted+${id}@sqlcraft.local`,
+    username: `deleted_${userSuffix}`,
+    displayName: `Deleted User ${userSuffix}`,
+    bio: null,
+    avatarUrl: null,
+    passwordHash: null,
+    status: 'disabled',
+    providerId: null,
+  });
+
+  if (!updated) {
+    throw new NotFoundError('User not found');
+  }
+
+  return buildAdminUserMutationResult(id);
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────

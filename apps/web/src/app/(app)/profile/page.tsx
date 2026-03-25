@@ -40,7 +40,7 @@ export default function ProfilePage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="page-title-lg">Profile</h1>
-          <p className="page-lead mt-2">Your public identity and learning stats.</p>
+          <p className="page-lead mt-2">Your public identity and account activity.</p>
         </div>
         <Link href="/settings">
           <Button variant="secondary" size="sm">

@@ -183,7 +183,7 @@
 | 4.3.19 | Admin: Content Management | Custom | ✅ | |
 | 4.3.20 | Admin: Lesson/Challenge Editor | `lesson_challenge_editor` | ⬜ | Rich text + SQL editor |
 | 4.3.21 | Admin: Database Overview | `final_database_overview_1/2` | ⬜ | ER diagram view |
-| 4.3.22 | Contributor Dashboard | `contributor_dashboard` | ✅ | |
+| 4.3.22 | Contribution Dashboard | `contributor_dashboard` | ✅ | |
 | 4.3.23 | Leaderboard | `competitive_tracks_leaderboards` | ✅ | |
 | 4.3.24 | User Profile / Settings | Custom | ⬜ | |
 | 4.3.25 | Not Found (404) | Custom | ⬜ | |

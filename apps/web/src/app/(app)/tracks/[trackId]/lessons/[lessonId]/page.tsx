@@ -237,14 +237,14 @@ export default function LessonPage() {
                   {formatMinutes(estimatedMinutes)}
                 </span>
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
-                  {challengeCount > 0 ? `${challengeCount} optional challenges` : 'Guided lesson'}
+                  {challengeCount > 0 ? `${challengeCount} optional challenges` : 'Content entry'}
                 </span>
               </div>
               <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface sm:text-4xl">
                 {lessonTitle}
               </h1>
               <p className="mt-3 max-w-2xl text-[15px] leading-7 text-on-surface-variant">
-                {lesson.description || 'Read the concept guide, study the SQL examples, then launch the practice lab with the starter query preloaded.'}
+                {lesson.description || 'Review the content and SQL examples, then launch the lab with the starter query preloaded.'}
               </p>
             </div>
 
@@ -314,23 +314,23 @@ export default function LessonPage() {
         <div className="space-y-4 lg:sticky lg:top-6 lg:self-start">
           <Card className="rounded-2xl border border-outline-variant/10">
             <CardHeader>
-              <CardTitle>Lesson Flow</CardTitle>
+              <CardTitle>Execution Flow</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="rounded-xl bg-surface-container-high p-3">
-                <p className="font-medium text-on-surface">1. Read the guide</p>
+                <p className="font-medium text-on-surface">1. Review the content</p>
                 <p className="mt-1 text-on-surface-variant">
-                  Study the markdown lesson and examples before opening the sandbox.
+                  Check the markdown content and SQL examples before opening the sandbox.
                 </p>
               </div>
               <div className="rounded-xl bg-surface-container-high p-3">
                 <p className="font-medium text-on-surface">2. Start the lab</p>
                 <p className="mt-1 text-on-surface-variant">
-                  SQLCraft will resume your existing lesson sandbox when available, or preload the starter query into a fresh one.
+                  SQLCraft will resume your existing sandbox when available, or preload the starter query into a fresh one.
                 </p>
               </div>
               <div className="rounded-xl bg-surface-container-high p-3">
-                <p className="font-medium text-on-surface">3. Practice more</p>
+                <p className="font-medium text-on-surface">3. Run optional validations</p>
                 <p className="mt-1 text-on-surface-variant">
                   Optional challenges live here next. The layout already reserves that slot.
                 </p>

@@ -1,16 +1,22 @@
 # Product Requirements Document (PRD)
 
 ## 1. Document Control
-- Product: Open Source SQL Learning Platform
+- Product: Open Source SQL Platform
 - Version: 1.0
 - Scope: V1 release
 - Audience: Product Owner, Business Analyst, Tech Lead, Engineering Team, Contributors
 
+## 1.1 Canonical Product Language
+- SQLCraft is a SQL platform, not a guided learning product.
+- The only system roles are `user` and `admin`.
+- User submissions are a workflow; they are not backed by a separate RBAC role.
+- Legacy names such as `tracks`, `lessons`, `challenges`, and `learning_sessions` may still appear in code and schema until a dedicated rename track is completed.
+
 ## 2. Product Vision
-Build an open-source learning platform that teaches SQL from fundamentals to production-grade query optimization using realistic schemas, progressive data scale, and isolated sandbox databases per learning session.
+Build an open-source SQL platform centered on sandboxed execution, realistic schemas, progressive data scale, versioned content, reviewed submissions, and production-grade query optimization workflows.
 
 ## 3. Problem Statement
-Most existing SQL learning platforms are strong in syntax training but weak in:
+Most existing SQL playgrounds and practice tools are strong in basic query execution but weak in:
 - realistic schemas
 - large datasets
 - execution plan learning
@@ -18,7 +24,7 @@ Most existing SQL learning platforms are strong in syntax training but weak in:
 - performance trade-off analysis
 - safe hands-on sandboxing
 
-Learners can often write a correct query, but they do not understand:
+Users can often write a correct query, but they do not understand:
 - why it is slow
 - how it scales
 - how indexes change behavior
@@ -26,25 +32,25 @@ Learners can often write a correct query, but they do not understand:
 
 ## 4. Product Goals
 ### 4.1 Business / Community Goals
-- create a high-quality open-source learning platform with strong contributor appeal
-- become a reference project for SQL education and query performance labs
-- support community-authored lessons, datasets, and learning tracks
+- create a high-quality open-source SQL platform with strong contributor appeal
+- become a reference project for SQL execution, dataset operations, and query performance labs
+- support community-authored content, datasets, and versioned resources
 
 ### 4.2 User Goals
-- learn SQL interactively
+- run SQL interactively
 - understand how query behavior changes from 10 rows to 100M+ rows
-- practice optimization safely
+- test optimization safely
 - inspect result sets, query plans, and performance metrics in one place
 
 ### 4.3 Engineering Goals
 - isolate user work in sandbox databases
 - support content versioning
-- support lesson authoring and future extensibility
+- support content authoring and future extensibility
 - operate with clear observability and security boundaries
 
 ## 5. Target Users
-### 5.1 Beginner Learners
-Need guided lessons, instant feedback, and simple datasets.
+### 5.1 SQL Users
+Need reliable execution environments, clear feedback, and realistic datasets.
 
 ### 5.2 Backend Developers
 Need realistic schemas, joins, indexes, and execution plan learning.
@@ -52,8 +58,8 @@ Need realistic schemas, joins, indexes, and execution plan learning.
 ### 5.3 Data Engineers / Analysts
 Need aggregate-heavy workloads, large-scale datasets, and performance comparison.
 
-### 5.4 Instructors / Contributors
-Need lesson authoring workflow, versioning, and maintainable documentation.
+### 5.4 Admins / Maintainers
+Need content governance, moderation workflow, versioning, and maintainable documentation.
 
 ## 6. User Problems
 1. “I can write SELECT queries but don’t understand joins deeply.”
@@ -66,9 +72,9 @@ Need lesson authoring workflow, versioning, and maintainable documentation.
 ## 7. Product Scope
 ### 7.1 In Scope for V1
 - user authentication
-- learning tracks and lessons
+- versioned content tracks and entries
 - versioned lesson and challenge content
-- isolated sandbox database per learning session
+- isolated sandbox database per active session
 - query execution with restrictions
 - result preview
 - EXPLAIN / EXPLAIN ANALYZE viewer
@@ -92,9 +98,9 @@ Need lesson authoring workflow, versioning, and maintainable documentation.
 - AI assistant for SQL generation
 
 ## 8. Value Proposition
-**Learn SQL from correctness to performance.**
+**Run SQL from correctness to performance.**
 The platform combines:
-- guided lessons
+- versioned content
 - realistic relational schemas
 - scalable datasets
 - sandbox isolation
@@ -120,7 +126,7 @@ Same lesson concepts can be practiced against the same schema and a canonical im
 
 Additional product rules:
 - imported canonical datasets are classified by total row count, while the exact row count is preserved as metadata
-- learners may only choose scales at or below the imported database's source scale
+- users may only choose scales at or below the imported database's source scale
 - no dataset upscaling in V1
 - changing scale reprovisions the sandbox from the selected dataset template; worker restores from artifact when available or falls back to deterministic synthetic loading rather than resizing the live sandbox in place
 
@@ -144,10 +150,10 @@ Structured learning:
 
 ## 10. Success Metrics
 ### 10.1 Product Metrics
-- monthly active learners
-- lesson completion rate
+- monthly active users
+- content completion rate
 - median session length
-- average queries per learning session
+- average queries per session
 - percentage of users using plan viewer
 - number of successful challenge submissions
 
@@ -168,7 +174,7 @@ Structured learning:
 - immediate feedback
 - visible cause-and-effect for optimization
 - safe experimentation
-- consistent learning progression
+- consistent execution workflow
 - low friction contributor onboarding
 
 ## 12. Assumptions
@@ -185,13 +191,13 @@ Structured learning:
 
 ## 14. Release Criteria for V1
 V1 is ready when:
-- users can sign in and start a learning session
+- users can sign in and start a session
 - a sandbox is provisioned from a template
 - lessons can load published content
 - queries can execute safely
 - results and plans are visible
 - attempts and history are persisted
-- learners can compare two executions side-by-side inside the lab
+- users can compare two executions side-by-side inside the lab
 - schema drift and reset-to-base workflows operate correctly inside the sandbox
 - idle sandboxes are cleaned up
 - core observability is enabled

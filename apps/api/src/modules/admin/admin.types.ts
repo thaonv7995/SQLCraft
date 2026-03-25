@@ -65,6 +65,27 @@ export interface UpdateUserStatusResult {
   updatedAt: Date | null;
 }
 
+export interface AdminUserMutationResult {
+  id: string;
+  email: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  status: UserRow['status'];
+  provider: string | null;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date | null;
+  roles: string[];
+}
+
+export interface CreateAdminUserResult extends AdminUserMutationResult {}
+
+export interface UpdateAdminUserResult extends AdminUserMutationResult {}
+
+export interface DeleteAdminUserResult extends AdminUserMutationResult {}
+
 export interface SystemHealthResult {
   status: 'healthy';
   timestamp: string;
