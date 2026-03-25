@@ -17,9 +17,14 @@ import { formatDuration, formatRows } from '@/lib/utils';
 const TERMINAL_STATUSES = new Set<QueryExecution['status']>(['success', 'error']);
 const POLL_INTERVAL_MS = 600;
 const POLL_TIMEOUT_MS = 35_000;
+const SCHEMA_MUTATION_SQL = /^\s*(create|alter|drop|truncate|comment|rename)\b/i;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function mayAffectSchema(sql: string): boolean {
+  return SCHEMA_MUTATION_SQL.test(sql);
 }
 
 async function pollUntilDone(executionId: string): Promise<QueryExecution> {
@@ -52,7 +57,7 @@ export function useExecuteQuery() {
     onMutate: () => {
       useLabStore.setState({ isExecuting: true, error: null, results: null, executionPlan: null });
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       useLabStore.setState((state) => ({
         isExecuting: false,
         lastExecution: data,
@@ -69,6 +74,11 @@ export function useExecuteQuery() {
         toastError('Query failed', new Error(data.errorMessage ?? 'Server rejected query or SQL is invalid'));
       }
       queryClient.invalidateQueries({ queryKey: ['query-history'] });
+
+      if (data.status === 'success' && mayAffectSchema(variables.sql)) {
+        queryClient.invalidateQueries({ queryKey: ['session-schema', variables.sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['session-schema-diff', variables.sessionId] });
+      }
     },
     onError: (err) => {
       useLabStore.setState({ isExecuting: false, error: err.message });

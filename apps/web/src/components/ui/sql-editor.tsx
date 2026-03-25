@@ -2,7 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import { sql, PostgreSQL } from '@codemirror/lang-sql';
+import { sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { Prec } from '@codemirror/state';
@@ -78,6 +78,127 @@ const sqlForgeTheme = EditorView.theme(
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+export interface SqlEditorSchemaColumn {
+  name: string;
+  type?: string;
+  isPrimary?: boolean;
+  isForeign?: boolean;
+  references?: string;
+}
+
+export interface SqlEditorSchemaTable {
+  name: string;
+  columns: SqlEditorSchemaColumn[];
+}
+
+type SchemaCompletion = {
+  label: string;
+  type: 'table' | 'property';
+  detail?: string;
+  info?: string;
+  boost?: number;
+};
+
+type SqlNamespaceTag = {
+  self: SchemaCompletion;
+  children: SQLNamespace;
+};
+
+function isNamespaceTag(value: unknown): value is SqlNamespaceTag {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && 'self' in value;
+}
+
+function buildColumnDetail(column: SqlEditorSchemaColumn): string | undefined {
+  const parts = [column.type, column.isPrimary ? 'PK' : null, column.isForeign ? 'FK' : null].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+function buildColumnCompletion(column: SqlEditorSchemaColumn, info?: string): SchemaCompletion {
+  return {
+    label: column.name,
+    type: 'property',
+    detail: buildColumnDetail(column),
+    info,
+    boost: column.isPrimary ? 100 : column.isForeign ? 98 : 96,
+  };
+}
+
+function buildTableNamespace(table: SqlEditorSchemaTable): SqlNamespaceTag {
+  return {
+    self: {
+      label: table.name,
+      type: 'table',
+      detail: `${table.columns.length} cols`,
+      boost: 99,
+    },
+    children: table.columns.map((column) =>
+      buildColumnCompletion(
+        column,
+        column.references ? `${table.name}.${column.name} → ${column.references}` : `${table.name}.${column.name}`,
+      ),
+    ),
+  };
+}
+
+function buildTopLevelColumnNamespace(tables: readonly SqlEditorSchemaTable[]): Record<string, SqlNamespaceTag> {
+  const columns = new Map<
+    string,
+    {
+      sample: SqlEditorSchemaColumn;
+      tables: string[];
+    }
+  >();
+
+  for (const table of tables) {
+    for (const column of table.columns) {
+      const existing = columns.get(column.name);
+
+      if (existing) {
+        existing.tables.push(table.name);
+        continue;
+      }
+
+      columns.set(column.name, {
+        sample: column,
+        tables: [table.name],
+      });
+    }
+  }
+
+  return Object.fromEntries(
+    Array.from(columns.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([columnName, entry]) => [
+        columnName,
+        {
+          self: buildColumnCompletion(
+            entry.sample,
+            entry.tables.length === 1
+              ? `Available in ${entry.tables[0]}`
+              : `Available in ${entry.tables.join(', ')}`,
+          ),
+          children: [],
+        },
+      ]),
+  );
+}
+
+function buildCompletionSchema(schema?: readonly SqlEditorSchemaTable[]): SQLNamespace | undefined {
+  if (!schema || schema.length === 0) {
+    return undefined;
+  }
+
+  const namespace: Record<string, SQLNamespace> = {
+    ...buildTopLevelColumnNamespace(schema),
+  };
+
+  for (const table of schema) {
+    namespace[table.name] = buildTableNamespace(table);
+  }
+
+  return namespace;
+}
+
 export interface SqlEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -88,6 +209,7 @@ export interface SqlEditorProps {
   readOnly?: boolean;
   className?: string;
   testId?: string;
+  schema?: readonly SqlEditorSchemaTable[];
 }
 
 export function SqlEditor({
@@ -100,12 +222,14 @@ export function SqlEditor({
   readOnly = false,
   className,
   testId,
+  schema,
 }: SqlEditorProps) {
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const completionSchema = buildCompletionSchema(schema);
 
   const extensions = useCallback(() => {
     const exts = [
-      sql({ dialect: PostgreSQL }),
+      sql({ dialect: PostgreSQL, schema: completionSchema }),
       sqlForgeTheme,
       EditorView.lineWrapping,
       keymap.of([indentWithTab, ...defaultKeymap]),
@@ -129,7 +253,7 @@ export function SqlEditor({
     }
 
     return exts;
-  }, [onExecute]);
+  }, [completionSchema, onExecute]);
 
   const hasActions = onFormat || onCopy;
 
@@ -198,3 +322,8 @@ export function SqlEditor({
     </div>
   );
 }
+
+export const __private__ = {
+  buildCompletionSchema,
+  isNamespaceTag,
+};

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
@@ -31,10 +31,12 @@ import {
   lessonsApi,
   queryApi,
   sandboxesApi,
+  sessionsApi,
   type DatasetScale,
   type QueryExecution,
   type QueryResultColumn,
   type SessionSchemaDiffResponse,
+  type SessionSchemaTable,
 } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
@@ -274,9 +276,11 @@ function EditorTabsBar() {
 }
 
 function SqlEditorPanel({
+  schemaTables,
   onFormat,
   onCopy,
 }: {
+  schemaTables?: SessionSchemaTable[];
   onFormat: () => void;
   onCopy: () => void;
 }) {
@@ -299,6 +303,7 @@ function SqlEditorPanel({
       onExecute={handleExecute}
       onFormat={onFormat}
       onCopy={onCopy}
+      schema={schemaTables}
       placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
       testId="lab-sql-editor"
     />
@@ -706,9 +711,11 @@ function CompareExecutionCard({
 function SideBySideComparePanel({
   sessionId,
   primaryQuery,
+  schemaTables,
 }: {
   sessionId: string;
   primaryQuery: string;
+  schemaTables?: SessionSchemaTable[];
 }) {
   const queryClient = useQueryClient();
   const [secondaryQuery, setSecondaryQuery] = useState('');
@@ -817,6 +824,7 @@ function SideBySideComparePanel({
               <SqlEditor
                 value={secondaryQuery}
                 onChange={setSecondaryQuery}
+                schema={schemaTables}
                 placeholder="-- Variant B: rewrite, add hints via indexes, or compare plan choices"
               />
             </div>
@@ -829,6 +837,94 @@ function SideBySideComparePanel({
               />
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EndSessionModal({
+  open,
+  isPending,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  isPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    if (!open || isPending) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isPending, onCancel, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      onClick={() => {
+        if (!isPending) {
+          onCancel();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="end-session-title"
+        aria-describedby="end-session-description"
+        className="w-full max-w-md rounded-xl border border-outline-variant/15 bg-surface-container-low p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-5 flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-error/10 text-error">
+            <span className="material-symbols-outlined text-[22px]">stop_circle</span>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+              Sandbox Control
+            </p>
+            <h2 id="end-session-title" className="mt-1 text-lg font-semibold text-on-surface">
+              End this session?
+            </h2>
+            <p id="end-session-description" className="mt-2 text-sm leading-6 text-on-surface-variant">
+              This will stop the current sandbox immediately. To keep working later, you will need
+              to start a new session.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-high/50 px-4 py-3 text-xs leading-5 text-on-surface-variant">
+          Any unsaved state inside this running sandbox will be discarded once shutdown begins.
+        </div>
+
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            loading={isPending}
+            onClick={onConfirm}
+            leftIcon={<span className="material-symbols-outlined text-[18px]">stop_circle</span>}
+          >
+            End Session
+          </Button>
         </div>
       </div>
     </div>
@@ -1179,6 +1275,7 @@ function LabSessionError({
 
 export default function LabPage() {
   const params = useParams<{ sessionId?: string | string[] }>();
+  const router = useRouter();
   const sessionId = sessionIdFromParams(params);
   const {
     activeTab,
@@ -1213,6 +1310,7 @@ export default function LabPage() {
     error: sessionFetchError,
     refetch: refetchSession,
   } = useSessionStatus(sessionId);
+  const { data: sessionSchema } = useSessionSchema(sessionId);
   const lessonContext = useMemo(() => readLabBootstrap(sessionId), [sessionId]);
   const { data: sessionLessonVersion } = useQuery({
     queryKey: ['lab-session-lesson-version', session?.lessonVersionId],
@@ -1374,9 +1472,26 @@ export default function LabPage() {
       queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
     },
   });
+  const endSessionMutation = useMutation({
+    mutationFn: async () => sessionsApi.end(sessionId),
+    onSuccess: () => {
+      setIsEndSessionModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['session-status', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema-diff', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
+      toast.success('Session ended. Sandbox is shutting down.');
+      router.replace(entryPath ?? '/lab');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to end session');
+    },
+  });
 
   const [hydratedEditorSessionId, setHydratedEditorSessionId] = useState<string | null>(null);
   const [hasPersistedEditorTabs, setHasPersistedEditorTabs] = useState(false);
+  const [isEndSessionModalOpen, setIsEndSessionModalOpen] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -1504,6 +1619,19 @@ export default function LabPage() {
     },
     [scaleSwitchMutation, selectedScale, session],
   );
+  const handleOpenEndSessionModal = useCallback(() => {
+    setIsEndSessionModalOpen(true);
+  }, []);
+
+  const handleCloseEndSessionModal = useCallback(() => {
+    if (!endSessionMutation.isPending) {
+      setIsEndSessionModalOpen(false);
+    }
+  }, [endSessionMutation.isPending]);
+
+  const handleConfirmEndSession = useCallback(() => {
+    endSessionMutation.mutate();
+  }, [endSessionMutation]);
 
   if (!sessionId) {
     return (
@@ -1675,9 +1803,27 @@ export default function LabPage() {
                     : session?.status ?? '—'}
               </span>
             </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              loading={endSessionMutation.isPending}
+              disabled={!session || session.status === 'ended'}
+              onClick={handleOpenEndSessionModal}
+              title="Stop this sandbox and end the current session immediately"
+              leftIcon={<span className="material-symbols-outlined text-[18px]">stop_circle</span>}
+            >
+              End Session
+            </Button>
           </div>
         </div>
       </header>
+
+      <EndSessionModal
+        open={isEndSessionModalOpen}
+        isPending={endSessionMutation.isPending}
+        onCancel={handleCloseEndSessionModal}
+        onConfirm={handleConfirmEndSession}
+      />
 
       {/* ── Session expired / failed overlay ── */}
       {session && !['active', 'provisioning', 'paused'].includes(session.status) && (
@@ -1714,7 +1860,11 @@ export default function LabPage() {
               </kbd>
             </div>
           </div>
-          <SqlEditorPanel onFormat={handleFormatSql} onCopy={handleCopyQuery} />
+          <SqlEditorPanel
+            schemaTables={sessionSchema?.tables}
+            onFormat={handleFormatSql}
+            onCopy={handleCopyQuery}
+          />
         </div>
 
         {/* Resize handle */}
@@ -1775,7 +1925,11 @@ export default function LabPage() {
             {activeTab === 'results' && <ResultsPanel />}
             {activeTab === 'plan' && <ExecutionPlanPanel />}
             {activeTab === 'compare' && (
-              <SideBySideComparePanel sessionId={sessionId} primaryQuery={currentQuery} />
+              <SideBySideComparePanel
+                sessionId={sessionId}
+                primaryQuery={currentQuery}
+                schemaTables={sessionSchema?.tables}
+              />
             )}
             {activeTab === 'history' && <QueryHistoryPanel />}
             {activeTab === 'schema' && <SchemaPanel sessionId={sessionId} />}

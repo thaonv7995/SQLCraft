@@ -6,6 +6,15 @@ const execFileAsync = promisify(execFile);
 
 const sandboxDockerNetwork = process.env.SANDBOX_DOCKER_NETWORK ?? 'sqlcraft-dev';
 const sandboxPostgresImage = process.env.SANDBOX_POSTGRES_IMAGE ?? 'postgres:16-alpine';
+const sandboxPostgresMaxWalSize = process.env.SANDBOX_POSTGRES_MAX_WAL_SIZE ?? '4GB';
+const sandboxPostgresMinWalSize = process.env.SANDBOX_POSTGRES_MIN_WAL_SIZE ?? '1GB';
+const sandboxPostgresCheckpointTimeout =
+  process.env.SANDBOX_POSTGRES_CHECKPOINT_TIMEOUT ?? '30min';
+const sandboxPostgresCheckpointCompletionTarget =
+  process.env.SANDBOX_POSTGRES_CHECKPOINT_COMPLETION_TARGET ?? '0.9';
+const sandboxPostgresWalCompression = process.env.SANDBOX_POSTGRES_WAL_COMPRESSION ?? 'on';
+const sandboxPostgresSynchronousCommit =
+  process.env.SANDBOX_POSTGRES_SYNCHRONOUS_COMMIT ?? 'off';
 const storageDockerContainer = process.env.STORAGE_DOCKER_CONTAINER ?? 'sqlcraft-minio';
 const storageAccessKey = process.env.STORAGE_ACCESS_KEY ?? 'minioadmin';
 const storageSecretKey = process.env.STORAGE_SECRET_KEY ?? 'minioadmin';
@@ -119,6 +128,9 @@ export async function createSandboxContainer(params: {
   const { containerRef, dbName, dbUser, dbPassword, sandboxId } = params;
 
   await ensureSandboxContainerRemoved(containerRef);
+
+  // Sandboxes are short-lived and spend most provisioning time bulk-loading fixtures.
+  // Looser checkpointing + compressed WAL cuts restore/seed time without changing SQL behavior.
   await runDocker([
     'run',
     '-d',
@@ -137,6 +149,19 @@ export async function createSandboxContainer(params: {
     '-e',
     `POSTGRES_DB=${dbName}`,
     sandboxPostgresImage,
+    'postgres',
+    '-c',
+    `max_wal_size=${sandboxPostgresMaxWalSize}`,
+    '-c',
+    `min_wal_size=${sandboxPostgresMinWalSize}`,
+    '-c',
+    `checkpoint_timeout=${sandboxPostgresCheckpointTimeout}`,
+    '-c',
+    `checkpoint_completion_target=${sandboxPostgresCheckpointCompletionTarget}`,
+    '-c',
+    `wal_compression=${sandboxPostgresWalCompression}`,
+    '-c',
+    `synchronous_commit=${sandboxPostgresSynchronousCommit}`,
   ]);
 }
 

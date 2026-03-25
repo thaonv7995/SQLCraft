@@ -131,6 +131,7 @@ async function applySchemaAndDataset(params: {
   let schemaDef: Awaited<ReturnType<typeof fetchSchemaTemplate>> = null;
 
   if (schemaTemplateId) {
+    const schemaStartedAt = Date.now();
     schemaDef = await fetchSchemaTemplate(schemaTemplateId);
     if (schemaDef?.tables?.length) {
       const ddlStatements = buildCreateTableDdl(schemaDef.tables);
@@ -144,7 +145,12 @@ async function applySchemaAndDataset(params: {
           await sandboxPool.query(ddl);
         }
         logger.info(
-          { sandboxInstanceId, dbName, tableCount: ddlStatements.length },
+          {
+            sandboxInstanceId,
+            dbName,
+            tableCount: ddlStatements.length,
+            durationMs: Date.now() - schemaStartedAt,
+          },
           'Schema DDL applied',
         );
       } finally {
@@ -158,6 +164,7 @@ async function applySchemaAndDataset(params: {
     return;
   }
 
+  const datasetLoadStartedAt = Date.now();
   const datasetTemplate = await fetchDatasetTemplate(datasetTemplateId);
   if (!datasetTemplate) {
     throw new Error(`Dataset template not found: ${datasetTemplateId}`);
@@ -171,6 +178,15 @@ async function applySchemaAndDataset(params: {
     datasetTemplate,
     schema: schemaDef,
   });
+
+  logger.info(
+    {
+      sandboxInstanceId,
+      datasetTemplateId,
+      durationMs: Date.now() - datasetLoadStartedAt,
+    },
+    'Dataset load applied',
+  );
 }
 
 // ─── Worker: provision_sandbox ────────────────────────────────────────────────
