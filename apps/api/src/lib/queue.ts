@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const queuePrefix = process.env.QUEUE_PREFIX?.trim() || undefined;
 
 // Shared Redis connection for all queues
 const connection = new IORedis(redisUrl, {
@@ -18,11 +19,12 @@ export const QUEUE_NAMES = {
 
 type BullConnection = import('bullmq').ConnectionOptions;
 const conn = connection as unknown as BullConnection;
+const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : { connection: conn };
 
-const sandboxProvisioningQueue = new Queue(QUEUE_NAMES.SANDBOX_PROVISIONING, { connection: conn });
-const sandboxCleanupQueue = new Queue(QUEUE_NAMES.SANDBOX_CLEANUP, { connection: conn });
-const sandboxResetQueue = new Queue(QUEUE_NAMES.SANDBOX_RESET, { connection: conn });
-const queryExecutionQueue = new Queue(QUEUE_NAMES.QUERY_EXECUTION, { connection: conn });
+const sandboxProvisioningQueue = new Queue(QUEUE_NAMES.SANDBOX_PROVISIONING, queueOptions);
+const sandboxCleanupQueue = new Queue(QUEUE_NAMES.SANDBOX_CLEANUP, queueOptions);
+const sandboxResetQueue = new Queue(QUEUE_NAMES.SANDBOX_RESET, queueOptions);
+const queryExecutionQueue = new Queue(QUEUE_NAMES.QUERY_EXECUTION, queueOptions);
 
 export interface ProvisionSandboxJobData {
   sandboxInstanceId: string;

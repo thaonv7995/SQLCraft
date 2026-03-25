@@ -7,7 +7,9 @@ import {
   InvalidCredentialsError,
   TokenInvalidError,
   UnauthorizedError,
+  ValidationError,
 } from '../../lib/errors';
+import { DEFAULT_USER_ROLE_NAME } from '../../lib/roles';
 import { config } from '../../lib/config';
 import { getPresignedUrl } from '../../lib/storage';
 import type { AuthTokens, AuthResult, TokenUser, UserProfile } from './auth.types';
@@ -66,6 +68,11 @@ export async function registerUser(
     throw new ConflictError('Username already taken');
   }
 
+  const defaultRole = await usersRepository.findRoleByName(DEFAULT_USER_ROLE_NAME);
+  if (!defaultRole) {
+    throw new ValidationError(`Role '${DEFAULT_USER_ROLE_NAME}' is not configured`);
+  }
+
   const passwordHash = await bcrypt.hash(data.password, 12);
 
   const newUser = await usersRepository.create({
@@ -76,7 +83,7 @@ export async function registerUser(
     provider: 'email',
   });
 
-  await usersRepository.setUserRole(newUser.id, 'user');
+  await usersRepository.setUserRole(newUser.id, DEFAULT_USER_ROLE_NAME);
 
   const roles = await usersRepository.getRoleNames(newUser.id);
   const tokens = await generateTokens(fastify, newUser, roles);

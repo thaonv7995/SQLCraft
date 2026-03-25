@@ -5,6 +5,7 @@ import type {
   ChallengeCatalogRow,
   EditableChallengeDetailRow,
   ChallengeLeaderboardAttemptRow,
+  GlobalLeaderboardAttemptRow,
   ChallengeRow,
   ChallengeVersionRow,
   PublishedChallengeVersionDetailRow,
@@ -109,6 +110,17 @@ export interface ChallengeLeaderboardEntry {
   attemptsCount: number;
   passedAttempts: number;
   lastSubmittedAt: Date;
+}
+
+export interface GlobalLeaderboardEntry {
+  rank: number;
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+  points: number;
+  challengesCompleted: number;
+  streak: number;
 }
 
 export interface ChallengeCatalogItem {
@@ -508,6 +520,116 @@ function buildLeaderboard(
       attemptsCount: entry.attemptsCount,
       passedAttempts: entry.passedAttempts,
       lastSubmittedAt: entry.lastSubmittedAt,
+    }));
+}
+
+function toUtcDayKey(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function computeRecentStreak(activityDays: Set<string>): number {
+  if (activityDays.size === 0) {
+    return 0;
+  }
+
+  const orderedDays = Array.from(activityDays).sort();
+  const latestDay = orderedDays[orderedDays.length - 1];
+  const cursor = new Date(`${latestDay}T00:00:00.000Z`);
+  let streak = 0;
+
+  while (activityDays.has(toUtcDayKey(cursor))) {
+    streak += 1;
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+  }
+
+  return streak;
+}
+
+function getGlobalLeaderboardSince(
+  period: 'weekly' | 'monthly' | 'alltime',
+): Date | undefined {
+  if (period === 'alltime') {
+    return undefined;
+  }
+
+  const now = new Date();
+  const daysToSubtract = period === 'weekly' ? 7 : 30;
+  now.setUTCDate(now.getUTCDate() - daysToSubtract);
+  return now;
+}
+
+function buildGlobalLeaderboard(
+  rows: GlobalLeaderboardAttemptRow[],
+  limit: number,
+): GlobalLeaderboardEntry[] {
+  const byUser = new Map<
+    string,
+    Omit<GlobalLeaderboardEntry, 'rank'> & {
+      challengeIds: Set<string>;
+      activityDays: Set<string>;
+      lastSubmittedAt: Date;
+    }
+  >();
+
+  for (const row of rows) {
+    const displayName = row.displayName ?? row.username;
+    const existing = byUser.get(row.userId);
+
+    if (!existing) {
+      const challengeIds = new Set<string>([row.challengeId]);
+      const activityDays = new Set<string>([toUtcDayKey(row.submittedAt)]);
+      byUser.set(row.userId, {
+        userId: row.userId,
+        username: row.username,
+        displayName,
+        avatarUrl: row.avatarUrl,
+        points: row.points,
+        challengesCompleted: 1,
+        streak: 0,
+        challengeIds,
+        activityDays,
+        lastSubmittedAt: row.submittedAt,
+      });
+      continue;
+    }
+
+    existing.activityDays.add(toUtcDayKey(row.submittedAt));
+    existing.lastSubmittedAt =
+      existing.lastSubmittedAt > row.submittedAt ? existing.lastSubmittedAt : row.submittedAt;
+
+    if (!existing.challengeIds.has(row.challengeId)) {
+      existing.challengeIds.add(row.challengeId);
+      existing.points += row.points;
+      existing.challengesCompleted += 1;
+    }
+  }
+
+  return Array.from(byUser.values())
+    .map((entry) => ({
+      ...entry,
+      streak: computeRecentStreak(entry.activityDays),
+    }))
+    .sort((left, right) => {
+      if (right.points !== left.points) return right.points - left.points;
+      if (right.challengesCompleted !== left.challengesCompleted) {
+        return right.challengesCompleted - left.challengesCompleted;
+      }
+      if (right.streak !== left.streak) return right.streak - left.streak;
+      if (right.lastSubmittedAt.getTime() !== left.lastSubmittedAt.getTime()) {
+        return right.lastSubmittedAt.getTime() - left.lastSubmittedAt.getTime();
+      }
+      return left.username.localeCompare(right.username);
+    })
+    .slice(0, limit)
+    .map((entry, index) => ({
+      rank: index + 1,
+      userId: entry.userId,
+      username: entry.username,
+      displayName: entry.displayName,
+      avatarUrl: entry.avatarUrl,
+      points: entry.points,
+      challengesCompleted: entry.challengesCompleted,
+      streak: entry.streak,
     }));
 }
 
@@ -1101,6 +1223,16 @@ export async function getChallengeLeaderboard(
 
   const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
   return buildLeaderboard(attempts, limit);
+}
+
+export async function getGlobalLeaderboard(
+  period: 'weekly' | 'monthly' | 'alltime' = 'alltime',
+  limit = 50,
+): Promise<GlobalLeaderboardEntry[]> {
+  const attempts = await challengesRepository.listPassedAttemptsForGlobalLeaderboard(
+    getGlobalLeaderboardSince(period),
+  );
+  return buildGlobalLeaderboard(attempts, limit);
 }
 
 export async function getAttempt(

@@ -106,11 +106,19 @@ function inferTextExpression(tableName: string, columnName: string, column: Colu
   return `(${sqlLiteral(`${base}_`)} || ((i - 1) % 100 + 1))`;
 }
 
+function isIntegerLikeType(typeUpper: string): boolean {
+  return /\b(SMALLINT|INTEGER|BIGINT|INT|INT2|INT4|INT8)\b/i.test(typeUpper);
+}
+
+function isDecimalLikeType(typeUpper: string): boolean {
+  return /\b(DECIMAL|NUMERIC|REAL|DOUBLE|FLOAT)\b/i.test(typeUpper);
+}
+
 function inferNumericExpression(column: ColumnMeta): string {
-  if (/\bDECIMAL\b|\bNUMERIC\b/i.test(column.typeUpper)) {
+  if (isDecimalLikeType(column.typeUpper)) {
     return '((i % 10000)::numeric / 100.0)';
   }
-  if (/\bBIGINT\b/i.test(column.typeUpper)) {
+  if (/\b(BIGINT|INT8)\b/i.test(column.typeUpper)) {
     return '(i::bigint)';
   }
   return '(i::int)';
@@ -157,7 +165,7 @@ function inferColumnExpression(
   if (/\bTIMESTAMP\b|\bDATE\b/i.test(column.typeUpper)) {
     return inferTemporalExpression(column);
   }
-  if (/\bINT\b|\bBIGINT\b|\bDECIMAL\b|\bNUMERIC\b|\bREAL\b|\bDOUBLE\b/i.test(column.typeUpper)) {
+  if (isIntegerLikeType(column.typeUpper) || isDecimalLikeType(column.typeUpper)) {
     return inferNumericExpression(column);
   }
   if (/\bCHAR\b|\bTEXT\b|\bUUID\b|\bJSON\b|\bJSONB\b/i.test(column.typeUpper)) {

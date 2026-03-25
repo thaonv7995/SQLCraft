@@ -5,6 +5,7 @@ import type {
   ChallengeLeaderboardQuery,
   ChallengeParams,
   ChallengeVersionParams,
+  GlobalLeaderboardQuery,
   CreateChallengeBody,
   CreateChallengeVersionBody,
   ReviewChallengeVersionBody,
@@ -23,11 +24,32 @@ import {
   listUserChallengesHandler,
   listUserAttemptsHandler,
   getChallengeLeaderboardHandler,
+  getGlobalLeaderboardHandler,
   reviewChallengeVersionHandler,
   validateChallengeDraftHandler,
 } from './challenges.handler';
 
 export default async function challengesRouter(fastify: FastifyInstance): Promise<void> {
+  fastify.get<{ Querystring: GlobalLeaderboardQuery }>(
+    '/v1/leaderboard',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Get the global challenge leaderboard',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            period: { type: 'string', enum: ['weekly', 'monthly', 'alltime'], default: 'alltime' },
+            limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 },
+          },
+        },
+      },
+    },
+    getGlobalLeaderboardHandler,
+  );
+
   fastify.get(
     '/v1/challenges',
     {

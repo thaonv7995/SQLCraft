@@ -64,10 +64,14 @@ services:
     environment:
       DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
       REDIS_URL: redis://redis:6379
+      QUEUE_PREFIX: sqlcraft:docker-dev
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_PUBLIC_URL: http://localhost:9000
       SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
       SANDBOX_DB_PASSWORD: sandbox
+    command: sh -c "pnpm db:migrate && pnpm dev"
     ports:
       - "4000:4000"
     volumes:
@@ -80,6 +84,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_started
     restart: unless-stopped
     networks:
       - sqlcraft
@@ -114,6 +120,7 @@ services:
     environment:
       DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
       REDIS_URL: redis://redis:6379
+      QUEUE_PREFIX: sqlcraft:docker-dev
       SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox

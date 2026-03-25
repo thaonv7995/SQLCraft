@@ -11,6 +11,7 @@ import {
   listUserChallenges,
   listUserAttempts,
   getChallengeLeaderboard,
+  getGlobalLeaderboard,
   validateChallengeDraft,
   createChallenge,
   createChallengeVersion,
@@ -22,6 +23,7 @@ import {
   ChallengeLeaderboardQuerySchema,
   ChallengeParamsSchema,
   ChallengeVersionParamsSchema,
+  GlobalLeaderboardQuerySchema,
   SubmitAttemptSchema,
   CreateChallengeSchema,
   CreateChallengeVersionSchema,
@@ -35,6 +37,7 @@ import type {
   AdminChallengeVersionParams,
   ChallengeAttemptsQuery,
   ChallengeLeaderboardQuery,
+  GlobalLeaderboardQuery,
   SubmitAttemptBody,
   CreateChallengeBody,
   CreateChallengeVersionBody,
@@ -108,6 +111,15 @@ export async function getChallengeLeaderboardHandler(
   const query = ChallengeLeaderboardQuerySchema.parse(request.query);
   const leaderboard = await getChallengeLeaderboard(id, query.limit);
   return reply.send(success(leaderboard, MESSAGES.LEADERBOARD_RETRIEVED));
+}
+
+export async function getGlobalLeaderboardHandler(
+  request: FastifyRequest<{ Querystring: GlobalLeaderboardQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = GlobalLeaderboardQuerySchema.parse(request.query);
+  const leaderboard = await getGlobalLeaderboard(query.period, query.limit);
+  return reply.send(success(leaderboard, 'Global leaderboard retrieved successfully'));
 }
 
 export async function createChallengeHandler(

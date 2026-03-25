@@ -24,6 +24,10 @@ vi.mock('../../../db/repositories', () => ({
     listUsers: vi.fn(),
     updateStatus: vi.fn(),
     findById: vi.fn(),
+    findRoleByName: vi.fn(),
+    emailExists: vi.fn(),
+    usernameExists: vi.fn(),
+    create: vi.fn(),
     setUserRole: vi.fn(),
     getRoleNames: vi.fn(),
   },
@@ -42,13 +46,15 @@ vi.mock('../../../db/repositories', () => ({
   },
 }));
 
-import { adminRepository } from '../../../db/repositories';
+import { adminRepository, usersRepository } from '../../../db/repositories';
 import { ValidationError } from '../../../lib/errors';
 import {
+  createAdminUser,
   getAdminConfig,
   importCanonicalDatabase,
   listSystemJobs,
   resetAdminConfig,
+  updateUserRole,
   updateAdminConfig,
 } from '../admin.service';
 import type { AdminConfigBody } from '../admin.schema';
@@ -164,6 +170,43 @@ const makeAdminConfigRow = (overrides: Partial<AdminConfigRow> = {}): AdminConfi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(usersRepository.findRoleByName).mockResolvedValue({
+    id: 'role-learner',
+    name: 'learner',
+  });
+  vi.mocked(usersRepository.emailExists).mockResolvedValue(false);
+  vi.mocked(usersRepository.usernameExists).mockResolvedValue(false);
+  vi.mocked(usersRepository.create).mockImplementation(async (data: any) => ({
+    id: 'user-1',
+    email: data.email,
+    username: data.username,
+    passwordHash: data.passwordHash,
+    displayName: data.displayName,
+    avatarUrl: null,
+    bio: data.bio ?? null,
+    status: data.status,
+    provider: data.provider,
+    providerId: null,
+    lastLoginAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  }));
+  vi.mocked(usersRepository.findById).mockResolvedValue({
+    id: 'user-1',
+    email: 'user@example.com',
+    username: 'learner01',
+    passwordHash: 'hash',
+    displayName: 'Learner 01',
+    avatarUrl: null,
+    bio: null,
+    status: 'active',
+    provider: 'email',
+    providerId: null,
+    lastLoginAt: null,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-01-01T00:00:00Z'),
+  });
+  vi.mocked(usersRepository.getRoleNames).mockResolvedValue(['learner']);
   vi.mocked(adminRepository.findLatestSchemaTemplateByName).mockResolvedValue(null);
   vi.mocked(adminRepository.createSchemaTemplate).mockImplementation(async (data: any) =>
     makeSchemaTemplate(data),
@@ -297,6 +340,31 @@ describe('listSystemJobs()', () => {
       type: 'canonical-dataset-import',
     });
     expect(result.items).toHaveLength(1);
+  });
+});
+
+describe('user role mapping', () => {
+  it('maps external user role updates to the learner role in storage', async () => {
+    const result = await updateUserRole('user-1', { role: 'user' });
+
+    expect(usersRepository.setUserRole).toHaveBeenCalledWith('user-1', 'learner');
+    expect(result.roles).toEqual(['learner']);
+  });
+
+  it('maps admin-created standard users to the learner role before persistence', async () => {
+    const result = await createAdminUser({
+      email: 'User@example.com',
+      username: 'learner01',
+      password: 'password123',
+      displayName: 'Learner 01',
+      bio: null,
+      role: 'user',
+      status: 'active',
+    });
+
+    expect(usersRepository.findRoleByName).toHaveBeenCalledWith('learner');
+    expect(usersRepository.setUserRole).toHaveBeenCalledWith('user-1', 'learner');
+    expect(result.roles).toEqual(['learner']);
   });
 });
 

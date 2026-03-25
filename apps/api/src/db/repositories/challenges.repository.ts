@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -69,6 +69,16 @@ export interface ChallengeLeaderboardAttemptRow {
   avatarUrl: string | null;
   score: number | null;
   status: ChallengeAttemptRow['status'];
+  submittedAt: Date;
+}
+
+export interface GlobalLeaderboardAttemptRow {
+  userId: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  challengeId: string;
+  points: number;
   submittedAt: Date;
 }
 
@@ -445,6 +455,39 @@ export class ChallengesRepository {
       .innerJoin(schema.users, eq(schema.learningSessions.userId, schema.users.id))
       .where(eq(schema.challengeAttempts.challengeVersionId, challengeVersionId))
       .orderBy(desc(schema.challengeAttempts.score), desc(schema.challengeAttempts.submittedAt));
+  }
+
+  async listPassedAttemptsForGlobalLeaderboard(
+    since?: Date,
+  ): Promise<GlobalLeaderboardAttemptRow[]> {
+    const filters = [
+      eq(schema.challengeAttempts.status, 'passed'),
+      since ? gte(schema.challengeAttempts.submittedAt, since) : null,
+    ].filter((value): value is NonNullable<typeof value> => value !== null);
+
+    return this.db
+      .select({
+        userId: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+        avatarUrl: schema.users.avatarUrl,
+        challengeId: schema.challenges.id,
+        points: schema.challenges.points,
+        submittedAt: schema.challengeAttempts.submittedAt,
+      })
+      .from(schema.challengeAttempts)
+      .innerJoin(
+        schema.learningSessions,
+        eq(schema.challengeAttempts.learningSessionId, schema.learningSessions.id),
+      )
+      .innerJoin(schema.users, eq(schema.learningSessions.userId, schema.users.id))
+      .innerJoin(
+        schema.challengeVersions,
+        eq(schema.challengeAttempts.challengeVersionId, schema.challengeVersions.id),
+      )
+      .innerJoin(schema.challenges, eq(schema.challengeVersions.challengeId, schema.challenges.id))
+      .where(filters.length === 1 ? filters[0] : and(...filters))
+      .orderBy(desc(schema.challengeAttempts.submittedAt));
   }
 
   async getSessionUserId(sessionId: string): Promise<string | null> {

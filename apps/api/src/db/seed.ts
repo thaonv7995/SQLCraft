@@ -4,6 +4,11 @@ import { Pool } from 'pg';
 import { eq, or } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import * as schema from './schema/index';
+import {
+  ADMIN_ROLE_NAME,
+  CONTRIBUTOR_ROLE_NAME,
+  DEFAULT_USER_ROLE_NAME,
+} from '../lib/roles';
 
 async function seed() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -15,25 +20,38 @@ async function seed() {
   console.log('Creating roles...');
   const existingRoles = await db.select().from(schema.roles);
 
-  let adminRole = existingRoles.find((r) => r.name === 'admin');
-  let userRole = existingRoles.find((r) => r.name === 'user');
+  let adminRole = existingRoles.find((r) => r.name === ADMIN_ROLE_NAME);
+  let learnerRole = existingRoles.find((r) => r.name === DEFAULT_USER_ROLE_NAME);
+  let contributorRole = existingRoles.find((r) => r.name === CONTRIBUTOR_ROLE_NAME);
 
   if (!adminRole) {
     const [r] = await db
       .insert(schema.roles)
-      .values({ name: 'admin', description: 'Platform administrator' })
+      .values({ name: ADMIN_ROLE_NAME, description: 'Platform administrator' })
       .returning();
     adminRole = r;
     console.log('  Created admin role');
   }
 
-  if (!userRole) {
+  if (!learnerRole) {
     const [r] = await db
       .insert(schema.roles)
-      .values({ name: 'user', description: 'Standard platform user' })
+      .values({ name: DEFAULT_USER_ROLE_NAME, description: 'SQL learner' })
       .returning();
-    userRole = r;
-    console.log('  Created user role');
+    learnerRole = r;
+    console.log('  Created learner role');
+  }
+
+  if (!contributorRole) {
+    const [r] = await db
+      .insert(schema.roles)
+      .values({
+        name: CONTRIBUTOR_ROLE_NAME,
+        description: 'Content contributor — can submit lessons, databases, and challenges for review',
+      })
+      .returning();
+    contributorRole = r;
+    console.log('  Created contributor role');
   }
 
   // 2. Create admin user
@@ -132,7 +150,7 @@ async function seed() {
   await db.delete(schema.userRoles).where(eq(schema.userRoles.userId, standardUser.id));
   await db.insert(schema.userRoles).values({
     userId: standardUser.id,
-    roleId: userRole.id,
+    roleId: learnerRole.id,
   });
 
   // 4. Create schema template for ecommerce

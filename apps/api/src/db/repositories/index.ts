@@ -58,6 +58,7 @@ export type {
   ChallengeAttemptRow,
   ChallengeAttemptWithExecutionRow,
   ChallengeLeaderboardAttemptRow,
+  GlobalLeaderboardAttemptRow,
   ChallengeCatalogRow,
   EditableChallengeDetailRow,
   PublishedChallengeVersionRow,

@@ -12,6 +12,7 @@ import {
   normalizeDatasetRowCounts,
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
+import { toStoredRoleName } from '../../lib/roles';
 import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
@@ -240,7 +241,12 @@ export async function updateUserRole(
 ): Promise<UpdateUserRoleResult> {
   const user = await usersRepository.findById(id);
   if (!user) throw new NotFoundError('User not found');
-  await usersRepository.setUserRole(id, body.role);
+  const roleName = toStoredRoleName(body.role);
+  const configuredRole = await usersRepository.findRoleByName(roleName);
+  if (!configuredRole) {
+    throw new ValidationError(`Role '${roleName}' is not configured`);
+  }
+  await usersRepository.setUserRole(id, roleName);
   const roles = await usersRepository.getRoleNames(id);
   return { id: user.id, email: user.email, username: user.username, roles, updatedAt: user.updatedAt };
 }
@@ -264,6 +270,12 @@ export async function createAdminUser(
     throw new ConflictError('Username already taken');
   }
 
+  const roleName = toStoredRoleName(body.role);
+  const configuredRole = await usersRepository.findRoleByName(roleName);
+  if (!configuredRole) {
+    throw new ValidationError(`Role '${roleName}' is not configured`);
+  }
+
   const passwordHash = await bcrypt.hash(body.password, 12);
 
   const createdUser = await usersRepository.create({
@@ -276,7 +288,7 @@ export async function createAdminUser(
     provider: 'email',
   });
 
-  await usersRepository.setUserRole(createdUser.id, body.role);
+  await usersRepository.setUserRole(createdUser.id, roleName);
 
   return buildAdminUserMutationResult(createdUser.id);
 }
@@ -301,6 +313,14 @@ export async function updateAdminUser(
     const usernameOwner = await usersRepository.findByUsername(body.username.trim());
     if (usernameOwner && usernameOwner.id !== id) {
       throw new ConflictError('Username already taken');
+    }
+  }
+
+  if (body.role) {
+    const roleName = toStoredRoleName(body.role);
+    const configuredRole = await usersRepository.findRoleByName(roleName);
+    if (!configuredRole) {
+      throw new ValidationError(`Role '${roleName}' is not configured`);
     }
   }
 
@@ -338,7 +358,8 @@ export async function updateAdminUser(
   }
 
   if (body.role) {
-    await usersRepository.setUserRole(id, body.role);
+    const roleName = toStoredRoleName(body.role);
+    await usersRepository.setUserRole(id, roleName);
   }
 
   return buildAdminUserMutationResult(id);

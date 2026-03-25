@@ -5,11 +5,18 @@ Date: 2026-03-25
 ## Executive Summary
 
 - Frontend feature surface discovered: 32 page routes in `apps/web/src/app`.
-- API surface discovered: 65 route definitions across 10 router modules.
+- API surface discovered: 66 route definitions across 10 router modules.
 - No runtime mock API implementation was found in the backend.
 - Runtime mock data and fallback catalog behavior were found in the frontend and removed in this audit slice.
 - API implementation exists across all registered router modules, but the system is not yet at a level where every API can be called “fully complete”.
 - Main reason: the backend currently proves business logic mostly through service tests, not HTTP contract/integration tests.
+- Manual HTTP verification initially exposed several runtime blockers, and the follow-up fixes in this audit slice now verify cleanly in the current Docker dev stack:
+- sandbox provisioning and live query execution succeed end-to-end
+- `/v1/leaderboard` now exists for the rankings screens
+- `/v1/admin/config` works after restoring the migration path on API startup
+- `POST /v1/admin/users` with `role: "user"` now creates a non-admin account with stored role `learner`
+- `POST /v1/users/me/avatar` now succeeds with a valid MinIO presigned URL
+- Docker dev now sets a dedicated BullMQ `QUEUE_PREFIX`, which prevents stray host-side workers from consuming the same Redis jobs as the compose stack
 
 ## Runtime Hardcode / Mock Audit
 
@@ -109,6 +116,7 @@ Date: 2026-03-25
 
 ### Challenges
 
+- `GET /v1/leaderboard`
 - `GET /v1/challenges`
 - `GET /v1/challenges/mine`
 - `POST /v1/challenges`
@@ -184,6 +192,148 @@ pnpm --filter @sqlcraft/web exec vitest run 'src/app/(app)/tracks/[trackId]/less
 - Web lint on touched files: passed
 - Targeted lesson page test: passed
 
+## Manual HTTP Verification By Screen
+
+### Environment used
+
+- Web base URL: `http://localhost:3000`
+- API base URL: `http://localhost:4000`
+- Stack used for the final verification: `docker-compose.dev.yml` with API, web, worker, Postgres, Redis, and MinIO
+- API container now runs `pnpm db:migrate` on startup before `pnpm dev`
+- API and worker containers now share `QUEUE_PREFIX=sqlcraft:docker-dev`, isolating Docker job queues from host-local worker processes
+- One false-negative during the audit came from a stale host-side worker process consuming Redis jobs outside Docker; that process was stopped before the final query-execution verification
+
+### Dashboard / Explore / Tracks
+
+- PASS `GET /v1/databases`
+- PASS `GET /v1/databases/:databaseId`
+- PASS `GET /v1/tracks`
+- PASS `GET /v1/tracks/:trackId`
+- PASS `GET /v1/learning-sessions`
+- PASS `GET /v1/query-executions`
+
+### Database Detail / Lesson Detail
+
+- PASS `POST /v1/databases/sessions`
+- PASS `POST /v1/learning-sessions`
+- PASS `GET /v1/learning-sessions/:sessionId`
+- PASS `GET /v1/learning-sessions/:sessionId/schema`
+- PASS `GET /v1/learning-sessions/:sessionId/schema-diff` returns the expected pre-ready validation error when the sandbox is not ready
+- PASS sandbox provisioning now completes and the session transitions to `active`
+- PASS `POST /v1/query-executions` succeeds on an active sandbox session
+- PASS `POST /v1/sandboxes/:sessionId/reset`
+- PASS `POST /v1/learning-sessions/:sessionId/end`
+
+### Contributor / Challenge Screens
+
+- PASS `POST /v1/challenges/validate`
+- PASS `POST /v1/challenges`
+- PASS `GET /v1/challenges/mine`
+- PASS `GET /v1/challenges/:id/draft`
+- PASS `POST /v1/challenges/:id/versions`
+- PASS `GET /v1/admin/challenges`
+- PASS `POST /v1/admin/challenge-versions/:id/review` with `decision: "approve"`
+- PASS `GET /v1/challenges`
+- PASS `GET /v1/challenge-versions/:id`
+- PASS `GET /v1/challenge-versions/:id/leaderboard`
+- PASS `GET /v1/challenge-attempts`
+- NOTE challenge-attempt submission was not re-run in the final pass, but its previously blocked dependency path is now verified: provisioning and query execution both succeed
+
+### Lab / History
+
+- PASS `GET /v1/query-executions`
+- PASS `GET /v1/learning-sessions/:sessionId/query-executions`
+- PASS `GET /v1/users/me/query-history`
+- PASS `GET /v1/users/me/sessions`
+- PASS lab execution flow is available in the current stack; live query execution returned a successful result preview
+
+### Settings
+
+- PASS `PATCH /v1/users/me`
+- PASS `POST /v1/users/me/change-password`
+- PASS `POST /v1/users/me/avatar`
+  - verified in Docker after separating the internal MinIO endpoint (`minio:9000`) from the public presign URL host (`localhost:9000`)
+
+### Admin Content
+
+- PASS `POST /v1/admin/lessons`
+- PASS `POST /v1/admin/lesson-versions`
+- PASS `GET /v1/admin/lessons/:id/versions`
+- PASS `GET /v1/admin/lesson-versions/:id`
+- PASS `POST /v1/admin/lesson-versions/:id/publish`
+- PASS `GET /v1/admin/challenges`
+- PASS `POST /v1/admin/challenge-versions/:id/review`
+
+### Admin User Management
+
+- PASS `GET /v1/admin/users`
+- PASS `POST /v1/admin/users` with `role: "user"`
+  - verified response now returns `roles: ["learner"]`
+- PASS `POST /v1/admin/users` with `role: "admin"`
+- PASS `PATCH /v1/admin/users/:id`
+- PASS `PATCH /v1/admin/users/:id/status`
+- PASS disabled-user login is blocked with `code: "1005"` / `Account is not active`
+- PASS `DELETE /v1/admin/users/:id`
+- NOTE the external admin/frontend contract still uses `"user"`, but storage is now normalized to the live non-admin role `learner`
+- PASS `GET /v1/users/me` for the seeded standard account now returns `roles: ["learner"]`
+
+### Admin Rankings / System
+
+- PASS `GET /v1/leaderboard`
+- PASS `GET /v1/admin/config`
+- PASS `PUT /v1/admin/config`
+- PASS `POST /v1/admin/config/reset`
+- PASS `GET /v1/admin/system/health`
+- PASS `GET /v1/admin/system/jobs`
+
+## Runtime Fixes Verified
+
+### 1. Sandbox provisioning and query execution now work in the containerized stack
+
+- Root cause fixed in code:
+  - `services/worker/src/dataset-loader.ts` did not classify `INTEGER` columns as numeric, so synthetic seed generation emitted text for `order_items.quantity`
+- Runtime false-negative also removed:
+  - a stale host-side worker process outside Docker was consuming `query-execution` jobs and could not resolve Docker container hostnames
+- Final evidence:
+  - worker log shows `Seeded table from rowCounts metadata` for `order_items`
+  - worker log shows `Sandbox ready`
+  - live `POST /v1/query-executions` returned a completed execution with `status: "succeeded"`
+
+### 2. Admin config persistence now works after restoring the migration path
+
+- Root cause:
+  - the migration file already existed, but the API container was not applying migrations when started directly through Docker Compose
+- Fix:
+  - `docker-compose.dev.yml` now starts the API with `pnpm db:migrate && pnpm dev`
+- Final evidence:
+  - `admin_configs` exists in Postgres
+  - `GET`, `PUT`, and `POST reset` on `/v1/admin/config` now return success
+
+### 3. External `"user"` role input is now bridged to the live stored role model
+
+- Fixes:
+  - admin/auth flows now normalize external `"user"` to stored role `learner`
+  - seed data now assigns the standard test account to `learner`
+- Final evidence:
+  - `POST /v1/admin/users` with `role: "user"` returns success and stored roles `["learner"]`
+  - `GET /v1/users/me` for `user@sqlcraft.dev` returns `roles: ["learner"]`
+
+### 4. Global leaderboard routing is now implemented
+
+- Fix:
+  - added `GET /v1/leaderboard` in the challenges module with period + limit query support
+- Final evidence:
+  - `GET /v1/leaderboard` now returns HTTP 200
+
+### 5. Avatar upload now works in Docker
+
+- Root cause:
+  - the API container inherited `.env` with `STORAGE_ENDPOINT=http://localhost:9000`, so the upload path tried to reach MinIO on the API container itself instead of the MinIO service
+- Fix:
+  - Docker Compose now sets `STORAGE_ENDPOINT=http://minio:9000` and `STORAGE_PUBLIC_URL=http://localhost:9000` for the API container
+- Final evidence:
+  - `POST /v1/users/me/avatar` now returns success and a valid MinIO presigned URL
+
 ## Per-Module Status
 
 | Module | Route status | Automated evidence today | Main gap | Verdict |
@@ -218,7 +368,7 @@ pnpm --filter @sqlcraft/web exec vitest run 'src/app/(app)/tracks/[trackId]/less
 
 ## Current Conclusion On “Are All APIs Complete?”
 
-Short answer: no, not at a quality bar that should be called complete.
+Short answer: still no, not yet at a quality bar that should be called complete.
 
 ### What can be said with evidence
 
@@ -236,10 +386,15 @@ Short answer: no, not at a quality bar that should be called complete.
   - multipart behavior
   - async state transitions
 - The written API spec is incomplete and outdated.
+- Most modules still lack route-contract coverage for negative cases and async state transitions.
+- The concrete runtime blockers found in this audit slice were fixed, but they are currently proven mostly by manual HTTP verification plus service/unit tests, not by durable end-to-end automation.
 
 ## Priority Next Actions
 
 1. Add route-contract tests for Auth and Users first.
 2. Add HTTP tests for Databases, Sessions, Queries, Challenges, and Admin multipart/import flows.
-3. Update `docs/api-spec.md` to match the 65 live route definitions.
-4. Add a generated or semi-generated API report job so this audit becomes repeatable.
+3. Add end-to-end coverage for sandbox provisioning, query execution, and challenge-attempt submission.
+4. Add a startup/health assertion that fails loudly if a host-side worker is consuming Redis jobs outside the intended Docker topology.
+5. Make admin user creation fully transactional even when role assignment fails unexpectedly for reasons beyond role lookup.
+6. Update `docs/api-spec.md` to match the 66 live route definitions.
+7. Add a generated or semi-generated API report job so this audit becomes repeatable.

@@ -25,6 +25,11 @@ export const ChallengeLeaderboardQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
 });
 
+export const GlobalLeaderboardQuerySchema = z.object({
+  period: z.enum(['weekly', 'monthly', 'alltime']).default('alltime'),
+  limit: z.coerce.number().int().min(1).max(50).default(50),
+});
+
 // Body schemas
 export const SubmitAttemptSchema = z.object({
   learningSessionId: z.string().uuid(),
@@ -85,6 +90,7 @@ export type ChallengeParams = z.infer<typeof ChallengeParamsSchema>;
 export type AdminChallengeVersionParams = z.infer<typeof AdminChallengeVersionParamsSchema>;
 export type ChallengeAttemptsQuery = z.infer<typeof ChallengeAttemptsQuerySchema>;
 export type ChallengeLeaderboardQuery = z.infer<typeof ChallengeLeaderboardQuerySchema>;
+export type GlobalLeaderboardQuery = z.infer<typeof GlobalLeaderboardQuerySchema>;
 export type SubmitAttemptBody = z.infer<typeof SubmitAttemptSchema>;
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type CreateChallengeVersionBody = z.infer<typeof CreateChallengeVersionSchema>;

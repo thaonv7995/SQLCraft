@@ -13,6 +13,10 @@ const EnvSchema = z.object({
 
   // ── Redis ────────────────────────────────────────────────────────────────
   REDIS_URL: z.string().url('REDIS_URL must be a valid URL'),
+  QUEUE_PREFIX: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().min(1).optional(),
+  ),
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   JWT_SECRET:     z.string().min(32, 'JWT_SECRET must be at least 32 characters'),

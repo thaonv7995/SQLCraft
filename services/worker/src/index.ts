@@ -44,6 +44,7 @@ const logger = pino({
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const queuePrefix = process.env.QUEUE_PREFIX?.trim() || undefined;
 const sandboxHost = process.env.SANDBOX_DB_HOST ?? 'localhost';
 const sandboxPort = process.env.SANDBOX_DB_PORT ?? '5433';
 const sandboxUser = process.env.SANDBOX_DB_USER ?? 'sandbox';
@@ -72,7 +73,8 @@ const QUEUES = {
 // Queue client used by the expiry scanner to enqueue cleanup jobs
 type BullConnection = import('bullmq').ConnectionOptions;
 const conn = connection as unknown as BullConnection;
-const cleanupQueue = new Queue(QUEUES.SANDBOX_CLEANUP, { connection: conn });
+const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : { connection: conn };
+const cleanupQueue = new Queue(QUEUES.SANDBOX_CLEANUP, queueOptions);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -204,7 +206,7 @@ const sandboxProvisioningWorker = new Worker(
       throw err;
     }
   },
-  { connection: conn },
+  queueOptions,
 );
 
 // ─── Worker: destroy_sandbox ──────────────────────────────────────────────────
@@ -258,7 +260,7 @@ const sandboxCleanupWorker = new Worker(
 
     logger.info({ sandboxInstanceId }, 'Sandbox destroyed');
   },
-  { connection: conn },
+  queueOptions,
 );
 
 // ─── Worker: reset_sandbox ────────────────────────────────────────────────────
@@ -316,7 +318,7 @@ const sandboxResetWorker = new Worker(
       throw err;
     }
   },
-  { connection: conn },
+  queueOptions,
 );
 
 // ─── Worker: execute_query ────────────────────────────────────────────────────
@@ -408,7 +410,7 @@ const queryExecutionWorker = new Worker(
       logger.warn({ queryExecutionId, err }, 'Query execution failed');
     }
   },
-  { connection: conn },
+  queueOptions,
 );
 
 // ─── Expiry scanner ───────────────────────────────────────────────────────────
@@ -481,6 +483,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 logger.info(
-  { queues: Object.values(QUEUES), redisUrl },
+  { queues: Object.values(QUEUES), redisUrl, queuePrefix: queuePrefix ?? 'bull' },
   'SQLCraft worker service started',
 );

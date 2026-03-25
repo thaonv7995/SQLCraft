@@ -13,6 +13,7 @@ vi.mock('../../../db/repositories', () => ({
     getSessionUserId: vi.fn(),
     listAttemptsForUser: vi.fn(),
     listAttemptsForChallengeVersion: vi.fn(),
+    listPassedAttemptsForGlobalLeaderboard: vi.fn(),
     listPublishedChallenges: vi.fn(),
     listChallengesForUser: vi.fn(),
     listChallengesForReview: vi.fn(),
@@ -44,6 +45,7 @@ import { challengesRepository, lessonsRepository, sandboxesRepository } from '..
 import { executeSql, getExplainPlan, validateSql } from '../../../services/query-executor';
 import {
   createChallengeVersion,
+  getGlobalLeaderboard,
   getEditableChallenge,
   getChallengeLeaderboard,
   getChallengeVersionDetail,
@@ -1045,6 +1047,69 @@ describe('getChallengeLeaderboard()', () => {
         bestScore: 95,
         attemptsCount: 2,
         passedAttempts: 1,
+      }),
+    ]);
+  });
+});
+
+describe('getGlobalLeaderboard()', () => {
+  it('deduplicates repeated passes per challenge and derives streaks from recent activity', async () => {
+    vi.mocked(challengesRepository.listPassedAttemptsForGlobalLeaderboard).mockResolvedValue([
+      {
+        userId: 'user-1',
+        username: 'alice',
+        displayName: 'Alice',
+        avatarUrl: null,
+        challengeId: 'challenge-1',
+        points: 100,
+        submittedAt: new Date('2026-03-25T08:00:00.000Z'),
+      },
+      {
+        userId: 'user-1',
+        username: 'alice',
+        displayName: 'Alice',
+        avatarUrl: null,
+        challengeId: 'challenge-1',
+        points: 100,
+        submittedAt: new Date('2026-03-24T08:00:00.000Z'),
+      },
+      {
+        userId: 'user-1',
+        username: 'alice',
+        displayName: 'Alice',
+        avatarUrl: null,
+        challengeId: 'challenge-2',
+        points: 200,
+        submittedAt: new Date('2026-03-23T08:00:00.000Z'),
+      },
+      {
+        userId: 'user-2',
+        username: 'bob',
+        displayName: 'Bob',
+        avatarUrl: null,
+        challengeId: 'challenge-3',
+        points: 250,
+        submittedAt: new Date('2026-03-25T07:00:00.000Z'),
+      },
+    ]);
+
+    const result = await getGlobalLeaderboard('alltime', 10);
+
+    expect(challengesRepository.listPassedAttemptsForGlobalLeaderboard).toHaveBeenCalledWith(undefined);
+    expect(result).toEqual([
+      expect.objectContaining({
+        rank: 1,
+        userId: 'user-1',
+        points: 300,
+        challengesCompleted: 2,
+        streak: 3,
+      }),
+      expect.objectContaining({
+        rank: 2,
+        userId: 'user-2',
+        points: 250,
+        challengesCompleted: 1,
+        streak: 1,
       }),
     ]);
   });
