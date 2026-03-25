@@ -62,7 +62,7 @@ export function useExecuteQuery() {
         queryHistory: [data, ...state.queryHistory].slice(0, 100),
       }));
       if (data.status === 'success') {
-        const msg = `Query completed in ${formatDuration(data.durationMs ?? 0)} — ${formatRows(data.rowCount ?? 0)} rows`;
+        const msg = `Query finished in ${formatDuration(data.durationMs ?? 0)} end-to-end — ${formatRows(data.rowCount ?? 0)} rows`;
         toast.success(msg, { duration: 3000 });
         setActiveTab('results');
       } else if (data.status === 'error') {

@@ -60,6 +60,16 @@ interface RuntimeRow {
   [key: string]: unknown;
 }
 
+interface SchemaDefinitionColumn {
+  name: string;
+  type: string;
+}
+
+interface SchemaDefinitionTable {
+  name: string;
+  columns: SchemaDefinitionColumn[];
+}
+
 function normalizeString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -87,6 +97,89 @@ function parseNamedCollection<T>(
   return collection
     .map((item) => (isRecord(item) ? mapper(item) : null))
     .filter((item): item is T => item != null);
+}
+
+function parseTableDefinitions(definition: unknown): SchemaDefinitionTable[] {
+  if (!isRecord(definition)) {
+    return [];
+  }
+
+  return parseNamedCollection(definition.tables, (item) => {
+    const name = normalizeString(item.name);
+    const columns = parseNamedCollection(item.columns, (column) => {
+      const columnName = normalizeString(column.name);
+      const type = normalizeString(column.type);
+
+      if (!columnName || !type) {
+        return null;
+      }
+
+      return {
+        name: columnName,
+        type,
+      };
+    });
+
+    if (!name) {
+      return null;
+    }
+
+    return {
+      name,
+      columns,
+    };
+  });
+}
+
+function buildImplicitUniqueIndexName(tableName: string, columns: string[]): string {
+  return `${tableName}_${columns.join('_')}_key`;
+}
+
+function buildImplicitUniqueIndexDefinition(tableName: string, name: string, columns: string[]): string {
+  return `CREATE UNIQUE INDEX ${name} ON public.${tableName} USING btree (${columns.join(', ')})`;
+}
+
+function inferUniqueIndexesFromTables(definition: unknown): SandboxSchemaIndex[] {
+  return parseTableDefinitions(definition).flatMap((table) =>
+    table.columns.flatMap((column) => {
+      if (!/\bunique\b/i.test(column.type) || /\bprimary\s+key\b/i.test(column.type)) {
+        return [];
+      }
+
+      const name = buildImplicitUniqueIndexName(table.name, [column.name]);
+      return [
+        {
+          name,
+          tableName: table.name,
+          definition: buildImplicitUniqueIndexDefinition(table.name, name, [column.name]),
+        },
+      ];
+    }),
+  );
+}
+
+function mergeIndexes(
+  explicitIndexes: SandboxSchemaIndex[],
+  inferredIndexes: SandboxSchemaIndex[],
+): SandboxSchemaIndex[] {
+  const merged = new Map<string, SandboxSchemaIndex>();
+
+  for (const index of explicitIndexes) {
+    merged.set(index.name, index);
+  }
+
+  for (const index of inferredIndexes) {
+    if (!merged.has(index.name)) {
+      merged.set(index.name, index);
+    }
+  }
+
+  return Array.from(merged.values()).sort((left, right) => {
+    if (left.tableName === right.tableName) {
+      return left.name.localeCompare(right.name);
+    }
+    return left.tableName.localeCompare(right.tableName);
+  });
 }
 
 function parseIndexDefinitions(definition: unknown): SandboxSchemaIndex[] {
@@ -200,8 +293,11 @@ function parsePartitionDefinitions(definition: unknown): SandboxSchemaPartition[
 }
 
 export function parseBaseSchemaSnapshot(definition: unknown): SandboxSchemaSnapshot {
+  const explicitIndexes = parseIndexDefinitions(definition);
+  const inferredIndexes = inferUniqueIndexesFromTables(definition);
+
   return {
-    indexes: parseIndexDefinitions(definition),
+    indexes: mergeIndexes(explicitIndexes, inferredIndexes),
     views: parseViewDefinitions(definition),
     materializedViews: parseMaterializedViewDefinitions(definition),
     functions: parseFunctionDefinitions(definition),
@@ -390,9 +486,19 @@ function buildDiffSection<T>(
 }
 
 function sameIndex(left: SandboxSchemaIndex, right: SandboxSchemaIndex): boolean {
+  const normalizeIndexDefinition = (definition: string): string =>
+    collapseWhitespace(definition)
+      .toLowerCase()
+      .replace(/"([^"]+)"/g, '$1')
+      .replace(/\bpublic\./g, '')
+      .replace(/\s+using\s+btree\s+/g, ' ')
+      .replace(/\(\s+/g, '(')
+      .replace(/\s+\)/g, ')')
+      .replace(/\s*,\s*/g, ', ');
+
   return (
     left.tableName === right.tableName &&
-    collapseWhitespace(left.definition) === collapseWhitespace(right.definition)
+    normalizeIndexDefinition(left.definition) === normalizeIndexDefinition(right.definition)
   );
 }
 

@@ -80,4 +80,49 @@ describe('parseSqlDumpBuffer()', () => {
       }),
     ]);
   });
+
+  it('preserves unique constraints in the stored schema definition', () => {
+    const sql = `
+      CREATE TABLE public.customers (
+        id uuid PRIMARY KEY,
+        email text NOT NULL UNIQUE,
+        tenant_id uuid NOT NULL,
+        slug text NOT NULL
+      );
+
+      ALTER TABLE ONLY public.customers
+        ADD CONSTRAINT customers_tenant_slug_key UNIQUE (tenant_id, slug);
+    `;
+
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'customers_dump.sql',
+      '22222222-2222-4222-8222-222222222222',
+    );
+
+    expect(result.definition.tables).toEqual([
+      expect.objectContaining({
+        name: 'customers',
+        columns: expect.arrayContaining([
+          expect.objectContaining({ name: 'email', type: 'text NOT NULL UNIQUE' }),
+        ]),
+      }),
+    ]);
+    expect(result.definition.indexes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'customers_email_key',
+          tableName: 'customers',
+          definition:
+            'CREATE UNIQUE INDEX customers_email_key ON public.customers USING btree (email)',
+        }),
+        expect.objectContaining({
+          name: 'customers_tenant_slug_key',
+          tableName: 'customers',
+          definition:
+            'CREATE UNIQUE INDEX customers_tenant_slug_key ON public.customers USING btree (tenant_id, slug)',
+        }),
+      ]),
+    );
+  });
 });

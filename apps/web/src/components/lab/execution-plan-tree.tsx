@@ -26,6 +26,7 @@ type PgPlanNode = {
 };
 
 type PlanBadgeTone = 'danger' | 'warning' | 'success' | 'neutral';
+type AccessPathType = 'index' | 'sequential' | null;
 
 function toNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -102,15 +103,15 @@ function getBufferStats(node: PgPlanNode): { hits?: number; reads?: number } {
   };
 }
 
-function getIndexStatus(node: PgPlanNode): 'hit' | 'miss' | null {
+function getAccessPathType(node: PgPlanNode): AccessPathType {
   const nodeType = getNodeType(node).toLowerCase();
 
   if (nodeType.includes('index')) {
-    return 'hit';
+    return 'index';
   }
 
   if (nodeType.includes('seq scan')) {
-    return 'miss';
+    return 'sequential';
   }
 
   return null;
@@ -130,17 +131,17 @@ function getNodeHighlight(node: PgPlanNode, rootActualTime?: number): {
     ? actualTime / rootActualTime
     : 0;
   const skewRatio = planRows > 0 && actualRows > 0 ? actualRows / planRows : 0;
-  const indexStatus = getIndexStatus(node);
+  const accessPathType = getAccessPathType(node);
 
   if (timeShare >= 0.35) {
     return {
       label: 'Bottleneck',
-      reason: `Consumes ${(timeShare * 100).toFixed(0)}% of total runtime`,
+      reason: `Accounts for ${(timeShare * 100).toFixed(0)}% of EXPLAIN time`,
       tone: 'danger',
     };
   }
 
-  if (indexStatus === 'miss' && scannedRows >= 1_000) {
+  if (accessPathType === 'sequential' && scannedRows >= 1_000) {
     return {
       label: 'Bottleneck',
       reason: `Sequential scan touches ${formatRows(scannedRows)} rows`,
@@ -237,7 +238,7 @@ function PlanNodeCard({
   const scannedRows = getScannedRows(node);
   const actualTime = getActualTime(node);
   const totalCost = getTotalCost(node);
-  const indexStatus = getIndexStatus(node);
+  const accessPathType = getAccessPathType(node);
   const bufferStats = getBufferStats(node);
   const highlight = getNodeHighlight(node, rootActualTime);
   const conditions = [node['Index Cond'], node.Filter, node['Hash Cond'], node['Merge Cond'], node['Recheck Cond']]
@@ -288,11 +289,11 @@ function PlanNodeCard({
               {actualTime != null && (
                 <MetricPill label="Time" value={formatDuration(actualTime)} tone="warning" />
               )}
-              {indexStatus && (
+              {accessPathType && (
                 <MetricPill
-                  label="Index"
-                  value={indexStatus === 'hit' ? 'Hit' : 'Miss'}
-                  tone={indexStatus === 'hit' ? 'success' : 'warning'}
+                  label="Access"
+                  value={accessPathType === 'index' ? 'Index scan' : 'Seq scan'}
+                  tone={accessPathType === 'index' ? 'success' : 'warning'}
                 />
               )}
               {highlight && (
@@ -306,7 +307,7 @@ function PlanNodeCard({
               {timeShare != null && (
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-[11px] text-on-surface-variant">
-                    <span>Runtime share</span>
+                    <span>Plan time share</span>
                     <span className="font-mono">{timeShare.toFixed(0)}%</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-surface-container">
@@ -317,7 +318,7 @@ function PlanNodeCard({
               {costShare != null && (
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-[11px] text-on-surface-variant">
-                    <span>Cost share</span>
+                    <span>Estimated cost share</span>
                     <span className="font-mono">{costShare.toFixed(0)}%</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-surface-container">
@@ -375,7 +376,13 @@ function PlanNodeCard({
   );
 }
 
-export function ExecutionPlanTree({ executionPlan }: { executionPlan: QueryExecutionPlan }) {
+export function ExecutionPlanTree({
+  executionPlan,
+  queryDurationMs,
+}: {
+  executionPlan: QueryExecutionPlan;
+  queryDurationMs?: number;
+}) {
   const rootNode = getPlanRoot(executionPlan.plan);
 
   if (!rootNode) {
@@ -389,8 +396,8 @@ export function ExecutionPlanTree({ executionPlan }: { executionPlan: QueryExecu
   const nodes = collectNodes(rootNode);
   const rootActualTime = getActualTime(rootNode) ?? executionPlan.actualTime;
   const rootTotalCost = getTotalCost(rootNode) ?? executionPlan.totalCost;
-  const indexHits = nodes.filter((node) => getIndexStatus(node) === 'hit').length;
-  const indexMisses = nodes.filter((node) => getIndexStatus(node) === 'miss').length;
+  const indexScans = nodes.filter((node) => getAccessPathType(node) === 'index').length;
+  const sequentialScans = nodes.filter((node) => getAccessPathType(node) === 'sequential').length;
   const bottleneckCandidates = nodes.length > 1 ? nodes.slice(1) : nodes;
   const bottlenecks = bottleneckCandidates
     .map((node) => ({
@@ -419,7 +426,7 @@ export function ExecutionPlanTree({ executionPlan }: { executionPlan: QueryExecu
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 xl:grid-cols-4 md:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-5 md:grid-cols-2">
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
           <p className="text-xs uppercase tracking-wide text-outline">Plan mode</p>
           <p className="mt-2 text-sm font-semibold text-on-surface">
@@ -427,14 +434,14 @@ export function ExecutionPlanTree({ executionPlan }: { executionPlan: QueryExecu
           </p>
         </div>
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">Total cost</p>
+          <p className="text-xs uppercase tracking-wide text-outline">Estimated cost</p>
           <p className="mt-2 text-sm font-semibold text-on-surface font-mono">
             {rootTotalCost != null ? rootTotalCost.toFixed(1) : '—'}
           </p>
         </div>
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
           <p className="text-xs uppercase tracking-wide text-outline">
-            {rootActualTime != null ? 'Actual time' : 'Planned rows'}
+            {rootActualTime != null ? 'Postgres executor time' : 'Planned rows'}
           </p>
           <p className="mt-2 text-sm font-semibold text-on-surface font-mono">
             {rootActualTime != null
@@ -445,13 +452,34 @@ export function ExecutionPlanTree({ executionPlan }: { executionPlan: QueryExecu
           </p>
         </div>
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">Index usage</p>
-          <p className="mt-2 text-sm font-semibold text-on-surface">
-            <span className="font-mono text-secondary">{indexHits}</span> hit
-            {' / '}
-            <span className="font-mono text-tertiary">{indexMisses}</span> miss
+          <p className="text-xs uppercase tracking-wide text-outline">End-to-end query time</p>
+          <p className="mt-2 text-sm font-semibold text-on-surface font-mono">
+            {queryDurationMs != null ? formatDuration(queryDurationMs) : '—'}
           </p>
         </div>
+        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
+          <p className="text-xs uppercase tracking-wide text-outline">Access path</p>
+          <p className="mt-2 text-sm font-semibold text-on-surface">
+            <span className="font-mono text-secondary">{indexScans}</span> index scan
+            {' / '}
+            <span className="font-mono text-tertiary">{sequentialScans}</span> seq scan
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 text-xs text-on-surface-variant">
+        <p>
+          <span className="font-semibold text-on-surface">Postgres executor time</span>
+          {' '}comes from <span className="font-mono">EXPLAIN ANALYZE</span> and measures work inside Postgres.
+        </p>
+        <p className="mt-2">
+          <span className="font-semibold text-on-surface">End-to-end query time</span>
+          {' '}includes the app roundtrip, result transfer, and response shaping.
+        </p>
+        <p className="mt-2">
+          <span className="font-semibold text-on-surface">Access path</span>
+          {' '}counts index scan nodes versus sequential scan nodes. It is not a cache hit/miss metric.
+        </p>
       </div>
 
       {bottlenecks.length > 0 && (

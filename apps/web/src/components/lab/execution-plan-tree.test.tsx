@@ -3,9 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ExecutionPlanTree } from './execution-plan-tree';
 
 describe('ExecutionPlanTree', () => {
-  it('renders tree nodes, index hit/miss badges, and bottleneck hints', () => {
+  it('renders clear timing and access path labels for explain analyze output', () => {
     const markup = renderToStaticMarkup(
       <ExecutionPlanTree
+        queryDurationMs={166}
         executionPlan={{
           type: 'json',
           mode: 'explain_analyze',
@@ -49,10 +50,14 @@ describe('ExecutionPlanTree', () => {
     expect(markup).toContain('Nested Loop');
     expect(markup).toContain('orders');
     expect(markup).toContain('customers via customers_pkey');
-    expect(markup).toContain('Hit');
-    expect(markup).toContain('Miss');
+    expect(markup).toContain('Postgres executor time');
+    expect(markup).toContain('End-to-end query time');
+    expect(markup).toContain('166ms');
+    expect(markup).toContain('Access path');
+    expect(markup).toContain('Index scan');
+    expect(markup).toContain('Seq scan');
     expect(markup).toContain('Bottleneck');
     expect(markup).toContain('12.0K');
-    expect(markup).toContain('Consumes 76% of total runtime');
+    expect(markup).toContain('Accounts for 76% of EXPLAIN time');
   });
 });

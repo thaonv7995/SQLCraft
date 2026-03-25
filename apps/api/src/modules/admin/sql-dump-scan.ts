@@ -51,6 +51,11 @@ export interface StoredSqlDumpScan extends SqlDumpScanResult {
         type: string;
       }>;
     }>;
+    indexes?: Array<{
+      name: string;
+      tableName: string;
+      definition: string;
+    }>;
     metadata: {
       source: 'sql_dump';
       fileName: string;
@@ -81,6 +86,7 @@ interface ParsedColumn {
   baseType: string;
   nullable: boolean;
   isPrimary: boolean;
+  isUnique: boolean;
   isForeign: boolean;
   references?: string;
 }
@@ -89,6 +95,10 @@ interface ParsedTable {
   name: string;
   schemaName?: string;
   columns: ParsedColumn[];
+  uniqueIndexes: Array<{
+    name: string;
+    columns: string[];
+  }>;
 }
 
 const MAX_SCAN_CACHE_ITEMS = 100;
@@ -438,6 +448,9 @@ function formatDefinitionType(column: ParsedColumn): string {
   if (!column.nullable && !column.isPrimary) {
     parts.push('NOT NULL');
   }
+  if (column.isUnique && !column.isPrimary) {
+    parts.push('UNIQUE');
+  }
   if (column.isPrimary) {
     parts.push('PRIMARY KEY');
   }
@@ -445,6 +458,70 @@ function formatDefinitionType(column: ParsedColumn): string {
     parts.push(`references ${column.references}`);
   }
   return normalizeSpacing(parts.join(' '));
+}
+
+function buildImplicitUniqueIndexName(tableName: string, columns: string[]): string {
+  return `${tableName}_${columns.join('_')}_key`;
+}
+
+function buildUniqueIndexDefinition(tableName: string, name: string, columns: string[]): string {
+  return `CREATE UNIQUE INDEX ${name} ON public.${tableName} USING btree (${columns.join(', ')})`;
+}
+
+function extractUniqueConstraint(segment: string): { name?: string; columns: string[] } | null {
+  const uniqueMatch = segment.match(
+    /(?:constraint\s+("[^"]+"|`[^`]+`|\[[^\]]+\]|[^\s(]+)\s+)?unique\s*\(([^)]+)\)/i,
+  );
+
+  if (!uniqueMatch) {
+    return null;
+  }
+
+  const columns = splitTopLevelList(uniqueMatch[2]).map((value) => unquoteIdentifier(value));
+  if (columns.length === 0) {
+    return null;
+  }
+
+  return {
+    name: uniqueMatch[1] ? unquoteIdentifier(uniqueMatch[1]) : undefined,
+    columns,
+  };
+}
+
+function collectDefinitionIndexes(
+  tables: ParsedTable[],
+): StoredSqlDumpScan['definition']['indexes'] {
+  const indexes = new Map<string, NonNullable<StoredSqlDumpScan['definition']['indexes']>[number]>();
+
+  for (const table of tables) {
+    for (const column of table.columns) {
+      if (!column.isUnique || column.isPrimary) {
+        continue;
+      }
+
+      const name = buildImplicitUniqueIndexName(table.name, [column.name]);
+      indexes.set(name, {
+        name,
+        tableName: table.name,
+        definition: buildUniqueIndexDefinition(table.name, name, [column.name]),
+      });
+    }
+
+    for (const uniqueIndex of table.uniqueIndexes) {
+      indexes.set(uniqueIndex.name, {
+        name: uniqueIndex.name,
+        tableName: table.name,
+        definition: buildUniqueIndexDefinition(table.name, uniqueIndex.name, uniqueIndex.columns),
+      });
+    }
+  }
+
+  return Array.from(indexes.values()).sort((left, right) => {
+    if (left.tableName === right.tableName) {
+      return left.name.localeCompare(right.name);
+    }
+    return left.tableName.localeCompare(right.tableName);
+  });
 }
 
 function inferDomain(name: string, description: string): AdminDatabaseDomain {
@@ -571,6 +648,7 @@ function parseCreateTable(statement: string): ParsedTable | null {
   const columns: ParsedColumn[] = [];
   const primaryKeyColumns = new Set<string>();
   const foreignKeyConstraints = new Map<string, string>();
+  const uniqueIndexes: ParsedTable['uniqueIndexes'] = [];
 
   for (const part of splitTopLevelList(tableBody)) {
     const segment = part.trim().replace(/,$/, '');
@@ -607,6 +685,17 @@ function parseCreateTable(statement: string): ParsedTable | null {
       continue;
     }
 
+    const uniqueConstraint = extractUniqueConstraint(segment);
+    if (uniqueConstraint && (upper.startsWith('UNIQUE') || upper.startsWith('CONSTRAINT'))) {
+      uniqueIndexes.push({
+        name:
+          uniqueConstraint.name ??
+          buildImplicitUniqueIndexName(identifier.name, uniqueConstraint.columns),
+        columns: uniqueConstraint.columns,
+      });
+      continue;
+    }
+
     const { identifier: columnIdentifier, remainder } = consumeLeadingIdentifier(segment);
     const columnName = unquoteIdentifier(columnIdentifier);
     if (!columnName || !remainder) {
@@ -620,6 +709,7 @@ function parseCreateTable(statement: string): ParsedTable | null {
       baseType: baseType || 'text',
       nullable: !/\bnot\s+null\b/i.test(remainder),
       isPrimary: /\bprimary\s+key\b/i.test(remainder),
+      isUnique: /\bunique\b/i.test(remainder) && !/\bprimary\s+key\b/i.test(remainder),
       isForeign: !!reference,
       references: reference,
     };
@@ -647,6 +737,7 @@ function parseCreateTable(statement: string): ParsedTable | null {
     name: identifier.name,
     schemaName: identifier.schemaName,
     columns: normalizedColumns,
+    uniqueIndexes,
   };
 }
 
@@ -699,6 +790,16 @@ function applyAlterTableConstraints(statement: string, tables: ParsedTable[]): v
         isForeign: true,
         references: `${targetTable}(${targetColumn})`,
       };
+    });
+  }
+
+  const uniqueConstraint = extractUniqueConstraint(details);
+  if (uniqueConstraint) {
+    table.uniqueIndexes.push({
+      name:
+        uniqueConstraint.name ??
+        buildImplicitUniqueIndexName(table.name, uniqueConstraint.columns),
+      columns: uniqueConstraint.columns,
     });
   }
 }
@@ -803,6 +904,7 @@ export function parseSqlDumpBuffer(
           type: formatDefinitionType(column),
         })),
       })),
+      indexes: collectDefinitionIndexes(tables),
       metadata: {
         source: 'sql_dump',
         fileName,

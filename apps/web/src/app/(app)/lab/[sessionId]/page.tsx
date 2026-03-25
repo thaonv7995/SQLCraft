@@ -320,7 +320,7 @@ function ExecutionPlanPanel() {
 
   return (
     <div className="flex-1 overflow-auto p-4">
-      <ExecutionPlanTree executionPlan={executionPlan} />
+      <ExecutionPlanTree executionPlan={executionPlan} queryDurationMs={lastExecution?.durationMs} />
     </div>
   );
 }
