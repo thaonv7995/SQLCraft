@@ -9,7 +9,6 @@ import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
-  PLACEHOLDER_DATABASES,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 
@@ -141,25 +140,23 @@ export default function ExplorePage() {
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');
 
-  const { data: apiData, isLoading } = useQuery({
+  const {
+    data: apiData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['databases', domain, scale],
     queryFn: () =>
       databasesApi.list({
         domain: domain === 'all' ? undefined : domain,
         scale: scale === 'all' ? undefined : scale,
-      }),
+    }),
     staleTime: 60_000,
   });
 
-  const databases = apiData?.items ?? PLACEHOLDER_DATABASES;
-
-  const filtered = apiData
-    ? databases
-    : databases.filter((db) => {
-        if (domain !== 'all' && db.domain !== domain) return false;
-        if (scale !== 'all' && db.scale !== scale) return false;
-        return true;
-      });
+  const filtered = apiData?.items ?? [];
 
   return (
     <div className="page-shell page-stack">
@@ -192,6 +189,21 @@ export default function ExplorePage() {
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {Array.from({ length: 6 }).map((_, i) => <DatabaseCardSkeleton key={i} />)}
+        </div>
+      ) : isError ? (
+        <div className="bg-surface-container-low rounded-xl p-16 flex flex-col items-center text-center">
+          <span className="material-symbols-outlined text-4xl text-outline mb-3">error</span>
+          <p className="text-sm font-medium text-on-surface mb-1">Database catalog unavailable</p>
+          <p className="text-xs text-on-surface-variant">
+            {error instanceof Error ? error.message : 'The explorer could not load databases.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-4 rounded-lg border border-outline-variant/20 bg-surface-container-high px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
+          >
+            Retry
+          </button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="bg-surface-container-low rounded-xl p-16 flex flex-col items-center text-center">

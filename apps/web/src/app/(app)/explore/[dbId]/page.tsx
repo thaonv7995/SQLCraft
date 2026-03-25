@@ -14,7 +14,6 @@ import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DOMAIN_LABELS,
   DATABASE_SCALE_LABELS,
-  getFallbackDatabase,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 
@@ -419,24 +418,14 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [progress, setProgress] = useState(10);
 
-  const fallbackDatabase = useMemo(() => getFallbackDatabase(dbId), [dbId]);
-
   const {
     data: database,
     isLoading,
     error,
+    refetch,
   } = useQuery({
     queryKey: ['database', dbId],
-    queryFn: async () => {
-      try {
-        return await databasesApi.get(dbId);
-      } catch {
-        if (fallbackDatabase) {
-          return fallbackDatabase;
-        }
-        throw new Error('Database not found');
-      }
-    },
+    queryFn: () => databasesApi.get(dbId),
     staleTime: 60_000,
   });
 
@@ -453,15 +442,8 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
     database?.sourceScale ??
     availableScales[availableScales.length - 1] ??
     'medium';
-  const selectedScale = scaleOverride && availableScales.includes(scaleOverride)
-    ? scaleOverride
-    : defaultScale;
-
-  useEffect(() => {
-    if (scaleOverride && !availableScales.includes(scaleOverride)) {
-      setScaleOverride(null);
-    }
-  }, [availableScales, scaleOverride]);
+  const selectedScale =
+    scaleOverride && availableScales.includes(scaleOverride) ? scaleOverride : defaultScale;
 
   const launchMutation = useMutation({
     mutationFn: async () => {
@@ -542,9 +524,14 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
           <p className="mt-3 text-sm text-on-surface-variant">
             {error instanceof Error ? error.message : 'This catalog entry is unavailable.'}
           </p>
-          <Link href="/explore" className="mt-6 inline-flex">
-            <Button variant="primary">Back to Explorer</Button>
-          </Link>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Button variant="primary" onClick={() => void refetch()}>
+              Retry
+            </Button>
+            <Link href="/explore" className="inline-flex">
+              <Button variant="secondary">Back to Explorer</Button>
+            </Link>
+          </div>
         </div>
       </div>
     );

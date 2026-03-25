@@ -16,43 +16,16 @@ const FILTER_TABS: { value: DifficultyFilter; label: string }[] = [
   { value: 'advanced', label: 'Advanced' },
 ];
 
-const PLACEHOLDER_TRACKS = [
-  {
-    id: 'placeholder-sql-fundamentals',
-    title: 'SQL Fundamentals',
-    slug: 'sql-fundamentals',
-    description: 'Build intuition for SELECT, filtering, sorting, grouping, and the first steps of structured querying.',
-    difficulty: 'beginner' as const,
-    lessonCount: 8,
-  },
-  {
-    id: 'placeholder-joins',
-    title: 'Joins & Relationships',
-    slug: 'joins-relationships',
-    description: 'Learn how relational tables connect and how to write joins that stay readable under pressure.',
-    difficulty: 'intermediate' as const,
-    lessonCount: 6,
-  },
-  {
-    id: 'placeholder-optimization',
-    title: 'Query Optimization',
-    slug: 'query-optimization',
-    description: 'Move from correct SQL to efficient SQL by understanding plans, indexes, and execution costs.',
-    difficulty: 'advanced' as const,
-    lessonCount: 7,
-  },
-];
-
 export default function TracksPage() {
   const [filter, setFilter] = useState<DifficultyFilter>('all');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['tracks'],
     queryFn: () => tracksApi.list({ limit: 20 }),
     staleTime: 60_000,
   });
 
-  const tracks = data?.items.length ? data.items : PLACEHOLDER_TRACKS;
+  const tracks = data?.items ?? [];
   const filtered =
     filter === 'all' ? tracks : tracks.filter((track) => track.difficulty === filter);
 
@@ -72,7 +45,7 @@ export default function TracksPage() {
         <div>
           <h2 className="font-headline text-xl font-medium text-on-surface">Published collections</h2>
           <p className="mt-1 text-sm text-on-surface-variant">
-            Filter locally by difficulty until server-side filtering lands.
+            Filter the published list by difficulty.
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-xl bg-surface-container-low p-1">
@@ -98,6 +71,21 @@ export default function TracksPage() {
           {[1, 2, 3, 4].map((row) => (
             <div key={row} className="h-48 animate-pulse rounded-2xl bg-surface-container-low" />
           ))}
+        </div>
+      ) : isError ? (
+        <div className="rounded-2xl bg-surface-container-low p-12 text-center">
+          <span className="material-symbols-outlined text-3xl text-outline">error</span>
+          <p className="mt-3 text-sm font-medium text-on-surface">Collections unavailable</p>
+          <p className="mt-1 text-xs text-on-surface-variant">
+            {error instanceof Error ? error.message : 'The practice catalog could not be loaded.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-4 rounded-lg border border-outline-variant/20 bg-surface-container-high px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
+          >
+            Retry
+          </button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-2xl bg-surface-container-low p-12 text-center">

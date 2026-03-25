@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth';
 import { StatCard } from '@/components/ui/card';
 import { StatusBadge, DifficultyBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DATABASE_SCALE_LABELS, PLACEHOLDER_DATABASES } from '@/lib/database-catalog';
+import { DATABASE_SCALE_LABELS } from '@/lib/database-catalog';
 import { formatRelativeTime, formatRows, truncateSql } from '@/lib/utils';
 
 // ─── Fallback stats while user data loads ─────────────────────────────────────
@@ -57,7 +57,13 @@ export default function DashboardPage() {
     staleTime: 30_000,
   });
 
-  const { data: databaseCatalog, isLoading: databasesLoading } = useQuery({
+  const {
+    data: databaseCatalog,
+    isLoading: databasesLoading,
+    isError: databasesError,
+    error: databasesErrorDetail,
+    refetch: refetchDatabases,
+  } = useQuery({
     queryKey: ['dashboard-databases'],
     queryFn: () => databasesApi.list(),
     staleTime: 60_000,
@@ -72,7 +78,7 @@ export default function DashboardPage() {
   const displayName = user?.displayName ?? user?.username ?? 'Developer';
   const stats = user?.stats ?? EMPTY_STATS;
   const recentQueries = queryHistory?.items ?? [];
-  const featuredDatabases = (databaseCatalog?.items ?? PLACEHOLDER_DATABASES).slice(0, 3);
+  const featuredDatabases = (databaseCatalog?.items ?? []).slice(0, 3);
 
   const resumableSession = sessions?.find(isResumableSession);
   const labHref = resumableSession ? `/lab/${resumableSession.id}` : '/lab';
@@ -169,6 +175,35 @@ export default function DashboardPage() {
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-40 animate-pulse rounded-xl bg-surface-container-low" />
             ))}
+          </div>
+        ) : databasesError ? (
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-5 py-8 text-center">
+            <span className="material-symbols-outlined mb-2 block text-2xl text-outline">
+              error
+            </span>
+            <p className="text-sm font-medium text-on-surface">Database catalog unavailable</p>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              {databasesErrorDetail instanceof Error
+                ? databasesErrorDetail.message
+                : 'Dashboard could not load database recommendations.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => void refetchDatabases()}
+              className="mt-4 rounded-lg border border-outline-variant/20 bg-surface-container-high px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest"
+            >
+              Retry
+            </button>
+          </div>
+        ) : featuredDatabases.length === 0 ? (
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-5 py-8 text-center">
+            <span className="material-symbols-outlined mb-2 block text-2xl text-outline">
+              dns
+            </span>
+            <p className="text-sm font-medium text-on-surface">No published databases yet</p>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              The explorer will show databases here after catalog items are published.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

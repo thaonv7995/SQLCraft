@@ -169,7 +169,7 @@ describe('LessonPage', () => {
     renderLessonPage();
 
     expect(await screen.findByRole('heading', { name: 'Filtering' })).toBeInTheDocument();
-    expect(screen.getByText('Lesson 2 of 3')).toBeInTheDocument();
+    expect(screen.getByText('Practice set 2 of 3')).toBeInTheDocument();
     expect(screen.getByText('Starter query ready')).toBeInTheDocument();
     expect(screen.getByText('Ecommerce')).toBeInTheDocument();
     expect(screen.getByText('users')).toBeInTheDocument();

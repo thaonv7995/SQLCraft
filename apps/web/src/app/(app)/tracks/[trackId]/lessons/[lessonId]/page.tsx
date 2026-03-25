@@ -456,7 +456,7 @@ export default function LessonPage() {
                     </p>
                     <div className="mt-3 flex items-center justify-between gap-3">
                       <p className="text-[11px] uppercase tracking-wider text-outline">
-                        Placeholder route ready for feature 4
+                        Open challenge detail
                       </p>
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-on-surface-variant">
                         Open
