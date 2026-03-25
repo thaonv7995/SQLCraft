@@ -25,23 +25,29 @@ interface AdminUser extends User {
   isActive?: boolean;
 }
 
+type AdminRoleFilter = 'all' | 'user' | 'admin';
+type DisplayRole = 'user' | 'admin';
+
 const ROLE_TABS = [
   { value: 'all', label: 'All Users' },
-  { value: 'student', label: 'Students' },
-  { value: 'contributor', label: 'Contributors' },
+  { value: 'user', label: 'Users' },
   { value: 'admin', label: 'Admins' },
-];
+] satisfies Array<{ value: AdminRoleFilter; label: string }>;
 
-const ROLE_COLORS: Record<string, string> = {
+const ROLE_COLORS: Record<DisplayRole, string> = {
   admin: 'text-error bg-error/10',
-  contributor: 'text-primary bg-primary/10',
-  student: 'text-on-surface-variant bg-surface-container-high',
+  user: 'text-on-surface-variant bg-surface-container-high',
 };
+
+const isAdminUser = (user: AdminUser) =>
+  user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+
+const getDisplayRole = (user: AdminUser): DisplayRole => (isAdminUser(user) ? 'admin' : 'user');
 
 export default function AdminUsersPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState<AdminRoleFilter>('all');
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
@@ -49,7 +55,7 @@ export default function AdminUsersPage() {
     queryFn: () =>
       usersApi.list({
         search: search || undefined,
-        role: roleFilter === 'all' ? undefined : roleFilter,
+        role: roleFilter === 'admin' ? 'admin' : undefined,
         page,
       }),
     staleTime: 30_000,
@@ -83,25 +89,29 @@ export default function AdminUsersPage() {
     onError: () => toast.error('Failed to update role'),
   });
 
-  const displayUsers: AdminUser[] = (data?.items as AdminUser[] | undefined) ?? [];
+  const rawUsers: AdminUser[] = (data?.items as AdminUser[] | undefined) ?? [];
+  const displayUsers = rawUsers.filter((user) => {
+    if (roleFilter === 'all') {
+      return true;
+    }
+
+    return roleFilter === getDisplayRole(user);
+  });
 
   return (
     <div className="page-shell page-stack">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="page-title">User Management</h1>
+          <h1 className="page-title">Users</h1>
           <p className="page-lead mt-1">
-            {data?.total ?? 0} total users
+            Moderate accounts, review practice stats, and handle user contribution history.
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          leftIcon={<span className="material-symbols-outlined text-sm">person_add</span>}
-        >
-          Invite User
-        </Button>
+        <div className="rounded-xl bg-surface-container-low px-4 py-3 text-right">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Total Users</p>
+          <p className="mt-2 text-xl font-semibold text-on-surface">{data?.total ?? 0}</p>
+        </div>
       </div>
 
       {/* Filters */}
@@ -140,19 +150,21 @@ export default function AdminUsersPage() {
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Queries</TableHead>
-              <TableHead>Challenges</TableHead>
-              <TableHead>Joined</TableHead>
+              <TableHead>Solved</TableHead>
+              <TableHead>Points</TableHead>
+              <TableHead>Last Active</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableSkeleton rows={5} cols={7} />
+              <TableSkeleton rows={5} cols={8} />
             ) : displayUsers.length === 0 ? (
-              <TableEmpty message="No users found" colSpan={7} />
+              <TableEmpty message="No users found" colSpan={8} />
             ) : (
               displayUsers.map((user) => {
-                const isActive = user.isActive !== false;
+                const displayRole = getDisplayRole(user);
+                const isActive = user.status !== 'disabled' && user.isActive !== false;
                 return (
                   <TableRow key={user.id}>
                     {/* User cell */}
@@ -174,10 +186,10 @@ export default function AdminUsersPage() {
                     <TableCell>
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          ROLE_COLORS[user.role] ?? ROLE_COLORS.student
+                          ROLE_COLORS[displayRole]
                         }`}
                       >
-                        {user.role}
+                        {displayRole}
                       </span>
                     </TableCell>
 
@@ -193,10 +205,12 @@ export default function AdminUsersPage() {
                     <TableCell className="font-mono text-xs text-on-surface-variant">
                       {user.stats?.completedChallenges ?? '—'}
                     </TableCell>
+                    <TableCell className="font-mono text-xs text-on-surface-variant">
+                      {user.stats?.totalPoints?.toLocaleString() ?? '—'}
+                    </TableCell>
 
-                    {/* Joined */}
                     <TableCell className="text-xs text-on-surface-variant">
-                      {formatDate(user.createdAt)}
+                      {user.lastLoginAt ? formatDate(user.lastLoginAt) : '—'}
                     </TableCell>
 
                     {/* Actions */}
@@ -206,14 +220,10 @@ export default function AdminUsersPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            const newRole = user.role === 'student'
-                              ? 'contributor'
-                              : user.role === 'contributor'
-                              ? 'admin'
-                              : 'student';
+                            const newRole = displayRole === 'admin' ? 'learner' : 'admin';
                             roleChangeMutation.mutate({ userId: user.id, role: newRole });
                           }}
-                          title="Change role"
+                          title={displayRole === 'admin' ? 'Set as user' : 'Promote to admin'}
                         >
                           <span className="material-symbols-outlined text-sm">manage_accounts</span>
                         </Button>

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Badge, DifficultyBadge, StatusBadge } from '@/components/ui/badge';
@@ -163,7 +163,7 @@ function buildPreviewMarkdown(form: ContributorForm): string {
   return [
     form.description.trim() ? `## What This Challenge Teaches\n\n${form.description.trim()}` : '',
     form.problemStatement.trim() ? `## Problem Statement\n\n${form.problemStatement.trim()}` : '',
-    form.hintText.trim() ? `## Learner Hint\n\n${form.hintText.trim()}` : '',
+    form.hintText.trim() ? `## Hint\n\n${form.hintText.trim()}` : '',
     form.expectedResultColumns.trim()
       ? `## Expected Result Columns\n\n${parseExpectedColumns(form.expectedResultColumns)
           .map((column) => `- \`${column}\``)
@@ -190,7 +190,8 @@ function ReviewStatusBadge({
 export default function ContributorPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
-  const displayName = user?.displayName ?? user?.username ?? 'Contributor';
+  const displayName = user?.displayName ?? user?.username ?? 'User';
+  const isAdmin = user?.role === 'admin' || (user?.roles?.includes('admin') ?? false);
 
   const [form, setForm] = useState<ContributorForm>(DEFAULT_FORM);
   const [activeTab, setActiveTab] = useState<EditorTab>('write');
@@ -228,15 +229,6 @@ export default function ContributorPage() {
     staleTime: 0,
   });
 
-  useEffect(() => {
-    if (!editableDraftQuery.data) {
-      return;
-    }
-
-    setForm(buildFormFromDraft(editableDraftQuery.data));
-    setPreflightResult(null);
-  }, [editableDraftQuery.data]);
-
   const lessonOptions = useMemo(() => {
     const tracks = lessonsQuery.data ?? [];
 
@@ -248,22 +240,31 @@ export default function ContributorPage() {
     );
   }, [lessonsQuery.data]);
 
-  useEffect(() => {
-    if (!form.lessonId && lessonOptions.length > 0) {
-      setForm((current) => ({ ...current, lessonId: lessonOptions[0]?.value ?? '' }));
-    }
-  }, [form.lessonId, lessonOptions]);
-
   const myChallenges = myChallengesQuery.data ?? [];
   const selectedChallenge = myChallenges.find((challenge) => challenge.id === selectedDraftId) ?? null;
+  const fallbackLessonId = lessonOptions[0]?.value ?? '';
+  const editorForm = form.lessonId ? form : { ...form, lessonId: fallbackLessonId };
   const editorMode = selectedDraftId ? 'edit' : 'create';
   const draftCount = myChallenges.filter((challenge) => challenge.status === 'draft').length;
   const publishedCount = myChallenges.filter((challenge) => challenge.status === 'published').length;
-  const previewMarkdown = buildPreviewMarkdown(form);
+  const previewMarkdown = buildPreviewMarkdown(editorForm);
+
+  const loadEditableDraft = async (challengeId: string) => {
+    const draft = await queryClient.fetchQuery({
+      queryKey: ['contributor-editable-draft', challengeId],
+      queryFn: () => challengesApi.getDraft(challengeId),
+      staleTime: 0,
+    });
+
+    setForm(buildFormFromDraft(draft));
+    return draft;
+  };
 
   const preflightMutation = useMutation({
     mutationFn: async () => {
-      const result = await challengesApi.validateDraft(createPayload(form, selectedDraftId ?? undefined));
+      const result = await challengesApi.validateDraft(
+        createPayload(editorForm, selectedDraftId ?? undefined),
+      );
       return result;
     },
     onSuccess: (result) => {
@@ -278,7 +279,7 @@ export default function ContributorPage() {
 
   const saveDraftMutation = useMutation({
     mutationFn: async () => {
-      const payload = createPayload(form, selectedDraftId ?? undefined);
+      const payload = createPayload(editorForm, selectedDraftId ?? undefined);
       const validation = await challengesApi.validateDraft(payload);
 
       if (!validation.valid) {
@@ -303,6 +304,7 @@ export default function ContributorPage() {
       await queryClient.invalidateQueries({
         queryKey: ['contributor-editable-draft', result.challenge.id],
       });
+      await loadEditableDraft(result.challenge.id);
       toast.success(mode === 'edit' ? 'Draft version submitted for review' : 'Challenge draft created');
     },
     onError: (error) => {
@@ -315,13 +317,13 @@ export default function ContributorPage() {
     event.preventDefault();
 
     if (
-      !form.lessonId ||
-      !form.title.trim() ||
-      !form.slug.trim() ||
-      !form.problemStatement.trim() ||
-      !form.referenceSolution.trim()
+      !editorForm.lessonId ||
+      !editorForm.title.trim() ||
+      !editorForm.slug.trim() ||
+      !editorForm.problemStatement.trim() ||
+      !editorForm.referenceSolution.trim()
     ) {
-      toast.error('Lesson, title, slug, problem statement, and reference solution are required');
+      toast.error('Practice set, title, slug, problem statement, and reference solution are required');
       return;
     }
 
@@ -332,39 +334,41 @@ export default function ContributorPage() {
     setSelectedDraftId(null);
     setPreflightResult(null);
     setActiveTab('write');
-    setForm((current) => ({
+    setForm({
       ...DEFAULT_FORM,
-      lessonId: current.lessonId || lessonOptions[0]?.value || '',
-    }));
+      lessonId: fallbackLessonId,
+    });
   };
 
   return (
     <div className="page-shell page-stack">
       <section className="flex flex-col gap-5 rounded-[28px] border border-outline-variant/10 bg-surface-container-low px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.24em] text-outline">Contributor workflow</p>
+          <p className="text-xs uppercase tracking-[0.24em] text-outline">Challenge submissions</p>
           <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface">
-            Build Challenge Drafts
+            Manage Challenge Drafts
           </h1>
           <p className="max-w-3xl text-base leading-7 text-on-surface-variant">
-            {displayName}, draft in markdown, run SQL preflight before submission, and iterate on
-            the latest review note without leaving the contributor lane.
+            {displayName}, draft in markdown, run SQL preflight before submitting, and iterate on
+            the latest review note in one workspace.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           <Badge className="bg-secondary/10 text-secondary">{draftCount} drafts open</Badge>
-          <Badge className="bg-primary/10 text-primary">{publishedCount} published</Badge>
-          <Link href="/admin/content">
-            <Button variant="secondary">Open Admin Queue</Button>
-          </Link>
+          <Badge className="bg-primary/10 text-primary">{publishedCount} live</Badge>
+          {isAdmin && (
+            <Link href="/admin/content">
+              <Button variant="secondary">Open Review Queue</Button>
+            </Link>
+          )}
         </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
         <StatCard label="My Drafts" value={draftCount} accent="primary" />
-        <StatCard label="Published Challenges" value={publishedCount} accent="secondary" />
-        <StatCard label="Available Lessons" value={lessonOptions.length} accent="tertiary" />
+        <StatCard label="Live Challenges" value={publishedCount} accent="secondary" />
+        <StatCard label="Available Practice Sets" value={lessonOptions.length} accent="tertiary" />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.28fr_1.72fr]">
@@ -383,7 +387,7 @@ export default function ContributorPage() {
                 )}
               </div>
               <CardDescription className="mt-1">
-                Keep the lesson metadata and scoring config in sync with the newest challenge version.
+                Keep the practice set reference and scoring config in sync with the newest challenge version.
               </CardDescription>
             </div>
 
@@ -440,15 +444,18 @@ export default function ContributorPage() {
             {activeTab === 'write' && (
               <form className="space-y-4" onSubmit={handleSubmit}>
                 <Select
-                  label="Lesson"
-                  value={form.lessonId}
+                  label="Practice Set"
+                  value={editorForm.lessonId}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, lessonId: event.target.value }))
                   }
                   options={[
                     {
                       value: '',
-                      label: lessonOptions.length > 0 ? 'Select a lesson' : 'No lessons available',
+                      label:
+                        lessonOptions.length > 0
+                          ? 'Select a practice set'
+                          : 'No practice sets available',
                     },
                     ...lessonOptions,
                   ]}
@@ -456,7 +463,7 @@ export default function ContributorPage() {
 
                 <Input
                   label="Title"
-                  value={form.title}
+                  value={editorForm.title}
                   onChange={(event) => {
                     const title = event.target.value;
                     setForm((current) => ({
@@ -473,7 +480,7 @@ export default function ContributorPage() {
 
                 <Input
                   label="Slug"
-                  value={form.slug}
+                  value={editorForm.slug}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, slug: slugify(event.target.value) }))
                   }
@@ -483,7 +490,7 @@ export default function ContributorPage() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Select
                     label="Difficulty"
-                    value={form.difficulty}
+                    value={editorForm.difficulty}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -502,7 +509,7 @@ export default function ContributorPage() {
                     type="number"
                     min={10}
                     max={1000}
-                    value={form.points}
+                    value={editorForm.points}
                     onChange={(event) =>
                       setForm((current) => ({ ...current, points: event.target.value }))
                     }
@@ -512,7 +519,7 @@ export default function ContributorPage() {
                 <Textarea
                   label="Description"
                   hint="Markdown supported"
-                  value={form.description}
+                  value={editorForm.description}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, description: event.target.value }))
                   }
@@ -522,7 +529,7 @@ export default function ContributorPage() {
                 <Textarea
                   label="Problem Statement"
                   hint="Markdown supported"
-                  value={form.problemStatement}
+                  value={editorForm.problemStatement}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, problemStatement: event.target.value }))
                   }
@@ -532,16 +539,16 @@ export default function ContributorPage() {
                 <Textarea
                   label="Hint Text"
                   hint="Markdown supported"
-                  value={form.hintText}
+                  value={editorForm.hintText}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, hintText: event.target.value }))
                   }
-                  placeholder="Optional hint for the learner."
+                  placeholder="Optional hint for solvers."
                 />
 
                 <Input
                   label="Expected Columns"
-                  value={form.expectedResultColumns}
+                  value={editorForm.expectedResultColumns}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
@@ -554,7 +561,7 @@ export default function ContributorPage() {
                 <Textarea
                   label="Reference Solution"
                   hint="This SQL is validated before submit."
-                  value={form.referenceSolution}
+                  value={editorForm.referenceSolution}
                   onChange={(event) =>
                     setForm((current) => ({ ...current, referenceSolution: event.target.value }))
                   }
@@ -566,7 +573,7 @@ export default function ContributorPage() {
                     label="Baseline Duration (ms)"
                     type="number"
                     min={1}
-                    value={form.baselineDurationMs}
+                    value={editorForm.baselineDurationMs}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -578,7 +585,7 @@ export default function ContributorPage() {
 
                   <Select
                     label="Index Optimization"
-                    value={form.requiresIndexOptimization}
+                    value={editorForm.requiresIndexOptimization}
                     onChange={(event) =>
                       setForm((current) => ({
                         ...current,
@@ -612,19 +619,19 @@ export default function ContributorPage() {
             {activeTab === 'preview' && (
               <div className="space-y-5">
                 <div className="flex flex-wrap items-center gap-2">
-                  <DifficultyBadge difficulty={form.difficulty} />
-                  <Badge className="bg-primary/10 text-primary">{form.points} pts</Badge>
+                  <DifficultyBadge difficulty={editorForm.difficulty} />
+                  <Badge className="bg-primary/10 text-primary">{editorForm.points} pts</Badge>
                   <Badge className="bg-surface-container-high text-on-surface-variant">
-                    {form.slug || 'slug-preview'}
+                    {editorForm.slug || 'slug-preview'}
                   </Badge>
                 </div>
 
                 <div className="space-y-2">
                   <h2 className="font-headline text-2xl font-semibold text-on-surface">
-                    {form.title || 'Untitled challenge'}
+                    {editorForm.title || 'Untitled challenge'}
                   </h2>
                   <p className="text-sm text-on-surface-variant">
-                    Markdown preview for the learner-facing copy and reviewer context.
+                    Markdown preview for the solver-facing copy and review context.
                   </p>
                 </div>
 
@@ -649,7 +656,7 @@ export default function ContributorPage() {
                   </div>
                   <div className="h-64 overflow-hidden rounded-3xl border border-outline-variant/10">
                     <SqlEditor
-                      value={form.referenceSolution}
+                      value={editorForm.referenceSolution}
                       onChange={() => undefined}
                       readOnly
                       testId="reference-solution-preview"
@@ -671,7 +678,7 @@ export default function ContributorPage() {
                     Re-run Preflight
                   </Button>
                   <p className="text-sm text-on-surface-variant">
-                    SQL validation runs server-side against the same contribution contract the API enforces.
+                    SQL validation runs server-side against the same submission contract the API enforces.
                   </p>
                 </div>
 
@@ -754,7 +761,7 @@ export default function ContributorPage() {
         <Card className="rounded-[28px] border border-outline-variant/10">
           <CardHeader className="flex-col items-start gap-2 px-6 py-5">
             <div>
-              <CardTitle>My Challenge Drafts</CardTitle>
+              <CardTitle>My Challenge Submissions</CardTitle>
               <CardDescription className="mt-1">
                 Open any draft to revise the latest version and inspect the newest review note.
               </CardDescription>
@@ -775,7 +782,7 @@ export default function ContributorPage() {
                 {myChallengesQuery.isLoading ? (
                   <TableEmpty colSpan={5} message="Loading your challenge drafts..." />
                 ) : myChallenges.length === 0 ? (
-                  <TableEmpty colSpan={5} message="No challenge drafts yet." />
+                  <TableEmpty colSpan={5} message="No submissions yet." />
                 ) : (
                   myChallenges.map((challenge) => (
                     <TableRow key={challenge.id}>
@@ -814,9 +821,11 @@ export default function ContributorPage() {
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={() => {
+                          onClick={async () => {
                             setSelectedDraftId(challenge.id);
                             setActiveTab('write');
+                            setPreflightResult(null);
+                            await loadEditableDraft(challenge.id);
                           }}
                           disabled={challenge.status !== 'draft'}
                         >

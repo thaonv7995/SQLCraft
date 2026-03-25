@@ -208,14 +208,14 @@ describe('ContributorPage', () => {
     renderContributorPage();
 
     expect(
-      await screen.findByRole('heading', { name: /build challenge drafts/i }),
+      await screen.findByRole('heading', { name: /manage challenge drafts/i }),
     ).toBeInTheDocument();
     expect(await screen.findByText('Filter active users')).toBeInTheDocument();
     expect(
       await screen.findByRole('option', { name: 'SQL Fundamentals / Filtering' }),
     ).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Lesson'), 'lesson-1');
+    await user.selectOptions(screen.getByLabelText('Practice Set'), 'lesson-1');
     await user.type(screen.getByLabelText('Title'), 'Index active users');
     await user.clear(screen.getByLabelText('Slug'));
     await user.type(screen.getByLabelText('Slug'), 'index-active-users');

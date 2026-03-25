@@ -674,6 +674,31 @@ export interface SystemJob {
   errorMessage?: string;
 }
 
+export interface AdminSystemHealth {
+  status: 'healthy';
+  timestamp: string;
+  stats: {
+    users: number;
+    tracks: number;
+    lessons: number;
+    activeSessions: number;
+    pendingJobs: number;
+  };
+}
+
+interface RawSystemJob {
+  id: string;
+  type: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'retrying';
+  payload?: Record<string, unknown> | null;
+  result?: Record<string, unknown> | null;
+  errorMessage?: string | null;
+  scheduledAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+}
+
 // ─── Session Schema ───────────────────────────────────────────────────────────
 
 export interface SessionSchemaColumn {
@@ -1011,6 +1036,25 @@ function normalizeAdminLessonVersionDetail(detail: AdminLessonVersionDetail): Ad
     datasetTemplateId: detail.datasetTemplateId ?? null,
     publishedAt: detail.publishedAt ?? null,
     createdBy: detail.createdBy ?? null,
+  };
+}
+
+function normalizeSystemJob(job: RawSystemJob): SystemJob {
+  const payload = job.payload && typeof job.payload === 'object' ? job.payload : null;
+  const target =
+    (typeof payload?.schemaName === 'string' && payload.schemaName) ||
+    (typeof payload?.schemaTemplateId === 'string' && payload.schemaTemplateId) ||
+    (typeof payload?.sourceDatasetTemplateId === 'string' && payload.sourceDatasetTemplateId) ||
+    undefined;
+
+  return {
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    target,
+    startedAt: job.startedAt ?? job.scheduledAt ?? job.createdAt,
+    completedAt: job.completedAt ?? undefined,
+    errorMessage: job.errorMessage ?? undefined,
   };
 }
 
@@ -1472,9 +1516,31 @@ export const usersApi = {
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
 export const adminApi = {
-  metrics: () => api.get<SystemMetrics>('/admin/metrics').then((r) => r.data),
+  systemHealth: () => api.get<AdminSystemHealth>('/admin/system/health').then((r) => r.data),
 
-  jobs: () => api.get<SystemJob[]>('/admin/jobs').then((r) => r.data),
+  systemJobs: (params?: {
+    limit?: number;
+    status?: SystemJob['status'];
+    type?: string;
+  }) =>
+    api
+      .get<RawSystemJob[]>('/admin/system/jobs', { params })
+      .then((r) => r.data.map(normalizeSystemJob)),
+
+  metrics: async () => {
+    const health = await adminApi.systemHealth();
+    return {
+      activeSandboxes: health.stats.activeSessions,
+      totalUsers: health.stats.users,
+      querySuccessRate: 0,
+      p95LatencyMs: 0,
+      totalQueriesLast24h: 0,
+      errorRate: 0,
+    } satisfies SystemMetrics;
+  },
+
+  jobs: (params?: { limit?: number; status?: SystemJob['status']; type?: string }) =>
+    adminApi.systemJobs(params),
 
   terminateAllSandboxes: () =>
     api.post('/admin/sandboxes/terminate-all').then((r) => r.data),
@@ -1505,6 +1571,9 @@ export const adminApi = {
     api.post<AdminLessonVersionDetail>(`/admin/lesson-versions/${versionId}/publish`).then((r) =>
       normalizeAdminLessonVersionDetail(r.data),
     ),
+
+  globalLeaderboard: (period: 'weekly' | 'monthly' | 'alltime' = 'alltime', limit = 10) =>
+    leaderboardApi.get(period, limit),
 };
 
 // ─── Databases API ────────────────────────────────────────────────────────────

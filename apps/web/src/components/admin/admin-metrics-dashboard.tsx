@@ -4,17 +4,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { adminApi } from '@/lib/api';
-import { StatCard } from '@/components/ui/card';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button, type ButtonVariant } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, StatCard } from '@/components/ui/card';
 import {
   Table,
-  TableHeader,
   TableBody,
-  TableRow,
-  TableHead,
   TableCell,
   TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
   TableSkeleton,
 } from '@/components/ui/table';
 import { formatRelativeTime } from '@/lib/utils';
@@ -41,42 +41,65 @@ interface QuickAction {
 
 const NAVIGATION_CARDS: NavigationCard[] = [
   {
-    href: '/admin/users',
-    label: 'User Management',
-    description: 'Review privileges, access status, and contributor activity.',
-    icon: 'group',
-  },
-  {
     href: '/admin/content',
-    label: 'Content Moderation',
-    description: 'Publish, archive, and inspect track and lesson operations.',
+    label: 'Content',
+    description: 'Manage lessons, challenges, and the review queue for user submissions.',
     icon: 'verified_user',
   },
   {
-    href: '/admin/health/logs',
-    label: 'System Logs',
-    description: 'Inspect privileged actions, job failures, and audit history.',
-    icon: 'receipt_long',
+    href: '/admin/databases',
+    label: 'Databases',
+    description: 'Operate schema templates, SQL imports, datasets, and generation jobs.',
+    icon: 'database',
+  },
+  {
+    href: '/admin/rankings',
+    label: 'Rankings',
+    description: 'Inspect global standings, challenge leaderboards, and point surfaces.',
+    icon: 'leaderboard',
+  },
+  {
+    href: '/admin/users',
+    label: 'Users',
+    description: 'Moderate accounts, review practice stats, and manage admin access.',
+    icon: 'group',
+  },
+  {
+    href: '/admin/system',
+    label: 'System',
+    description: 'Track queue health, runtime status, and operational pressure.',
+    icon: 'dns',
   },
 ];
 
 export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
   const router = useRouter();
 
-  const { data: metrics, isLoading: metricsLoading } = useQuery({
-    queryKey: ['admin-metrics'],
-    queryFn: adminApi.metrics,
+  const { data: health, isLoading: healthLoading } = useQuery({
+    queryKey: ['admin-system-health-dashboard'],
+    queryFn: adminApi.systemHealth,
     refetchInterval: 30_000,
     staleTime: 10_000,
   });
 
   const { data: jobs, isLoading: jobsLoading } = useQuery({
-    queryKey: ['admin-jobs'],
-    queryFn: adminApi.jobs,
+    queryKey: ['admin-jobs-dashboard'],
+    queryFn: () => adminApi.systemJobs({ limit: 8 }),
     staleTime: 15_000,
   });
 
+  const { data: topLeaders, isLoading: leadersLoading, isError: leadersError } = useQuery({
+    queryKey: ['admin-overview-leaders'],
+    queryFn: () => adminApi.globalLeaderboard('alltime', 5),
+    staleTime: 30_000,
+    enabled: variant === 'overview',
+  });
+
   const displayJobs = jobs ?? [];
+  const pendingJobs =
+    health?.stats.pendingJobs ?? displayJobs.filter((job) => job.status === 'pending').length;
+  const runningJobs = displayJobs.filter((job) => job.status === 'running').length;
+  const failedJobs = displayJobs.filter((job) => job.status === 'failed').length;
 
   const handleTerminateAll = async (): Promise<void> => {
     try {
@@ -90,37 +113,37 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
   const heading = variant === 'overview' ? 'Overview' : 'System Health';
   const description =
     variant === 'overview'
-      ? 'Central control plane for platform metrics, operator workflows, and privileged activity.'
-      : 'Real-time platform metrics and infrastructure status.';
+      ? 'Operational snapshot for SQL practice content, user standings, and worker activity.'
+      : 'Real-time infrastructure status for sessions, queue pressure, and content inventory.';
   const statusLabel =
-    variant === 'overview' ? 'Control plane live' : 'All systems operational';
+    variant === 'overview' ? 'Admin console ready' : 'System telemetry live';
 
   const quickActions: QuickAction[] =
     variant === 'overview'
       ? [
           {
-            label: 'Open System Health',
-            icon: 'dns',
-            href: '/admin/health',
+            label: 'Review Queue',
+            icon: 'rule_settings',
+            href: '/admin/content?tab=review',
             variant: 'secondary',
           },
           {
-            label: 'Review Users',
-            icon: 'group',
-            href: '/admin/users',
+            label: 'Open Rankings',
+            icon: 'leaderboard',
+            href: '/admin/rankings',
             variant: 'ghost',
           },
           {
-            label: 'Inspect Logs',
-            icon: 'receipt_long',
-            href: '/admin/health/logs',
+            label: 'Manage Databases',
+            icon: 'database',
+            href: '/admin/databases',
             variant: 'ghost',
           },
           {
-            label: 'Terminate All Sandboxes',
-            icon: 'stop_circle',
-            action: handleTerminateAll,
-            variant: 'destructive',
+            label: 'Inspect System',
+            icon: 'dns',
+            href: '/admin/system',
+            variant: 'ghost',
           },
         ]
       : [
@@ -131,33 +154,21 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
             variant: 'destructive',
           },
           {
-            label: 'Run Migrations',
-            icon: 'upgrade',
-            action: () => {
-              toast.success('Migrations queued');
-            },
+            label: 'Open Queues',
+            icon: 'account_tree',
+            href: '/admin/system?tab=queues',
             variant: 'secondary',
           },
           {
-            label: 'Sync Content',
-            icon: 'sync',
-            action: () => {
-              toast.success('Sync started');
-            },
+            label: 'Review SQL Imports',
+            icon: 'upload_file',
+            href: '/admin/databases?tab=sql-imports',
             variant: 'secondary',
           },
           {
-            label: 'Export User Data',
-            icon: 'download',
-            action: () => {
-              toast.success('Export queued');
-            },
-            variant: 'ghost',
-          },
-          {
-            label: 'View System Logs',
+            label: 'Open Logs',
             icon: 'receipt_long',
-            href: '/admin/health/logs',
+            href: '/admin/system?tab=logs',
             variant: 'ghost',
           },
         ];
@@ -178,7 +189,7 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
       </div>
 
       {variant === 'overview' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           {NAVIGATION_CARDS.map((card) => (
             <Link
               key={card.href}
@@ -187,7 +198,7 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-on-surface group-hover:text-on-surface transition-colors">
+                  <p className="text-sm font-semibold text-on-surface transition-colors group-hover:text-on-surface">
                     {card.label}
                   </p>
                   <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">
@@ -203,86 +214,76 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
         </div>
       )}
 
-      {metricsLoading || !metrics ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 bg-surface-container-low rounded-xl animate-pulse" />
+      {healthLoading || !health ? (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((index) => (
+            <div key={index} className="h-24 animate-pulse rounded-xl bg-surface-container-low" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatCard
-            label="Active Sandboxes"
-            value={metrics.activeSandboxes}
+            label="Total Users"
+            value={health.stats.users.toLocaleString()}
+            accent="primary"
+            icon={<span className="material-symbols-outlined">group</span>}
+          />
+          <StatCard
+            label="Active Sessions"
+            value={health.stats.activeSessions}
             accent="tertiary"
             icon={<span className="material-symbols-outlined">dns</span>}
           />
           <StatCard
-            label="Query Success Rate"
-            value={`${metrics.querySuccessRate}%`}
-            delta="+0.3% vs yesterday"
-            deltaPositive
+            label="Published Lessons"
+            value={health.stats.lessons}
             accent="secondary"
-            icon={<span className="material-symbols-outlined">verified</span>}
+            icon={<span className="material-symbols-outlined">menu_book</span>}
           />
           <StatCard
-            label="p95 Latency"
-            value={`${metrics.p95LatencyMs}ms`}
+            label="Pending Jobs"
+            value={pendingJobs}
             accent="primary"
-            icon={<span className="material-symbols-outlined">speed</span>}
-          />
-          <StatCard
-            label="Queries (24h)"
-            value={metrics.totalQueriesLast24h.toLocaleString()}
-            delta="+12% vs last week"
-            deltaPositive
-            accent="primary"
-            icon={<span className="material-symbols-outlined">query_stats</span>}
+            icon={<span className="material-symbols-outlined">account_tree</span>}
           />
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Total Users</h3>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="rounded-xl bg-surface-container-low p-5 space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Tracks</h3>
           <p className="text-3xl font-headline font-bold text-on-surface">
-            {metricsLoading || !metrics ? '—' : metrics.totalUsers.toLocaleString()}
+            {healthLoading || !health ? '—' : health.stats.tracks.toLocaleString()}
           </p>
-          <p className="text-xs text-secondary">+34 today</p>
+          <p className="text-xs text-on-surface-variant">Current practice catalog groups</p>
         </div>
-        <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Error Rate</h3>
-          <p
-            className={`text-3xl font-headline font-bold ${
-              metrics && metrics.errorRate > 5 ? 'text-error' : 'text-on-surface'
-            }`}
-          >
-            {metricsLoading || !metrics ? '—' : `${metrics.errorRate}%`}
-          </p>
-          <p className="text-xs text-on-surface-variant">Query execution errors</p>
+        <div className="rounded-xl bg-surface-container-low p-5 space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Running Jobs</h3>
+          <p className="text-3xl font-headline font-bold text-on-surface">{runningJobs}</p>
+          <p className="text-xs text-on-surface-variant">Workers currently executing</p>
         </div>
-        <div className="bg-surface-container-low rounded-xl p-5 space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Sandbox Pool</h3>
+        <div className="rounded-xl bg-surface-container-low p-5 space-y-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-outline">Failed Jobs</h3>
           <div className="flex items-end gap-2">
-            <p className="text-3xl font-headline font-bold text-on-surface">
-              {metricsLoading || !metrics ? '—' : metrics.activeSandboxes}
+            <p className={`text-3xl font-headline font-bold ${failedJobs > 0 ? 'text-error' : 'text-on-surface'}`}>
+              {failedJobs}
             </p>
-            <p className="text-sm text-on-surface-variant mb-1">/ 50 max</p>
+            <p className="mb-1 text-sm text-on-surface-variant">recent</p>
           </div>
-          <div className="h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-container-highest">
             <div
-              className="h-full bg-on-surface-variant rounded-full"
-              style={{ width: metrics ? `${(metrics.activeSandboxes / 50) * 100}%` : '0%' }}
+              className={failedJobs > 0 ? 'h-full rounded-full bg-error' : 'h-full rounded-full bg-secondary'}
+              style={{ width: `${Math.min((Math.max(failedJobs, 1) / 8) * 100, 100)}%` }}
             />
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 bg-surface-container-low rounded-xl overflow-hidden">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.9fr_1fr]">
+        <div className="overflow-hidden rounded-xl bg-surface-container-low">
           <div className="flex items-center justify-between px-5 py-4">
             <h2 className="font-headline text-base font-semibold text-on-surface">
-              Recent System Jobs
+              Recent Worker Jobs
             </h2>
             <Button variant="ghost" size="sm">
               <span className="material-symbols-outlined text-sm">refresh</span>
@@ -309,26 +310,26 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
                     ? `${Math.round(
                         (new Date(job.completedAt).getTime() -
                           new Date(job.startedAt).getTime()) /
-                          1000
+                          1000,
                       )}s`
                     : job.status === 'running'
                       ? 'Running...'
-                      : '-';
+                      : '—';
 
                   return (
                     <TableRow key={job.id}>
                       <TableCell>
-                        <span className="font-mono text-xs bg-surface-container-high px-2 py-0.5 rounded text-on-surface-variant">
+                        <span className="rounded bg-surface-container-high px-2 py-0.5 font-mono text-xs text-on-surface-variant">
                           {job.type}
                         </span>
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={job.status} />
                       </TableCell>
-                      <TableCell className="text-on-surface-variant text-xs">
+                      <TableCell className="text-xs text-on-surface-variant">
                         {job.target ?? '—'}
                       </TableCell>
-                      <TableCell className="text-on-surface-variant text-xs">
+                      <TableCell className="text-xs text-on-surface-variant">
                         {formatRelativeTime(job.startedAt)}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-on-surface-variant">
@@ -342,31 +343,118 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
           </Table>
         </div>
 
-        <div className="bg-surface-container-low rounded-xl p-5 space-y-4">
-          <h2 className="font-headline text-base font-semibold text-on-surface">
-            Quick Actions
-          </h2>
-          <div className="space-y-2">
-            {quickActions.map((item) => (
-              <Button
-                key={item.label}
-                variant={item.variant}
-                size="sm"
-                fullWidth
-                onClick={() => {
-                  if (item.href) {
-                    router.push(item.href);
-                    return;
-                  }
+        <div className="space-y-6">
+          {variant === 'overview' ? (
+            <Card className="rounded-xl border border-outline-variant/10">
+              <CardHeader className="flex-col items-start gap-2 px-5 py-4">
+                <div>
+                  <CardTitle>Leaderboard Snapshot</CardTitle>
+                  <CardDescription className="mt-1">
+                    Top global performers across solved SQL practice content.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 px-5 pb-5 pt-0">
+                {leadersLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((index) => (
+                      <div key={index} className="h-12 animate-pulse rounded-xl bg-surface-container" />
+                    ))}
+                  </div>
+                ) : leadersError ? (
+                  <p className="text-sm text-on-surface-variant">
+                    Global ranking data is not available in this environment yet.
+                  </p>
+                ) : (topLeaders ?? []).length === 0 ? (
+                  <p className="text-sm text-on-surface-variant">No ranking entries yet.</p>
+                ) : (
+                  (topLeaders ?? []).map((entry) => (
+                    <div
+                      key={entry.userId}
+                      className="flex items-center justify-between rounded-xl bg-surface-container px-3 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-on-surface">
+                          #{entry.rank} {entry.displayName}
+                        </p>
+                        <p className="truncate text-xs text-on-surface-variant">
+                          @{entry.username}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-mono text-sm text-secondary">
+                          {entry.points.toLocaleString()} pts
+                        </p>
+                        <p className="text-xs text-on-surface-variant">
+                          {entry.challengesCompleted} solved
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
 
-                  void item.action?.();
-                }}
-                leftIcon={<span className="material-symbols-outlined text-sm">{item.icon}</span>}
-                className="justify-start"
-              >
-                {item.label}
-              </Button>
-            ))}
+                <Link href="/admin/rankings" className="inline-flex">
+                  <Button variant="secondary" size="sm">
+                    Open Rankings
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="rounded-xl border border-outline-variant/10">
+              <CardHeader className="flex-col items-start gap-2 px-5 py-4">
+                <div>
+                  <CardTitle>System Summary</CardTitle>
+                  <CardDescription className="mt-1">
+                    High-level health state for sessions and worker backlog.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 px-5 pb-5 pt-0">
+                <div className="flex items-center justify-between rounded-xl bg-surface-container px-3 py-2.5">
+                  <span className="text-sm text-on-surface">Health Status</span>
+                  <StatusBadge status={health?.status ?? 'pending'} />
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-surface-container px-3 py-2.5">
+                  <span className="text-sm text-on-surface">Queue Backlog</span>
+                  <span className="font-mono text-sm text-on-surface">{pendingJobs}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-surface-container px-3 py-2.5">
+                  <span className="text-sm text-on-surface">Active Sessions</span>
+                  <span className="font-mono text-sm text-on-surface">
+                    {health?.stats.activeSessions ?? 0}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="rounded-xl bg-surface-container-low p-5 space-y-4">
+            <h2 className="font-headline text-base font-semibold text-on-surface">
+              Quick Actions
+            </h2>
+            <div className="space-y-2">
+              {quickActions.map((item) => (
+                <Button
+                  key={item.label}
+                  variant={item.variant}
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    if (item.href) {
+                      router.push(item.href);
+                      return;
+                    }
+
+                    void item.action?.();
+                  }}
+                  leftIcon={<span className="material-symbols-outlined text-sm">{item.icon}</span>}
+                  className="justify-start"
+                >
+                  {item.label}
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

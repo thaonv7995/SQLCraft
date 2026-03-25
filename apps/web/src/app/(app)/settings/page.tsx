@@ -132,6 +132,9 @@ function ProfileSection({
   };
 
   const initials = generateInitials(user.displayName ?? user.username);
+  const isAdmin = user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+  const roleLabel = isAdmin ? 'Admin' : 'User';
+  const roleClassName = isAdmin ? 'text-error' : 'text-on-surface-variant';
 
   return (
     <section className="section-card card-padding">
@@ -185,11 +188,7 @@ function ProfileSection({
           <p className="text-sm text-on-surface-variant">{user.email}</p>
           <p className="text-xs text-on-surface-variant">
             @{user.username} ·{' '}
-            <span className={`capitalize font-medium ${
-              user.role === 'admin' ? 'text-error' : user.role === 'contributor' ? 'text-primary' : 'text-on-surface-variant'
-            }`}>
-              {user.role}
-            </span>
+            <span className={`font-medium ${roleClassName}`}>{roleLabel}</span>
           </p>
         </div>
       </div>

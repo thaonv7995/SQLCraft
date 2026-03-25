@@ -1,5 +1,5 @@
-import { AdminMetricsDashboard } from '@/components/admin/admin-metrics-dashboard';
+import { redirect } from 'next/navigation';
 
 export default function AdminHealthPage() {
-  return <AdminMetricsDashboard variant="health" />;
+  redirect('/admin/system');
 }

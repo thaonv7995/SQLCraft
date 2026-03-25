@@ -57,7 +57,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
   fastify.post<{ Body: CreateChallengeBody }>(
     '/v1/challenges',
     {
-      onRequest: [fastify.authenticate, fastify.authorize(['contributor', 'admin'])],
+      onRequest: [fastify.authenticate],
       schema: {
         tags: ['Challenges'],
         summary: 'Create a challenge draft with an initial version',
@@ -89,7 +89,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
   fastify.post<{ Body: ValidateChallengeDraftBody }>(
     '/v1/challenges/validate',
     {
-      onRequest: [fastify.authenticate, fastify.authorize(['contributor', 'admin'])],
+      onRequest: [fastify.authenticate],
       schema: {
         tags: ['Challenges'],
         summary: 'Validate a challenge draft before submission',
@@ -122,7 +122,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
   fastify.post<{ Params: ChallengeParams; Body: CreateChallengeVersionBody }>(
     '/v1/challenges/:id/versions',
     {
-      onRequest: [fastify.authenticate, fastify.authorize(['contributor', 'admin'])],
+      onRequest: [fastify.authenticate],
       schema: {
         tags: ['Challenges'],
         summary: 'Create a new draft version for an existing challenge',

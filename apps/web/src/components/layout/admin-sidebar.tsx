@@ -10,24 +10,16 @@ interface NavItem {
   label: string;
   icon: string;
   exact?: boolean;
-  children?: Array<{
-    href: string;
-    label: string;
-  }>;
 }
 
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Overview', icon: 'dashboard', exact: true },
-  { href: '/admin/users', label: 'User Management', icon: 'group' },
-  { href: '/admin/content', label: 'Content Moderation', icon: 'verified_user' },
-  { href: '/admin/schema', label: 'Schema Management', icon: 'schema' },
-  { href: '/admin/lessons', label: 'Lesson Management', icon: 'menu_book' },
-  {
-    href: '/admin/health',
-    label: 'System Health',
-    icon: 'dns',
-    children: [{ href: '/admin/health/logs', label: 'System Logs' }],
-  },
+  { href: '/admin/content', label: 'Content', icon: 'verified_user' },
+  { href: '/admin/databases', label: 'Databases', icon: 'database' },
+  { href: '/admin/users', label: 'Users', icon: 'group' },
+  { href: '/admin/rankings', label: 'Rankings', icon: 'leaderboard' },
+  { href: '/admin/system', label: 'System', icon: 'dns' },
+  { href: '/admin/settings', label: 'Settings', icon: 'settings' },
 ];
 
 export function AdminSidebar() {
@@ -59,60 +51,29 @@ export function AdminSidebar() {
       {/* Nav */}
       <nav className="flex-1 px-4 space-y-0.5">
         {ADMIN_NAV.map((item) => {
-          const childActive = item.children?.some((child) => isActiveRoute(child.href)) ?? false;
-          const active = isActiveRoute(item.href, item.exact) || childActive;
+          const active = isActiveRoute(item.href, item.exact);
 
           return (
-            <div key={item.href} className="space-y-1">
-              <Link
-                href={item.href}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-sm',
-                  active
-                    ? 'text-on-surface bg-surface-container-highest border-l-2 border-on-surface font-semibold'
-                    : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50'
-                )}
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded transition-colors duration-200 text-sm',
+                active
+                  ? 'text-on-surface bg-surface-container-highest border-l-2 border-on-surface font-semibold'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50'
+              )}
+            >
+              <span
+                className="material-symbols-outlined shrink-0"
+                style={{
+                  fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0",
+                }}
               >
-                <span
-                  className="material-symbols-outlined shrink-0"
-                  style={{
-                    fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0",
-                  }}
-                >
-                  {item.icon}
-                </span>
-                {item.label}
-              </Link>
-
-              {childActive && item.children ? (
-                <div className="pl-10 space-y-1">
-                  {item.children.map((child) => {
-                    const childIsActive = isActiveRoute(child.href);
-
-                    return (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        className={cn(
-                          'flex items-center gap-3 px-3 py-1.5 rounded text-xs transition-colors duration-200',
-                          childIsActive
-                            ? 'text-on-surface font-semibold'
-                            : 'text-on-surface-variant hover:text-on-surface'
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            'w-1.5 h-1.5 rounded-full',
-                            childIsActive ? 'bg-on-surface' : 'bg-on-surface-variant'
-                          )}
-                        />
-                        {child.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
+                {item.icon}
+              </span>
+              {item.label}
+            </Link>
           );
         })}
       </nav>
@@ -128,19 +89,11 @@ export function AdminSidebar() {
         </button>
 
         <Link
-          href="/admin/settings"
+          href="/docs"
           className="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50 transition-colors text-sm"
         >
-          <span className="material-symbols-outlined">settings</span>
-          Settings
-        </Link>
-
-        <Link
-          href="/admin/support"
-          className="flex items-center gap-3 px-3 py-2 rounded text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50 transition-colors text-sm"
-        >
-          <span className="material-symbols-outlined">help_outline</span>
-          Support
+          <span className="material-symbols-outlined">menu_book</span>
+          Docs
         </Link>
       </div>
     </aside>

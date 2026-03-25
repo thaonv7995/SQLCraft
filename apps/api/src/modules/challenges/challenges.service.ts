@@ -1216,7 +1216,7 @@ export async function createChallengeVersion(
   }
 
   if (existing.status !== 'draft') {
-    throw new ValidationError('Only draft challenges can be revised from the contributor flow.');
+    throw new ValidationError('Only draft challenges can be revised from the submission flow.');
   }
 
   const validation = await buildDraftValidation({ ...data, challengeId });

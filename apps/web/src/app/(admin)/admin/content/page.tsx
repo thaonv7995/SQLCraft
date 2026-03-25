@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Badge, DifficultyBadge, StatusBadge } from '@/components/ui/badge';
@@ -15,7 +16,7 @@ import { adminApi, challengesApi, tracksApi } from '@/lib/api';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
 type TrackWithLessons = Track & { lessons?: Lesson[] };
-type ContentTab = 'tracks' | 'lessons' | 'challenges';
+type ContentTab = 'challenges' | 'lessons' | 'review';
 
 type LessonVersionForm = {
   title: string;
@@ -24,16 +25,20 @@ type LessonVersionForm = {
 };
 
 const TAB_LABELS: Record<ContentTab, string> = {
-  tracks: 'Tracks',
-  lessons: 'Lessons',
   challenges: 'Challenges',
+  lessons: 'Lessons',
+  review: 'Review Queue',
 };
+const CONTENT_TABS = Object.keys(TAB_LABELS) as ContentTab[];
 
 const DEFAULT_LESSON_VERSION_FORM: LessonVersionForm = {
   title: '',
   content: '',
   starterQuery: '',
 };
+
+const isContentTab = (value: string | null): value is ContentTab =>
+  value !== null && CONTENT_TABS.includes(value as ContentTab);
 
 const REVIEW_STATUS_META: Record<
   'pending' | 'approved' | 'changes_requested' | 'rejected',
@@ -71,15 +76,18 @@ function ReviewStatusBadge({
 }
 
 export default function AdminContentPage() {
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<ContentTab>('tracks');
+  const requestedTab = searchParams?.get('tab') ?? null;
+  const [activeTabOverride, setActiveTabOverride] = useState<ContentTab | null>(null);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
-  const [reviewNote, setReviewNote] = useState('');
   const [selectedLessonId, setSelectedLessonId] = useState('');
   const [selectedLessonVersionId, setSelectedLessonVersionId] = useState<string | null>(null);
   const [lessonVersionForm, setLessonVersionForm] = useState<LessonVersionForm>(
     DEFAULT_LESSON_VERSION_FORM,
   );
+  const reviewNoteRef = useRef<HTMLTextAreaElement | null>(null);
+  const activeTab = activeTabOverride ?? (isContentTab(requestedTab) ? requestedTab : 'challenges');
 
   const tracksQuery = useQuery({
     queryKey: ['tracks-admin'],
@@ -109,16 +117,15 @@ export default function AdminContentPage() {
       })),
     );
   }, [trackDetailsQuery.data]);
-
-  useEffect(() => {
+  const effectiveSelectedLessonId = useMemo(() => {
     if (lessonOptions.length === 0) {
-      return;
+      return '';
     }
 
-    const selectedLessonStillExists = lessonOptions.some((lesson) => lesson.value === selectedLessonId);
-    if (!selectedLessonId || !selectedLessonStillExists) {
-      setSelectedLessonId(lessonOptions[0]?.value ?? '');
-    }
+    const selectedLessonStillExists = lessonOptions.some(
+      (lesson) => lesson.value === selectedLessonId,
+    );
+    return selectedLessonStillExists ? selectedLessonId : lessonOptions[0]?.value ?? '';
   }, [lessonOptions, selectedLessonId]);
 
   const reviewQueueQuery = useQuery({
@@ -127,63 +134,57 @@ export default function AdminContentPage() {
     staleTime: 30_000,
   });
 
-  const reviewQueue = reviewQueueQuery.data ?? [];
-
-  useEffect(() => {
-    if (reviewQueue.length === 0) {
-      setSelectedChallengeId(null);
-      return;
-    }
-
-    const selectedStillExists = reviewQueue.some((challenge) => challenge.id === selectedChallengeId);
-    if (!selectedChallengeId || !selectedStillExists) {
-      setSelectedChallengeId(reviewQueue[0]?.id ?? null);
-    }
-  }, [reviewQueue, selectedChallengeId]);
-
-  const selectedChallengeSummary =
-    reviewQueue.find((challenge) => challenge.id === selectedChallengeId) ?? null;
-
-  const challengeDetailQuery = useQuery({
-    queryKey: ['admin-challenge-draft', selectedChallengeId],
-    enabled: Boolean(selectedChallengeId),
-    queryFn: () => challengesApi.getDraft(selectedChallengeId as string),
-    staleTime: 0,
-  });
-
-  useEffect(() => {
-    if (!challengeDetailQuery.data) {
-      return;
-    }
-
-    setReviewNote(challengeDetailQuery.data.latestVersion.reviewNotes ?? '');
-  }, [challengeDetailQuery.data?.latestVersion.id, challengeDetailQuery.data?.latestVersion.reviewNotes]);
-
-  const lessonVersionsQuery = useQuery({
-    queryKey: ['admin-lesson-versions', selectedLessonId],
-    enabled: Boolean(selectedLessonId),
-    queryFn: () => adminApi.listLessonVersions(selectedLessonId),
+  const publishedChallengesQuery = useQuery({
+    queryKey: ['admin-published-challenges'],
+    queryFn: () => challengesApi.listPublished(),
     staleTime: 30_000,
   });
 
-  const lessonVersions = lessonVersionsQuery.data ?? [];
+  const reviewQueue = useMemo(() => reviewQueueQuery.data ?? [], [reviewQueueQuery.data]);
+  const effectiveSelectedChallengeId = useMemo(() => {
+    if (reviewQueue.length === 0) {
+      return null;
+    }
 
-  useEffect(() => {
+    const selectedStillExists = reviewQueue.some(
+      (challenge) => challenge.id === selectedChallengeId,
+    );
+    return selectedStillExists ? selectedChallengeId : reviewQueue[0]?.id ?? null;
+  }, [reviewQueue, selectedChallengeId]);
+
+  const selectedChallengeSummary =
+    reviewQueue.find((challenge) => challenge.id === effectiveSelectedChallengeId) ?? null;
+
+  const challengeDetailQuery = useQuery({
+    queryKey: ['admin-challenge-draft', effectiveSelectedChallengeId],
+    enabled: Boolean(effectiveSelectedChallengeId),
+    queryFn: () => challengesApi.getDraft(effectiveSelectedChallengeId as string),
+    staleTime: 0,
+  });
+
+  const lessonVersionsQuery = useQuery({
+    queryKey: ['admin-lesson-versions', effectiveSelectedLessonId],
+    enabled: Boolean(effectiveSelectedLessonId),
+    queryFn: () => adminApi.listLessonVersions(effectiveSelectedLessonId),
+    staleTime: 30_000,
+  });
+
+  const lessonVersions = useMemo(() => lessonVersionsQuery.data ?? [], [lessonVersionsQuery.data]);
+  const effectiveSelectedLessonVersionId = useMemo(() => {
     if (lessonVersions.length === 0) {
-      setSelectedLessonVersionId(null);
-      return;
+      return null;
     }
 
-    const selectedStillExists = lessonVersions.some((version) => version.id === selectedLessonVersionId);
-    if (!selectedLessonVersionId || !selectedStillExists) {
-      setSelectedLessonVersionId(lessonVersions[0]?.id ?? null);
-    }
+    const selectedStillExists = lessonVersions.some(
+      (version) => version.id === selectedLessonVersionId,
+    );
+    return selectedStillExists ? selectedLessonVersionId : lessonVersions[0]?.id ?? null;
   }, [lessonVersions, selectedLessonVersionId]);
 
   const lessonVersionDetailQuery = useQuery({
-    queryKey: ['admin-lesson-version-detail', selectedLessonVersionId],
-    enabled: Boolean(selectedLessonVersionId),
-    queryFn: () => adminApi.getLessonVersion(selectedLessonVersionId as string),
+    queryKey: ['admin-lesson-version-detail', effectiveSelectedLessonVersionId],
+    enabled: Boolean(effectiveSelectedLessonVersionId),
+    queryFn: () => adminApi.getLessonVersion(effectiveSelectedLessonVersionId as string),
     staleTime: 0,
   });
 
@@ -208,20 +209,20 @@ export default function AdminContentPage() {
 
       return challengesApi.reviewVersion(versionId, {
         decision,
-        note: reviewNote.trim() || undefined,
+        note: reviewNoteRef.current?.value.trim() || undefined,
       });
     },
     onSuccess: async (_result, decision) => {
       await queryClient.invalidateQueries({ queryKey: ['challenge-review-queue'] });
       await queryClient.invalidateQueries({
-        queryKey: ['admin-challenge-draft', selectedChallengeId],
+        queryKey: ['admin-challenge-draft', effectiveSelectedChallengeId],
       });
 
       const message =
         decision === 'approve'
           ? 'Challenge approved and published'
           : decision === 'request_changes'
-            ? 'Requested contributor changes'
+            ? 'Requested user changes'
             : 'Challenge draft rejected';
 
       toast.success(message);
@@ -233,12 +234,12 @@ export default function AdminContentPage() {
 
   const createLessonVersionMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedLessonId) {
+      if (!effectiveSelectedLessonId) {
         throw new Error('Select a lesson before creating a version');
       }
 
       return adminApi.createLessonVersion({
-        lessonId: selectedLessonId,
+        lessonId: effectiveSelectedLessonId,
         title: lessonVersionForm.title.trim(),
         content: lessonVersionForm.content,
         starterQuery: lessonVersionForm.starterQuery.trim() || undefined,
@@ -246,7 +247,9 @@ export default function AdminContentPage() {
     },
     onSuccess: async (version) => {
       setSelectedLessonVersionId(version.id);
-      await queryClient.invalidateQueries({ queryKey: ['admin-lesson-versions', selectedLessonId] });
+      await queryClient.invalidateQueries({
+        queryKey: ['admin-lesson-versions', effectiveSelectedLessonId],
+      });
       await queryClient.invalidateQueries({
         queryKey: ['admin-lesson-version-detail', version.id],
       });
@@ -271,42 +274,47 @@ export default function AdminContentPage() {
     },
   });
 
-  const tracks = tracksQuery.data?.items ?? [];
-
   return (
     <div className="page-shell-wide page-stack">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="page-title">Content Management</h1>
+          <h1 className="page-title">Content</h1>
           <p className="page-lead mt-1">
-            Moderate challenge submissions, manage lesson versions, and keep the curriculum release
-            flow auditable.
+            Manage lessons, challenge definitions, fixed-point values, and the review queue for
+            user-submitted content.
           </p>
         </div>
 
-        {activeTab === 'challenges' ? (
-          <Link href="/contributor">
+        {activeTab === 'review' ? (
+          <button
+            type="button"
+            onClick={() => setActiveTabOverride('challenges')}
+            className="inline-flex items-center justify-center rounded-lg border border-outline-variant bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition-colors hover:brightness-110"
+          >
+            Open Challenge Catalog
+          </button>
+        ) : activeTab === 'challenges' ? (
+          <button
+            type="button"
+            onClick={() => setActiveTabOverride('review')}
+            className="inline-flex items-center justify-center rounded-lg border border-outline-variant bg-primary px-4 py-2 text-sm font-semibold text-on-primary transition-colors hover:brightness-110"
+          >
+            Review Pending Drafts
+          </button>
+        ) : (
+          <Link href="/admin/rankings">
             <Button variant="primary" size="sm">
-              Open Contributor Drafts
+              Open Rankings
             </Button>
           </Link>
-        ) : (
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<span className="material-symbols-outlined text-sm">history_edu</span>}
-            onClick={() => setActiveTab(activeTab === 'tracks' ? 'lessons' : activeTab)}
-          >
-            {activeTab === 'tracks' ? 'Manage Versions' : 'Stay in Lesson Versions'}
-          </Button>
         )}
       </div>
 
       <div className="flex w-fit items-center gap-1 rounded-xl bg-surface-container-low p-1">
-        {(Object.keys(TAB_LABELS) as ContentTab[]).map((tab) => (
+        {CONTENT_TABS.map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => setActiveTabOverride(tab)}
             className={cn(
               'rounded-lg px-4 py-1.5 text-sm font-medium transition-all',
               activeTab === tab
@@ -319,35 +327,68 @@ export default function AdminContentPage() {
         ))}
       </div>
 
-      {activeTab === 'tracks' && (
+      {activeTab === 'challenges' && (
         <div className="space-y-3">
-          {tracksQuery.isLoading ? (
+          {publishedChallengesQuery.isLoading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((index) => (
-                <div key={index} className="h-20 animate-pulse rounded-xl bg-surface-container-low" />
+                <div key={index} className="h-28 animate-pulse rounded-xl bg-surface-container-low" />
               ))}
             </div>
-          ) : tracks.length === 0 ? (
+          ) : (publishedChallengesQuery.data ?? []).length === 0 ? (
             <div className="rounded-xl bg-surface-container-low p-10 text-center">
-              <p className="text-sm font-medium text-on-surface">No tracks yet</p>
+              <p className="text-sm font-medium text-on-surface">No published challenges yet</p>
             </div>
           ) : (
-            tracks.map((track) => (
+            (publishedChallengesQuery.data ?? []).map((challenge) => (
               <div
-                key={track.id}
-                className="flex items-center gap-4 rounded-xl bg-surface-container-low px-5 py-4"
+                key={challenge.id}
+                className="rounded-xl bg-surface-container-low px-5 py-4"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-3">
-                    <h3 className="text-sm font-semibold text-on-surface">{track.title}</h3>
-                    <DifficultyBadge difficulty={track.difficulty} />
-                    <StatusBadge status={track.isPublished ? 'published' : 'draft'} />
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-on-surface">{challenge.title}</h3>
+                      <DifficultyBadge difficulty={challenge.difficulty} />
+                      <StatusBadge status={challenge.status} />
+                      <Badge className="bg-primary/10 text-primary">
+                        {challenge.points} pts
+                      </Badge>
+                    </div>
+                    <p className="text-sm leading-6 text-on-surface-variant">
+                      {challenge.description}
+                    </p>
+                    <div className="mt-3 grid gap-2 text-xs text-on-surface-variant sm:grid-cols-2 lg:grid-cols-4">
+                      <p>
+                        <span className="text-on-surface">Track:</span> {challenge.trackTitle}
+                      </p>
+                      <p>
+                        <span className="text-on-surface">Lesson:</span> {challenge.lessonTitle}
+                      </p>
+                      <p>
+                        <span className="text-on-surface">Validator:</span>{' '}
+                        {challenge.validatorType ?? 'result_set'}
+                      </p>
+                      <p>
+                        <span className="text-on-surface">Version:</span> v
+                        {challenge.latestVersionNo ?? 1}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-on-surface-variant">
-                    <span>{track.lessonCount} lessons</span>
-                    {track.createdAt && (
-                      <span>Created {new Date(track.createdAt).toLocaleDateString()}</span>
-                    )}
+
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setActiveTabOverride('review')}
+                    >
+                      Open Review Queue
+                    </Button>
+                    <Link href="/admin/rankings">
+                      <Button variant="secondary" size="sm">
+                        View Rankings
+                      </Button>
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -370,7 +411,7 @@ export default function AdminContentPage() {
 
               <Select
                 label="Lesson"
-                value={selectedLessonId}
+                value={effectiveSelectedLessonId}
                 onChange={(event) => setSelectedLessonId(event.target.value)}
                 options={[
                   {
@@ -383,7 +424,7 @@ export default function AdminContentPage() {
             </CardHeader>
 
             <CardContent className="space-y-4 px-6 pb-6 pt-0">
-              {!selectedLessonId ? (
+              {!effectiveSelectedLessonId ? (
                 <div className="rounded-2xl bg-surface-container-low p-6 text-sm text-on-surface-variant">
                   Select a lesson to inspect its version history.
                 </div>
@@ -406,7 +447,7 @@ export default function AdminContentPage() {
                       onClick={() => setSelectedLessonVersionId(version.id)}
                       className={cn(
                         'w-full rounded-2xl border px-4 py-4 text-left transition-all',
-                        selectedLessonVersionId === version.id
+                        effectiveSelectedLessonVersionId === version.id
                           ? 'border-primary/30 bg-primary/10'
                           : 'border-outline-variant/10 bg-surface-container-low hover:bg-surface-container',
                       )}
@@ -497,7 +538,7 @@ export default function AdminContentPage() {
                   setLessonVersionForm((current) => ({ ...current, content: event.target.value }))
                 }
                 className="min-h-[220px]"
-                placeholder={'## Goal\n\nTeach learners how to filter and sort rows.'}
+                placeholder={'## Goal\n\nGuide users through filtering and sorting result sets.'}
               />
 
               <Textarea
@@ -516,7 +557,11 @@ export default function AdminContentPage() {
                 <Button
                   onClick={() => createLessonVersionMutation.mutate()}
                   loading={createLessonVersionMutation.isPending}
-                  disabled={!selectedLessonId || !lessonVersionForm.title.trim() || !lessonVersionForm.content.trim()}
+                  disabled={
+                    !effectiveSelectedLessonId ||
+                    !lessonVersionForm.title.trim() ||
+                    !lessonVersionForm.content.trim()
+                  }
                 >
                   Create Lesson Version
                 </Button>
@@ -533,7 +578,7 @@ export default function AdminContentPage() {
                   <div>
                     <h3 className="text-sm font-semibold text-on-surface">Lesson Preview</h3>
                     <p className="text-xs text-on-surface-variant">
-                      This is the learner-facing markdown for the next lesson version.
+                      This is the user-facing markdown for the next lesson version.
                     </p>
                   </div>
                 </div>
@@ -570,14 +615,15 @@ export default function AdminContentPage() {
         </div>
       )}
 
-      {activeTab === 'challenges' && (
+      {activeTab === 'review' && (
         <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <Card className="rounded-[28px] border border-outline-variant/10">
             <CardHeader className="flex-col items-start gap-2 px-6 py-5">
               <div>
                 <CardTitle>Challenge Review Queue</CardTitle>
                 <CardDescription className="mt-1">
-                  Only the latest unpublished contributor versions that still need moderation appear here.
+                  Only the latest unpublished user submissions that still need moderation appear
+                  here.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -601,7 +647,7 @@ export default function AdminContentPage() {
                     onClick={() => setSelectedChallengeId(challenge.id)}
                     className={cn(
                       'w-full rounded-2xl border px-4 py-4 text-left transition-all',
-                      selectedChallengeId === challenge.id
+                      effectiveSelectedChallengeId === challenge.id
                         ? 'border-primary/30 bg-primary/10'
                         : 'border-outline-variant/10 bg-surface-container-low hover:bg-surface-container',
                     )}
@@ -634,14 +680,14 @@ export default function AdminContentPage() {
               <div>
                 <CardTitle>Moderation Detail</CardTitle>
                 <CardDescription className="mt-1">
-                  Inspect the latest draft version, review the validator contract, then approve, request
-                  changes, or reject.
+                  Inspect the latest draft version, review the validator contract, then approve,
+                  request changes, or reject.
                 </CardDescription>
               </div>
             </CardHeader>
 
             <CardContent className="space-y-4 px-6 pb-6 pt-0">
-              {!selectedChallengeId ? (
+              {!effectiveSelectedChallengeId ? (
                 <div className="rounded-2xl bg-surface-container-low p-6 text-sm text-on-surface-variant">
                   Select a draft from the queue to inspect its latest version.
                 </div>
@@ -672,7 +718,7 @@ export default function AdminContentPage() {
 
                     <div className="grid gap-2 text-sm text-on-surface-variant sm:grid-cols-2">
                       <p>
-                        <span className="text-on-surface">Creator:</span>{' '}
+                        <span className="text-on-surface">Submitted by:</span>{' '}
                         {selectedChallengeSummary?.createdBy.displayName ??
                           selectedChallengeSummary?.createdBy.username ??
                           'Unknown'}
@@ -774,10 +820,11 @@ export default function AdminContentPage() {
                   </div>
 
                   <Textarea
+                    key={challengeDetailQuery.data.latestVersion.id}
+                    ref={reviewNoteRef}
                     label="Review Note"
-                    hint="This note is sent back to the contributor or stored with the approval."
-                    value={reviewNote}
-                    onChange={(event) => setReviewNote(event.target.value)}
+                    hint="This note is sent back to the submitting user or stored with the approval."
+                    defaultValue={challengeDetailQuery.data.latestVersion.reviewNotes ?? ''}
                     placeholder="Call out what to change or document why this version is approved."
                   />
 

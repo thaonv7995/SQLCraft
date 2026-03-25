@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   },
   challengesApi: {
     listReviewQueue: vi.fn(),
+    listPublished: vi.fn(),
     getDraft: vi.fn(),
     reviewVersion: vi.fn(),
   },
@@ -133,6 +134,8 @@ describe('AdminContentPage', () => {
       },
     ]);
 
+    mocks.challengesApi.listPublished.mockResolvedValue([]);
+
     mocks.challengesApi.getDraft.mockResolvedValue({
       id: 'challenge-1',
       lessonId: 'lesson-1',
@@ -241,7 +244,7 @@ describe('AdminContentPage', () => {
 
     renderAdminContentPage();
 
-    await user.click(screen.getByRole('button', { name: 'Challenges' }));
+    await user.click(screen.getByRole('button', { name: 'Review Queue' }));
 
     expect((await screen.findAllByText('Filter active users')).length).toBeGreaterThan(0);
 

@@ -13,25 +13,14 @@ function isAdminUser(user: User): boolean {
   return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
 }
 
-function canSeeContributorLink(user: User): boolean {
-  return (
-    user.role === 'contributor' ||
-    user.role === 'admin' ||
-    (user.roles?.includes('contributor') ?? false) ||
-    (user.roles?.includes('admin') ?? false)
-  );
-}
-
 function buildUserMenuItems(user: User) {
   const items: { href: string; label: string; icon: string }[] = [
     { href: '/profile', label: 'Profile', icon: 'person' },
     { href: '/settings', label: 'Settings', icon: 'settings' },
     { href: '/docs', label: 'Documentation', icon: 'menu_book' },
     { href: '/history', label: 'Query History', icon: 'history' },
+    { href: '/contributor', label: 'Submissions', icon: 'code' },
   ];
-  if (canSeeContributorLink(user)) {
-    items.push({ href: '/contributor', label: 'Contributor', icon: 'code' });
-  }
   if (isAdminUser(user)) {
     items.push({ href: '/admin', label: 'Admin Panel', icon: 'admin_panel_settings' });
   }
