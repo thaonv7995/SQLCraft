@@ -366,11 +366,10 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
                     artifactUrl: { type: 'string', format: 'uri' },
                   },
                 },
-                generateDerivedDatasets: { type: 'boolean', default: true },
+                generateDerivedDatasets: { type: 'boolean' },
                 status: {
                   type: 'string',
                   enum: ['draft', 'published', 'archived'],
-                  default: 'published',
                 },
               },
             },

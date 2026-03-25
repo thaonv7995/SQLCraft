@@ -36,6 +36,11 @@ const registerSchema = z
 
 type RegisterFormData = z.infer<typeof registerSchema>;
 
+function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
+  if (!user) return false;
+  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -64,7 +69,7 @@ export default function RegisterPage() {
       const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
       setAuth(hydratedUser, tokens);
       toast.success('Account created! Welcome to SQLCraft.');
-      router.push('/dashboard');
+      router.push(isAdminUser(hydratedUser) ? '/admin' : '/dashboard');
     } catch (err) {
       toastError('Registration failed', err);
     }

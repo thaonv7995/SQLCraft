@@ -20,6 +20,11 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
+function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
+  if (!user) return false;
+  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -39,7 +44,7 @@ export default function LoginPage() {
       const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
       setAuth(hydratedUser, tokens);
       toast.success('Welcome back!');
-      router.push('/dashboard');
+      router.push(isAdminUser(hydratedUser) ? '/admin' : '/dashboard');
     } catch (err) {
       toastError('Login failed', err);
     }

@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { sessionsApi, databasesApi, queryApi } from '@/lib/api';
 import type { LearningSession, UserStats } from '@/lib/api';
@@ -34,8 +36,20 @@ function leadCopy(stats: UserStats): string {
   return 'Open the Lab to run SQL and see your activity here.';
 }
 
+function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
+  if (!user) return false;
+  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
+}
+
 export default function DashboardPage() {
+  const router = useRouter();
   const { user } = useAuthStore();
+
+  useEffect(() => {
+    if (isAdminUser(user)) {
+      router.replace('/admin');
+    }
+  }, [router, user]);
 
   const { data: sessions } = useQuery({
     queryKey: ['sessions'],
@@ -73,6 +87,10 @@ export default function DashboardPage() {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  if (isAdminUser(user)) {
+    return null;
+  }
 
   return (
     <div className="page-shell page-stack">

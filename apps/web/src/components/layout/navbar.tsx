@@ -112,6 +112,7 @@ export function Navbar() {
   const { user, isAuthenticated } = useAuthStore();
   const mounted = useMounted();
   const authed = mounted && isAuthenticated();
+  const homeHref = authed && user && isAdminUser(user) ? '/admin' : authed ? '/dashboard' : '/';
 
   return (
     <nav
@@ -120,7 +121,7 @@ export function Navbar() {
     >
       {/* Brand — điều hướng chi tiết ở sidebar / bottom nav */}
       <Link
-        href={authed ? '/dashboard' : '/'}
+        href={homeHref}
         className="flex min-w-0 shrink-0 items-center gap-2.5"
       >
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-outline-variant/40 bg-surface-container-high">
