@@ -1,5 +1,13 @@
 import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { queryApi } from '@/lib/api';
+import {
+  DEFAULT_LAB_QUERY,
+  buildNextEditorTabName,
+  createDefaultLabEditorState,
+  createLabEditorTab,
+  type LabEditorTab,
+} from '@/lib/lab-editor-tabs';
 import type {
   DatasetScale,
   LearningSession,
@@ -14,7 +22,15 @@ interface LabState {
   setSession: (session: LearningSession | null) => void;
 
   // SQL editor
+  editorTabs: LabEditorTab[];
+  activeEditorTabId: string;
+  currentEditorTabName: string;
   currentQuery: string;
+  hydrateEditorTabs: (tabs: LabEditorTab[], activeTabId?: string) => void;
+  setActiveEditorTab: (tabId: string) => void;
+  addEditorTab: () => void;
+  renameEditorTab: (tabId: string, name: string) => void;
+  closeEditorTab: (tabId: string) => void;
   setQuery: (sql: string) => void;
 
   // Dataset scale context
@@ -47,7 +63,29 @@ interface LabState {
   resetResults: () => void;
 }
 
-export const useLabStore = create<LabState>()((set, get) => ({
+function deriveEditorState(
+  tabs: LabEditorTab[],
+  requestedActiveTabId?: string,
+): Pick<LabState, 'editorTabs' | 'activeEditorTabId' | 'currentEditorTabName' | 'currentQuery'> {
+  const fallback = createDefaultLabEditorState(DEFAULT_LAB_QUERY);
+  const nextTabs = tabs.length > 0 ? tabs : fallback.tabs;
+  const activeTab =
+    nextTabs.find((tab) => tab.id === requestedActiveTabId) ??
+    nextTabs[0] ??
+    fallback.tabs[0];
+
+  return {
+    editorTabs: nextTabs,
+    activeEditorTabId: activeTab.id,
+    currentEditorTabName: activeTab.name,
+    currentQuery: activeTab.sql,
+  };
+}
+
+const defaultEditorState = createDefaultLabEditorState(DEFAULT_LAB_QUERY);
+
+export const useLabStore = create<LabState>()(
+  subscribeWithSelector((set, get) => ({
   session: null,
   setSession: (session) =>
     set({
@@ -63,8 +101,70 @@ export const useLabStore = create<LabState>()((set, get) => ({
             : null,
     }),
 
-  currentQuery: '-- Welcome to SQLCraft!\n-- Start writing your SQL query here...\n\nSELECT * FROM employees LIMIT 10;',
-  setQuery: (sql) => set({ currentQuery: sql }),
+  ...deriveEditorState(defaultEditorState.tabs, defaultEditorState.activeTabId),
+  hydrateEditorTabs: (tabs, activeTabId) =>
+    set(deriveEditorState(tabs, activeTabId)),
+  setActiveEditorTab: (tabId) =>
+    set((state) => deriveEditorState(state.editorTabs, tabId)),
+  addEditorTab: () =>
+    set((state) => {
+      const tab = createLabEditorTab({
+        name: buildNextEditorTabName(state.editorTabs),
+        sql: '',
+      });
+      return deriveEditorState([...state.editorTabs, tab], tab.id);
+    }),
+  renameEditorTab: (tabId, name) =>
+    set((state) => {
+      const nextName = name.trim();
+      if (!nextName) {
+        return state;
+      }
+
+      return deriveEditorState(
+        state.editorTabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                name: nextName,
+              }
+            : tab,
+        ),
+        state.activeEditorTabId,
+      );
+    }),
+  closeEditorTab: (tabId) =>
+    set((state) => {
+      if (state.editorTabs.length <= 1) {
+        return state;
+      }
+
+      const tabIndex = state.editorTabs.findIndex((tab) => tab.id === tabId);
+      if (tabIndex < 0) {
+        return state;
+      }
+
+      const nextTabs = state.editorTabs.filter((tab) => tab.id !== tabId);
+      const nextActiveTabId =
+        state.activeEditorTabId === tabId
+          ? nextTabs[Math.max(0, tabIndex - 1)]?.id ?? nextTabs[0].id
+          : state.activeEditorTabId;
+
+      return deriveEditorState(nextTabs, nextActiveTabId);
+    }),
+  setQuery: (sql) =>
+    set((state) => {
+      const nextTabs = state.editorTabs.map((tab) =>
+        tab.id === state.activeEditorTabId
+          ? {
+              ...tab,
+              sql,
+              updatedAt: Date.now(),
+            }
+          : tab,
+      );
+      return deriveEditorState(nextTabs, state.activeEditorTabId);
+    }),
 
   sourceScale: null,
   selectedScale: null,
@@ -143,4 +243,4 @@ export const useLabStore = create<LabState>()((set, get) => ({
       activeTab: 'results',
     });
   },
-}));
+})));

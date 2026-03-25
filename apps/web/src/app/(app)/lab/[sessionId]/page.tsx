@@ -39,6 +39,12 @@ import {
 import { SqlEditor } from '@/components/ui/sql-editor';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
+import {
+  createDefaultLabEditorState,
+  readLabEditorState,
+  writeLabEditorState,
+  type LabEditorTab,
+} from '@/lib/lab-editor-tabs';
 
 function sessionIdFromParams(params: { sessionId?: string | string[] }): string {
   const raw = params.sessionId;
@@ -151,6 +157,122 @@ function DatasetScaleSelector({
 
 // ─── SQL Editor (CodeMirror 6) ────────────────────────────────────────────────
 
+function EditorTabsBar() {
+  const editorTabs = useLabStore((state) => state.editorTabs);
+  const activeEditorTabId = useLabStore((state) => state.activeEditorTabId);
+  const addEditorTab = useLabStore((state) => state.addEditorTab);
+  const setActiveEditorTab = useLabStore((state) => state.setActiveEditorTab);
+  const renameEditorTab = useLabStore((state) => state.renameEditorTab);
+  const closeEditorTab = useLabStore((state) => state.closeEditorTab);
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [draftTabName, setDraftTabName] = useState('');
+
+  useEffect(() => {
+    if (editingTabId && !editorTabs.some((tab) => tab.id === editingTabId)) {
+      setEditingTabId(null);
+      setDraftTabName('');
+    }
+  }, [editingTabId, editorTabs]);
+
+  const beginRename = useCallback((tab: LabEditorTab) => {
+    setEditingTabId(tab.id);
+    setDraftTabName(tab.name);
+  }, []);
+
+  const stopRenaming = useCallback(() => {
+    setEditingTabId(null);
+    setDraftTabName('');
+  }, []);
+
+  const commitRename = useCallback(
+    (tabId: string) => {
+      const nextName = draftTabName.trim();
+      if (nextName) {
+        renameEditorTab(tabId, nextName);
+      }
+      stopRenaming();
+    },
+    [draftTabName, renameEditorTab, stopRenaming],
+  );
+
+  return (
+    <div className="flex min-w-0 flex-1 items-stretch overflow-hidden">
+      <div className="scrollbar-none flex min-w-0 flex-1 items-stretch overflow-x-auto">
+        {editorTabs.map((tab) => {
+          const isActive = tab.id === activeEditorTabId;
+          const isEditing = tab.id === editingTabId;
+          const canClose = editorTabs.length > 1;
+
+          return (
+            <div
+              key={tab.id}
+              className={cn(
+                'group flex shrink-0 items-center gap-1 border-r border-outline-variant/10 px-2 py-2 transition-colors',
+                isActive ? 'bg-surface-container text-on-surface' : 'bg-surface-container-low/60 text-on-surface-variant',
+              )}
+            >
+              {isEditing ? (
+                <input
+                  value={draftTabName}
+                  onChange={(event) => setDraftTabName(event.target.value)}
+                  onBlur={() => commitRename(tab.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      commitRename(tab.id);
+                    }
+
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      stopRenaming();
+                    }
+                  }}
+                  autoFocus
+                  className="w-36 rounded border border-outline-variant/20 bg-surface px-2 py-1 font-mono text-xs text-on-surface outline-none focus:border-primary/40"
+                  aria-label="Rename SQL tab"
+                />
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setActiveEditorTab(tab.id)}
+                    onDoubleClick={() => beginRename(tab)}
+                    className="max-w-40 truncate font-mono text-xs"
+                    title={`${tab.name} · Double-click to rename`}
+                  >
+                    {tab.name}
+                  </button>
+                  {canClose ? (
+                    <button
+                      type="button"
+                      onClick={() => closeEditorTab(tab.id)}
+                      className="rounded p-0.5 text-outline transition-colors hover:text-on-surface"
+                      title="Close tab"
+                      aria-label={`Close ${tab.name}`}
+                    >
+                      <span className="material-symbols-outlined text-sm">close</span>
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => addEditorTab()}
+        className="shrink-0 border-l border-outline-variant/10 px-3 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
+        title="Add SQL tab"
+        aria-label="Add SQL tab"
+      >
+        <span className="material-symbols-outlined text-lg">add</span>
+      </button>
+    </div>
+  );
+}
+
 function SqlEditorPanel({
   onFormat,
   onCopy,
@@ -158,7 +280,8 @@ function SqlEditorPanel({
   onFormat: () => void;
   onCopy: () => void;
 }) {
-  const { currentQuery, setQuery } = useLabStore();
+  const currentQuery = useLabStore((state) => state.currentQuery);
+  const setQuery = useLabStore((state) => state.setQuery);
   const params = useParams<{ sessionId?: string | string[] }>();
   const sessionId = sessionIdFromParams(params);
   const { mutate: executeQuery } = useExecuteQuery();
@@ -1066,7 +1189,11 @@ export default function LabPage() {
     queryHistory,
     results,
     error,
+    editorTabs,
+    activeEditorTabId,
+    currentEditorTabName,
     currentQuery,
+    hydrateEditorTabs,
     setQuery,
     selectedScale,
     sourceScale,
@@ -1243,16 +1370,63 @@ export default function LabPage() {
     },
   });
 
+  const [hydratedEditorSessionId, setHydratedEditorSessionId] = useState<string | null>(null);
+  const [hasPersistedEditorTabs, setHasPersistedEditorTabs] = useState(false);
+
   useEffect(() => {
+    if (!sessionId) {
+      setHydratedEditorSessionId(null);
+      setHasPersistedEditorTabs(false);
+      return;
+    }
+
+    const persistedEditorState = readLabEditorState(sessionId);
+    setHasPersistedEditorTabs(Boolean(persistedEditorState));
+
+    if (persistedEditorState) {
+      hydrateEditorTabs(persistedEditorState.tabs, persistedEditorState.activeTabId);
+    } else {
+      const defaultEditorState = createDefaultLabEditorState();
+      hydrateEditorTabs(defaultEditorState.tabs, defaultEditorState.activeTabId);
+    }
+
+    setHydratedEditorSessionId(sessionId);
+  }, [hydrateEditorTabs, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || hydratedEditorSessionId !== sessionId) {
+      return;
+    }
+
+    writeLabEditorState(sessionId, {
+      tabs: editorTabs,
+      activeTabId: activeEditorTabId,
+    });
+  }, [activeEditorTabId, editorTabs, hydratedEditorSessionId, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || hydratedEditorSessionId !== sessionId) {
+      return;
+    }
+
     const bootstrap = readLabBootstrap(sessionId);
 
-    if (!bootstrap || bootstrap.starterQueryConsumed || !bootstrap.starterQuery?.trim()) {
+    if (!bootstrap) {
+      return;
+    }
+
+    if (hasPersistedEditorTabs) {
+      markLabBootstrapConsumed(sessionId);
+      return;
+    }
+
+    if (bootstrap.starterQueryConsumed || !bootstrap.starterQuery?.trim()) {
       return;
     }
 
     setQuery(bootstrap.starterQuery);
     markLabBootstrapConsumed(sessionId);
-  }, [sessionId, setQuery]);
+  }, [hasPersistedEditorTabs, hydratedEditorSessionId, sessionId, setQuery]);
 
   // Global keyboard shortcut: Ctrl+Enter to execute (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
@@ -1514,13 +1688,19 @@ export default function LabPage() {
           style={{ width: `${leftWidth}%` }}
         >
           <div className="flex items-center border-b border-outline-variant/10 bg-surface-container-low/80">
-            <div className="flex items-center gap-2 border-r border-outline-variant/10 bg-surface-container px-4 py-2">
+            <div className="flex shrink-0 items-center gap-2 border-r border-outline-variant/10 bg-surface-container px-4 py-2">
               <span className="material-symbols-outlined text-base text-tertiary" style={{ fontVariationSettings: "'FILL' 1" }}>
                 terminal
               </span>
-              <span className="font-mono text-xs text-on-surface">query.sql</span>
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-outline">
+                SQL
+              </span>
             </div>
+            <EditorTabsBar />
             <div className="ml-auto flex items-center gap-2 px-3">
+              <span className="hidden max-w-40 truncate font-mono text-[10px] uppercase text-outline lg:inline">
+                {currentEditorTabName}
+              </span>
               <span className="font-mono text-[10px] uppercase text-outline">
                 {currentQuery.split('\n').length} lines
               </span>
