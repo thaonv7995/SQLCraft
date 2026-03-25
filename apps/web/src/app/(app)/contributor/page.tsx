@@ -344,13 +344,13 @@ export default function ContributorPage() {
     <div className="page-shell page-stack">
       <section className="flex flex-col gap-5 rounded-[28px] border border-outline-variant/10 bg-surface-container-low px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.24em] text-outline">Challenge submissions</p>
+          <p className="text-xs uppercase tracking-[0.24em] text-outline">Submissions workspace</p>
           <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface">
-            Manage Challenge Drafts
+            Manage Submission Drafts
           </h1>
           <p className="max-w-3xl text-base leading-7 text-on-surface-variant">
-            {displayName}, draft in markdown, run SQL preflight before submitting, and iterate on
-            the latest review note in one workspace.
+            {displayName}, prepare challenge drafts, run SQL preflight before submitting, and
+            iterate on the latest review note in one workspace.
           </p>
         </div>
 
@@ -762,9 +762,9 @@ export default function ContributorPage() {
           <CardHeader className="flex-col items-start gap-2 px-6 py-5">
             <div>
               <CardTitle>My Challenge Submissions</CardTitle>
-              <CardDescription className="mt-1">
-                Open any draft to revise the latest version and inspect the newest review note.
-              </CardDescription>
+          <CardDescription className="mt-1">
+            Open any draft to revise the latest version and inspect the newest review note.
+          </CardDescription>
             </div>
           </CardHeader>
           <CardContent className="px-0 pb-2 pt-0">

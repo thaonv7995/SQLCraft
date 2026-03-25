@@ -112,9 +112,9 @@ export default function TrackDetailPage() {
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-3xl text-outline">route</span>
               <div>
-                <h1 className="font-headline text-xl font-semibold text-on-surface">Track unavailable</h1>
+                <h1 className="font-headline text-xl font-semibold text-on-surface">Collection unavailable</h1>
                 <p className="mt-1 text-sm text-on-surface-variant">
-                  {error instanceof Error ? error.message : 'This track could not be loaded.'}
+                  {error instanceof Error ? error.message : 'This collection could not be loaded.'}
                 </p>
               </div>
             </div>
@@ -123,7 +123,7 @@ export default function TrackDetailPage() {
                 Try again
               </Button>
               <Button variant="secondary" onClick={() => router.push('/tracks')}>
-                Back to tracks
+                Back to collections
               </Button>
             </div>
           </CardContent>
@@ -158,7 +158,7 @@ export default function TrackDetailPage() {
         className="inline-flex w-fit items-center gap-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
       >
         <span className="material-symbols-outlined text-base">arrow_back</span>
-        Back to tracks
+        Back to collections
       </Link>
 
       <Card className="overflow-hidden rounded-[1.75rem] border border-outline-variant/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0.01))]">
@@ -168,24 +168,25 @@ export default function TrackDetailPage() {
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <DifficultyBadge difficulty={track.difficulty} />
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
-                  {lessons.length} lessons
+                  {lessons.length} practice set{lessons.length === 1 ? '' : 's'}
                 </span>
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
                   {formatMinutes(totalMinutes)}
                 </span>
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
-                  {totalChallenges > 0 ? `${totalChallenges} optional challenges` : 'Lesson-first path'}
+                  {totalChallenges > 0 ? `${totalChallenges} optional challenges` : 'Guide-first collection'}
                 </span>
               </div>
               <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface sm:text-4xl">
                 {track.title}
               </h1>
               <p className="mt-3 max-w-2xl text-[15px] leading-7 text-on-surface-variant">
-                {track.description || 'Open each lesson to read the guide, then launch the SQL lab with the lesson starter query.'}
+                {track.description ||
+                  'Open each practice set to read the guide, then launch the SQL lab with the related starter query.'}
               </p>
               <div className="mt-5 max-w-xl space-y-2">
                 <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant">
-                  <span>{completedLessons} of {lessons.length} lessons completed</span>
+                  <span>{completedLessons} of {lessons.length} practice sets completed</span>
                   <span>{progressPercent}%</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-surface-container-high">
@@ -204,7 +205,7 @@ export default function TrackDetailPage() {
                   {resumableLessonSessions.length > 0 ? (
                     <span className="inline-flex items-center gap-1">
                       <span className="material-symbols-outlined text-sm">terminal</span>
-                      {resumableLessonSessions.length} lesson lab{resumableLessonSessions.length > 1 ? 's' : ''} in progress
+                      {resumableLessonSessions.length} active lab session{resumableLessonSessions.length > 1 ? 's' : ''}
                     </span>
                   ) : null}
                 </div>
@@ -213,13 +214,13 @@ export default function TrackDetailPage() {
 
             <div className="grid grid-cols-2 gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 sm:min-w-72 lg:grid-cols-4">
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-outline">Published lessons</p>
+                <p className="text-[11px] uppercase tracking-wider text-outline">Published sets</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
                   {publishedLessons}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-wider text-outline">Learning path</p>
+                <p className="text-[11px] uppercase tracking-wider text-outline">Collection size</p>
                 <p className="mt-1 font-headline text-2xl font-semibold text-on-surface">
                   {lessons.length}
                 </p>
@@ -244,9 +245,9 @@ export default function TrackDetailPage() {
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="font-headline text-xl font-semibold text-on-surface">Lessons</h2>
+            <h2 className="font-headline text-xl font-semibold text-on-surface">Practice Sets</h2>
             <p className="mt-1 text-sm text-on-surface-variant">
-              Read the lesson first. Practice starts from the lesson page, not directly from the track.
+              Open the practice set first. Practice starts from the set page, not directly from the collection.
             </p>
           </div>
         </div>
@@ -254,7 +255,7 @@ export default function TrackDetailPage() {
         {lessons.length === 0 ? (
           <Card className="rounded-2xl border border-dashed border-outline-variant/20">
             <CardContent className="py-8 text-center text-sm text-on-surface-variant">
-              No published lessons are attached to this track yet.
+              No published practice sets are attached to this collection yet.
             </CardContent>
           </Card>
         ) : (
@@ -296,7 +297,7 @@ export default function TrackDetailPage() {
                             <DifficultyBadge difficulty={lesson.difficulty} />
                           </div>
                           <p className="mt-2 text-sm leading-6 text-on-surface-variant">
-                            {lesson.description || 'Open this lesson to read the guide and launch the lab.'}
+                            {lesson.description || 'Open this practice set to read the guide and launch the lab.'}
                           </p>
                           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-on-surface-variant">
                             <span className="inline-flex items-center gap-1">
@@ -305,7 +306,7 @@ export default function TrackDetailPage() {
                             </span>
                             <span className="inline-flex items-center gap-1">
                               <span className="material-symbols-outlined text-sm">article</span>
-                              Markdown lesson
+                              Markdown guide
                             </span>
                             {challengeCount > 0 && (
                               <span className="inline-flex items-center gap-1">
@@ -344,7 +345,7 @@ export default function TrackDetailPage() {
                             </span>
                           }
                         >
-                          {isAvailable ? 'Open lesson' : 'Coming soon'}
+                          {isAvailable ? 'Open practice set' : 'Coming soon'}
                         </Button>
                       </div>
                     </div>

@@ -93,7 +93,7 @@ export default function LessonPage() {
   const isLoading = trackLoading || lessonLoading || (Boolean(lesson?.publishedVersionId) && versionLoading);
   const error = lessonError ?? versionError;
 
-  const lessonTitle = lessonVersion?.lesson?.title ?? lesson?.title ?? 'Lesson';
+  const lessonTitle = lessonVersion?.lesson?.title ?? lesson?.title ?? 'Practice Set';
   const estimatedMinutes = lessonVersion?.lesson?.estimatedMinutes ?? lesson?.estimatedMinutes ?? 0;
   const challengeCount = lessonVersion?.challenges.length ?? 0;
   const starterQuery = lessonVersion?.starterQuery?.trim() ?? '';
@@ -110,9 +110,9 @@ export default function LessonPage() {
     : -1;
   const lessonOrderLabel = lesson
     ? lessonIndex >= 0 && orderedTrackLessons.length > 0
-      ? `Lesson ${lessonIndex + 1} of ${orderedTrackLessons.length}`
+      ? `Practice set ${lessonIndex + 1} of ${orderedTrackLessons.length}`
       : lesson.sortOrder > 0
-        ? `Lesson ${lesson.sortOrder}`
+        ? `Practice set ${lesson.sortOrder}`
         : null
     : null;
   const resumableLessonSession =
@@ -132,7 +132,7 @@ export default function LessonPage() {
 
   const handleStartLab = async () => {
     if (!lessonVersion) {
-      toast.error('This lesson is not published yet');
+      toast.error('This practice set is not published yet');
       return;
     }
 
@@ -184,7 +184,7 @@ export default function LessonPage() {
           className="inline-flex w-fit items-center gap-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
         >
           <span className="material-symbols-outlined text-base">arrow_back</span>
-          Back to track
+          Back to collection
         </Link>
 
         <Card className="rounded-2xl">
@@ -192,9 +192,9 @@ export default function LessonPage() {
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-3xl text-outline">menu_book</span>
               <div>
-                <CardTitle>Lesson unavailable</CardTitle>
+                <CardTitle>Practice set unavailable</CardTitle>
                 <CardDescription className="mt-1">
-                  {error instanceof Error ? error.message : 'This lesson could not be loaded.'}
+                  {error instanceof Error ? error.message : 'This practice set could not be loaded.'}
                 </CardDescription>
               </div>
             </div>
@@ -203,7 +203,7 @@ export default function LessonPage() {
                 Try again
               </Button>
               <Button variant="secondary" onClick={() => router.push(`/tracks/${params.trackId}`)}>
-                Back to track
+                Back to collection
               </Button>
             </div>
           </CardContent>
@@ -219,7 +219,7 @@ export default function LessonPage() {
         className="inline-flex w-fit items-center gap-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
       >
         <span className="material-symbols-outlined text-base">arrow_back</span>
-        {track?.title ? `Back to ${track.title}` : 'Back to track'}
+        {track?.title ? `Back to ${track.title}` : 'Back to collection'}
       </Link>
 
       <Card className="overflow-hidden rounded-[1.75rem] border border-outline-variant/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0.01))]">
@@ -237,14 +237,15 @@ export default function LessonPage() {
                   {formatMinutes(estimatedMinutes)}
                 </span>
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
-                  {challengeCount > 0 ? `${challengeCount} optional challenges` : 'Content entry'}
+                  {challengeCount > 0 ? `${challengeCount} optional challenges` : 'Guide entry'}
                 </span>
               </div>
               <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface sm:text-4xl">
                 {lessonTitle}
               </h1>
               <p className="mt-3 max-w-2xl text-[15px] leading-7 text-on-surface-variant">
-                {lesson.description || 'Review the content and SQL examples, then launch the lab with the starter query preloaded.'}
+                {lesson.description ||
+                  'Review the guide and SQL examples, then launch the lab with the starter query preloaded.'}
               </p>
             </div>
 
@@ -286,7 +287,7 @@ export default function LessonPage() {
                 fullWidth
                 onClick={() => router.push(`/tracks/${params.trackId}`)}
               >
-                View all lessons
+                View all practice sets
               </Button>
               {resumeActivityLabel ? (
                 <p className="max-w-64 text-xs leading-5 text-on-surface-variant">
@@ -305,7 +306,7 @@ export default function LessonPage() {
               <LessonMarkdown content={lessonVersion.content} />
             ) : (
               <div className="flex min-h-60 items-center justify-center rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-6 text-center text-sm text-on-surface-variant">
-                This lesson is published without a content body yet.
+                This practice set is published without a guide body yet.
               </div>
             )}
           </CardContent>
@@ -318,7 +319,7 @@ export default function LessonPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="rounded-xl bg-surface-container-high p-3">
-                <p className="font-medium text-on-surface">1. Review the content</p>
+                <p className="font-medium text-on-surface">1. Review the guide</p>
                 <p className="mt-1 text-on-surface-variant">
                   Check the markdown content and SQL examples before opening the sandbox.
                 </p>
@@ -365,7 +366,7 @@ export default function LessonPage() {
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
-                  This lesson starts with a blank editor. You can still launch the lab and write the first query from scratch.
+                  This practice set starts with a blank editor. You can still launch the lab and write the first query from scratch.
                 </div>
               )}
 
@@ -381,7 +382,7 @@ export default function LessonPage() {
             <CardHeader>
               <CardTitle>Schema Context</CardTitle>
               <CardDescription>
-                Database shape bundled with this lesson version.
+                Database shape bundled with this practice set version.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -396,7 +397,7 @@ export default function LessonPage() {
                   </div>
                   <p className="text-sm leading-6 text-on-surface-variant">
                     {lessonVersion.schemaTemplate.description ||
-                      'This lesson uses a published schema template without an extra description yet.'}
+                      'This practice set uses a published schema template without an extra description yet.'}
                   </p>
                   <div className="rounded-xl bg-surface-container-high p-3">
                     <p className="text-[11px] uppercase tracking-wider text-outline">
@@ -428,7 +429,7 @@ export default function LessonPage() {
                 </>
               ) : (
                 <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
-                  No schema template is linked to this lesson version yet.
+                  No schema template is linked to this practice set version yet.
                 </div>
               )}
             </CardContent>
@@ -436,7 +437,7 @@ export default function LessonPage() {
 
           <Card className="rounded-2xl border border-outline-variant/10">
             <CardHeader>
-              <CardTitle>Practice After This Lesson</CardTitle>
+              <CardTitle>Practice After This Set</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {lessonVersion?.challenges.length ? (
@@ -466,7 +467,7 @@ export default function LessonPage() {
                 ))
               ) : (
                 <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
-                  No optional challenges are attached to this lesson yet.
+                  No optional challenges are attached to this practice set yet.
                 </div>
               )}
             </CardContent>

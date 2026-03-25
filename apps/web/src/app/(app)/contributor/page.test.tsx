@@ -208,7 +208,7 @@ describe('ContributorPage', () => {
     renderContributorPage();
 
     expect(
-      await screen.findByRole('heading', { name: /manage challenge drafts/i }),
+      await screen.findByRole('heading', { name: /manage submission drafts/i }),
     ).toBeInTheDocument();
     expect(await screen.findByText('Filter active users')).toBeInTheDocument();
     expect(
@@ -259,7 +259,7 @@ describe('ContributorPage', () => {
     });
   });
 
-  it('loads an existing draft and submits a new version when the contributor edits it', async () => {
+  it('loads an existing draft and submits a new version when the user edits it', async () => {
     const user = userEvent.setup();
 
     renderContributorPage();

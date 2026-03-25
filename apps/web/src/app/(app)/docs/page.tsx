@@ -87,7 +87,7 @@ export default function DocsPage() {
       <div className="rounded-xl border border-dashed border-outline-variant/25 bg-surface-container-low/50 p-5 text-sm text-on-surface-variant">
         <p>
           Cần hỗ trợ về challenge drafts? Mở{' '}
-          <Link href="/contributor" className="font-medium text-on-surface underline-offset-2 hover:underline">
+          <Link href="/submissions" className="font-medium text-on-surface underline-offset-2 hover:underline">
             Submissions
           </Link>
           {' '}hoặc liên hệ quản trị qua menu tài khoản nếu bạn cần hỗ trợ hệ thống.
