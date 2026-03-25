@@ -775,7 +775,7 @@ export interface SessionSchemaTable {
 }
 
 export interface SessionSchemaResponse {
-  schemaTemplateId: string;
+  schemaTemplateId?: string;
   tables: SessionSchemaTable[];
 }
 
@@ -846,9 +846,11 @@ export interface Database {
   sourceRowCount?: number;
   tableCount: number;
   estimatedSizeGb: number;
+  schemaTemplateId?: string;
   sourceScale?: DatasetScale | null;
   selectedScale?: DatasetScale | null;
   availableScales?: DatasetScale[];
+  availableScaleMetadata?: Array<{ scale: DatasetScale; rowCount: number }>;
   region?: string;
   uptime?: number;
   isAvailable?: boolean;
@@ -1716,7 +1718,13 @@ export const adminApi = {
 // ─── Databases API ────────────────────────────────────────────────────────────
 
 export const databasesApi = {
-  list: (params?: { domain?: string; scale?: string; difficulty?: string }) =>
+  list: (params?: {
+    domain?: string;
+    scale?: string;
+    difficulty?: string;
+    page?: number;
+    limit?: number;
+  }) =>
     api
       .get<PaginatedResponse<Database>>('/databases', { params })
       .then((r) => ({

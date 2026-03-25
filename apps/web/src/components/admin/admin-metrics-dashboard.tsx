@@ -87,7 +87,7 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
     {
       label: 'Review SQL Imports',
       icon: 'upload_file',
-      href: '/admin/databases?tab=sql-imports',
+      href: '/admin/databases?view=import',
       variant: 'secondary',
     },
     {
