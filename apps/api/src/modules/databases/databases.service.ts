@@ -35,7 +35,6 @@ interface SchemaDefinition {
 
 type SchemaTemplateRow = typeof dbSchema.schemaTemplates.$inferSelect;
 type DatasetTemplateRow = typeof dbSchema.datasetTemplates.$inferSelect;
-type LessonVersionRow = typeof dbSchema.lessonVersions.$inferSelect;
 
 const DOMAIN_ICONS: Record<DatabaseDomain, string> = {
   ecommerce: 'storefront',
@@ -301,24 +300,6 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
   );
 }
 
-async function findPublishedLessonVersionForSchema(
-  schemaTemplateId: string,
-): Promise<LessonVersionRow | null> {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(dbSchema.lessonVersions)
-    .where(
-      and(
-        eq(dbSchema.lessonVersions.schemaTemplateId, schemaTemplateId),
-        eq(dbSchema.lessonVersions.isPublished, true),
-      ),
-    )
-    .orderBy(asc(dbSchema.lessonVersions.createdAt))
-    .limit(1);
-  return row ?? null;
-}
-
 async function findDatasetForSchema(
   schemaTemplateId: string,
   requestedScale: DatabaseScale,
@@ -403,12 +384,6 @@ export async function createDatabaseSession(
     );
   }
 
-  const lessonVersion = await findPublishedLessonVersionForSchema(database.schemaTemplateId);
-
-  if (!lessonVersion) {
-    throw new NotFoundError('No published lesson version is linked to this database');
-  }
-
   const datasetTemplate = await findDatasetForSchema(database.schemaTemplateId, requestedScale);
   if (!datasetTemplate) {
     throw new ValidationError(
@@ -423,7 +398,7 @@ export async function createDatabaseSession(
 
   const session = await sessionsRepository.createSession({
     userId,
-    lessonVersionId: lessonVersion.id,
+    lessonVersionId: null,
     challengeVersionId: null,
     status: 'provisioning',
   });

@@ -88,16 +88,36 @@ function sandboxConnStr(host: string, dbName: string, port = 5432): string {
   return `postgresql://${sandboxUser}:${sandboxPassword}@${host}:${port}/${dbName}`;
 }
 
+function stripInlinePrimaryKey(type: string): string {
+  return type.replace(/\bPRIMARY\s+KEY\b/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 /** Generate CREATE TABLE DDL from a parsed schema definition */
 function buildCreateTableDdl(
   tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>,
 ): string[] {
-  return tables.map(
-    (t) =>
-      `CREATE TABLE IF NOT EXISTS "${t.name}" (\n` +
-      t.columns.map((c) => `  "${c.name}" ${c.type}`).join(',\n') +
-      '\n);',
-  );
+  return tables.map((table) => {
+    const primaryKeyColumns = table.columns
+      .filter((column) => /\bPRIMARY\s+KEY\b/i.test(column.type))
+      .map((column) => column.name);
+
+    const columnDefinitions = table.columns.map((column) => {
+      const normalizedType =
+        primaryKeyColumns.length > 0 ? stripInlinePrimaryKey(column.type) : column.type;
+      return `  "${column.name}" ${normalizedType}`;
+    });
+
+    const tableConstraints =
+      primaryKeyColumns.length > 0
+        ? [`  PRIMARY KEY (${primaryKeyColumns.map((column) => `"${column}"`).join(', ')})`]
+        : [];
+
+    return (
+      `CREATE TABLE IF NOT EXISTS "${table.name}" (\n` +
+      [...columnDefinitions, ...tableConstraints].join(',\n') +
+      '\n);'
+    );
+  });
 }
 
 async function applySchemaAndDataset(params: {

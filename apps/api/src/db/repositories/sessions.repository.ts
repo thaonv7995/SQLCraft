@@ -95,7 +95,15 @@ export class SessionsRepository {
   async findByUserId(
     userId: string,
     limit = 20,
-  ): Promise<Array<SessionRow & { sandboxStatus: string | null; lessonTitle: string | null }>> {
+  ): Promise<
+    Array<
+      SessionRow & {
+        sandboxStatus: string | null;
+        lessonTitle: string | null;
+        schemaTemplateName: string | null;
+      }
+    >
+  > {
     const rows = await this.db
       .select({
         id: schema.learningSessions.id,
@@ -109,6 +117,7 @@ export class SessionsRepository {
         createdAt: schema.learningSessions.createdAt,
         sandboxStatus: schema.sandboxInstances.status,
         lessonTitle: schema.lessons.title,
+        schemaTemplateName: schema.schemaTemplates.name,
       })
       .from(schema.learningSessions)
       .leftJoin(
@@ -120,11 +129,21 @@ export class SessionsRepository {
         eq(schema.lessonVersions.id, schema.learningSessions.lessonVersionId),
       )
       .leftJoin(schema.lessons, eq(schema.lessons.id, schema.lessonVersions.lessonId))
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.schemaTemplates.id, schema.sandboxInstances.schemaTemplateId),
+      )
       .where(eq(schema.learningSessions.userId, userId))
       .orderBy(desc(schema.learningSessions.startedAt))
       .limit(limit);
 
-    return rows as Array<SessionRow & { sandboxStatus: string | null; lessonTitle: string | null }>;
+    return rows as Array<
+      SessionRow & {
+        sandboxStatus: string | null;
+        lessonTitle: string | null;
+        schemaTemplateName: string | null;
+      }
+    >;
   }
 
   async expireSandboxBySessionId(sessionId: string): Promise<void> {
@@ -180,6 +199,16 @@ export class SessionsRepository {
       .select()
       .from(schema.datasetTemplates)
       .where(eq(schema.datasetTemplates.id, datasetTemplateId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
+  async findSchemaTemplateById(schemaTemplateId: string): Promise<SchemaTemplateRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.id, schemaTemplateId))
       .limit(1);
 
     return row ?? null;

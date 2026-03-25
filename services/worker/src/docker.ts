@@ -6,6 +6,9 @@ const execFileAsync = promisify(execFile);
 
 const sandboxDockerNetwork = process.env.SANDBOX_DOCKER_NETWORK ?? 'sqlcraft-dev';
 const sandboxPostgresImage = process.env.SANDBOX_POSTGRES_IMAGE ?? 'postgres:16-alpine';
+const storageDockerContainer = process.env.STORAGE_DOCKER_CONTAINER ?? 'sqlcraft-minio';
+const storageAccessKey = process.env.STORAGE_ACCESS_KEY ?? 'minioadmin';
+const storageSecretKey = process.env.STORAGE_SECRET_KEY ?? 'minioadmin';
 
 function isNotFoundError(stderr: string | undefined): boolean {
   return (stderr ?? '').toLowerCase().includes('no such container');
@@ -52,6 +55,39 @@ async function runDockerWithInput(args: string[], input: string | Buffer): Promi
     child.stdin.write(input);
     child.stdin.end();
   });
+}
+
+async function runDockerBinary(args: string[]): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const child = spawn('docker', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      reject(error);
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdoutChunks));
+        return;
+      }
+      reject(new Error(`docker ${args.join(' ')} failed with code ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
 export function sandboxContainerName(sandboxId: string): string {
@@ -162,4 +198,21 @@ export async function runPgRestoreInSandboxContainer(params: {
     ],
     dump,
   );
+}
+
+export async function readS3ObjectViaMinioContainer(artifactRef: string): Promise<Buffer> {
+  const parsed = new URL(artifactRef);
+  const bucket = parsed.hostname;
+  const objectName = parsed.pathname.replace(/^\/+/, '');
+
+  if (!bucket || !objectName) {
+    throw new Error(`Invalid s3 artifact reference: ${artifactRef}`);
+  }
+
+  const script = [
+    `mc alias set local http://localhost:9000 ${shQuote(storageAccessKey)} ${shQuote(storageSecretKey)} >/dev/null`,
+    `mc cat ${shQuote(`local/${bucket}/${objectName}`)}`,
+  ].join(' && ');
+
+  return runDockerBinary(['exec', storageDockerContainer, 'sh', '-lc', script]);
 }

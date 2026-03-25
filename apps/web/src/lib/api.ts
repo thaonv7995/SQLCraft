@@ -481,11 +481,12 @@ export function resolveDatasetScaleContext(payload: {
 export interface LearningSession {
   id: string;
   userId: string;
-  lessonVersionId: string;
+  lessonVersionId: string | null;
   challengeVersionId?: string | null;
   status: 'provisioning' | 'active' | 'paused' | 'ended' | 'expired' | 'failed';
   sandboxStatus?: string | null;
   lessonTitle?: string | null;
+  displayTitle?: string;
   sandbox?: {
     id: string;
     status: string;

@@ -1216,7 +1216,12 @@ export default function LabPage() {
   const lessonContext = useMemo(() => readLabBootstrap(sessionId), [sessionId]);
   const { data: sessionLessonVersion } = useQuery({
     queryKey: ['lab-session-lesson-version', session?.lessonVersionId],
-    queryFn: () => lessonsApi.getVersion(session!.lessonVersionId),
+    queryFn: () => {
+      if (!session?.lessonVersionId) {
+        throw new Error('This lab session is not linked to a lesson version');
+      }
+      return lessonsApi.getVersion(session.lessonVersionId);
+    },
     enabled: Boolean(session?.lessonVersionId),
     staleTime: 60_000,
   });

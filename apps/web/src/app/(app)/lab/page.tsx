@@ -107,7 +107,7 @@ export default function LabIndexPage() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-on-surface">
-                          {s.lessonTitle ?? 'Lab session'}
+                          {s.displayTitle ?? s.lessonTitle ?? 'Lab session'}
                         </p>
                         <p className="text-[11px] text-on-surface-variant">
                           {s.lastActivityAt

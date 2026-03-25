@@ -282,9 +282,7 @@ export const learningSessions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    lessonVersionId: uuid('lesson_version_id')
-      .notNull()
-      .references(() => lessonVersions.id),
+    lessonVersionId: uuid('lesson_version_id').references(() => lessonVersions.id),
     challengeVersionId: uuid('challenge_version_id').references(() => challengeVersions.id),
     status: sessionStatusEnum('status').notNull().default('provisioning'),
     startedAt: timestamp('started_at').notNull().default(sql`now()`),

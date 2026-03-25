@@ -405,13 +405,6 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
         summary: 'Upload and scan a SQL dump before publishing',
         security: [{ bearerAuth: [] }],
         consumes: ['multipart/form-data'],
-        body: {
-          type: 'object',
-          required: ['dump'],
-          properties: {
-            dump: { type: 'string', format: 'binary' },
-          },
-        },
       },
     },
     scanSqlDumpHandler,

@@ -2,7 +2,11 @@ import { gunzipSync } from 'node:zlib';
 import { readFile } from 'node:fs/promises';
 import pino from 'pino';
 import type { DatasetTemplateDefinition, SchemaDefinition } from './db';
-import { runPgRestoreInSandboxContainer, runPsqlInSandboxContainer } from './docker';
+import {
+  readS3ObjectViaMinioContainer,
+  runPgRestoreInSandboxContainer,
+  runPsqlInSandboxContainer,
+} from './docker';
 
 interface ColumnMeta {
   name: string;
@@ -42,7 +46,9 @@ function parseSchemaTables(schema: SchemaDefinition | null): TableMeta[] {
         isUnique: /\bUNIQUE\b/i.test(column.type),
         hasDefault: /\bDEFAULT\b/i.test(column.type),
         isSerialLike:
-          /\bSERIAL\b/i.test(column.type) || /\bGENERATED\b/i.test(column.type) || /\bIDENTITY\b/i.test(column.type),
+          /\b(?:SMALLSERIAL|SERIAL|BIGSERIAL)\b/i.test(column.type) ||
+          /\bGENERATED\b/i.test(column.type) ||
+          /\bIDENTITY\b/i.test(column.type),
         reference: parseReference(column.type),
       };
     }),
@@ -95,15 +101,41 @@ function sqlLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function inferTextExpression(tableName: string, columnName: string, column: ColumnMeta): string {
+function parseFixedCharLength(typeUpper: string): number | null {
+  const match = typeUpper.match(/\b(?:CHARACTER|CHAR)\s*\((\d+)\)/i);
+  if (!match) return null;
+  const length = Number(match[1]);
+  return Number.isInteger(length) && length > 0 ? length : null;
+}
+
+function inferFixedLengthCharExpression(
+  tableName: string,
+  columnName: string,
+  length: number,
+  indexExpr = 'i',
+): string {
+  return `substring(upper(md5(${sqlLiteral(`${tableName}_${columnName}_`)} || ((${indexExpr})::text))) from 1 for ${length})`;
+}
+
+function inferTextExpression(
+  tableName: string,
+  columnName: string,
+  column: ColumnMeta,
+  indexExpr = 'i',
+): string {
+  const fixedCharLength = parseFixedCharLength(column.typeUpper);
+  if (fixedCharLength) {
+    return inferFixedLengthCharExpression(tableName, columnName, fixedCharLength, indexExpr);
+  }
+
   const base = `${tableName}_${columnName}`;
   if (column.isUnique || /email/i.test(columnName)) {
     if (/email/i.test(columnName)) {
-      return `(${sqlLiteral(`${base}_`)} || i || '@example.com')`;
+      return `(${sqlLiteral(`${base}_`)} || (${indexExpr}) || '@example.com')`;
     }
-    return `(${sqlLiteral(`${base}_`)} || i)`;
+    return `(${sqlLiteral(`${base}_`)} || (${indexExpr}))`;
   }
-  return `(${sqlLiteral(`${base}_`)} || ((i - 1) % 100 + 1))`;
+  return `(${sqlLiteral(`${base}_`)} || ((((${indexExpr}) - 1) % 100) + 1))`;
 }
 
 function isIntegerLikeType(typeUpper: string): boolean {
@@ -114,29 +146,64 @@ function isDecimalLikeType(typeUpper: string): boolean {
   return /\b(DECIMAL|NUMERIC|REAL|DOUBLE|FLOAT)\b/i.test(typeUpper);
 }
 
-function inferNumericExpression(column: ColumnMeta): string {
+function inferNumericExpression(column: ColumnMeta, indexExpr = 'i'): string {
   if (isDecimalLikeType(column.typeUpper)) {
-    return '((i % 10000)::numeric / 100.0)';
+    return `(((${indexExpr}) % 10000)::numeric / 100.0)`;
   }
   if (/\b(BIGINT|INT8)\b/i.test(column.typeUpper)) {
-    return '(i::bigint)';
+    return `((${indexExpr})::bigint)`;
   }
-  return '(i::int)';
+  return `((${indexExpr})::int)`;
 }
 
-function inferTemporalExpression(column: ColumnMeta): string {
+function inferTemporalExpression(column: ColumnMeta, indexExpr = 'i'): string {
   if (/\bDATE\b/i.test(column.typeUpper) && !/\bTIMESTAMP\b/i.test(column.typeUpper)) {
-    return "((CURRENT_DATE - ((i % 30) || ' days')::interval)::date)";
+    return `((CURRENT_DATE - (((${indexExpr}) % 30) || ' days')::interval)::date)`;
   }
-  return "(NOW() - ((i % 30) || ' days')::interval)";
+  return `(NOW() - (((${indexExpr}) % 30) || ' days')::interval)`;
+}
+
+function inferDirectColumnExpression(
+  tableName: string,
+  column: ColumnMeta,
+  indexExpr = 'i',
+): string | null {
+  if (column.isSerialLike) {
+    return null;
+  }
+
+  if (/\bBOOL(?:EAN)?\b/i.test(column.typeUpper)) {
+    return `(((${indexExpr}) % 2) = 0)`;
+  }
+  if (/\bTIMESTAMP\b|\bDATE\b/i.test(column.typeUpper)) {
+    return inferTemporalExpression(column, indexExpr);
+  }
+  if (isIntegerLikeType(column.typeUpper) || isDecimalLikeType(column.typeUpper)) {
+    return inferNumericExpression(column, indexExpr);
+  }
+  if (/\bCHAR\b|\bTEXT\b|\bUUID\b|\bJSON\b|\bJSONB\b/i.test(column.typeUpper)) {
+    if (/\bUUID\b/i.test(column.typeUpper)) {
+      return `(md5((${indexExpr})::text || '::seed')::uuid)`;
+    }
+    if (/\bJSONB?\b/i.test(column.typeUpper)) {
+      return `jsonb_build_object('seed', ${indexExpr}, 'table', current_schema())`;
+    }
+    return inferTextExpression(tableName, column.name, column, indexExpr);
+  }
+
+  if (column.isNotNull && !column.hasDefault) {
+    return inferTextExpression(tableName, column.name, column, indexExpr);
+  }
+  return null;
 }
 
 function inferColumnExpression(
   tableName: string,
   column: ColumnMeta,
   rowCounts: Map<string, number>,
+  tablesByName: Map<string, TableMeta>,
 ): string | null {
-  if (column.isSerialLike || column.isPrimary) {
+  if (column.isSerialLike) {
     return null;
   }
 
@@ -156,32 +223,28 @@ function inferColumnExpression(
       }
       return 'NULL';
     }
-    return `(((i - 1) % ${refRowCount}) + 1)`;
+
+    const refIndexExpr = `(((i - 1) % ${refRowCount}) + 1)`;
+    const referencedTable = tablesByName.get(column.reference.table);
+    const referencedColumn = referencedTable?.columns.find(
+      (candidate) => candidate.name === column.reference?.column,
+    );
+
+    if (referencedColumn && !referencedColumn.isSerialLike) {
+      const referencedExpression = inferDirectColumnExpression(
+        column.reference.table,
+        referencedColumn,
+        refIndexExpr,
+      );
+      if (referencedExpression) {
+        return referencedExpression;
+      }
+    }
+
+    return refIndexExpr;
   }
 
-  if (/\bBOOL\b/i.test(column.typeUpper)) {
-    return '((i % 2) = 0)';
-  }
-  if (/\bTIMESTAMP\b|\bDATE\b/i.test(column.typeUpper)) {
-    return inferTemporalExpression(column);
-  }
-  if (isIntegerLikeType(column.typeUpper) || isDecimalLikeType(column.typeUpper)) {
-    return inferNumericExpression(column);
-  }
-  if (/\bCHAR\b|\bTEXT\b|\bUUID\b|\bJSON\b|\bJSONB\b/i.test(column.typeUpper)) {
-    if (/\bUUID\b/i.test(column.typeUpper)) {
-      return "(md5(i::text || '::seed')::uuid)";
-    }
-    if (/\bJSONB?\b/i.test(column.typeUpper)) {
-      return "jsonb_build_object('seed', i, 'table', current_schema())";
-    }
-    return inferTextExpression(tableName, column.name, column);
-  }
-
-  if (column.isNotNull && !column.hasDefault) {
-    return inferTextExpression(tableName, column.name, column);
-  }
-  return null;
+  return inferDirectColumnExpression(tableName, column);
 }
 
 async function applySyntheticSeedFromRowCounts(params: {
@@ -196,6 +259,7 @@ async function applySyntheticSeedFromRowCounts(params: {
   const rowCountMap = normalizeRowCounts(rowCounts);
   const parsedTables = parseSchemaTables(schema);
   const orderedTables = topologicalOrder(parsedTables);
+  const tablesByName = new Map(parsedTables.map((table) => [table.name, table]));
 
   if (orderedTables.length === 0 || rowCountMap.size === 0) {
     logger.info('No synthetic seed rows requested');
@@ -210,7 +274,7 @@ async function applySyntheticSeedFromRowCounts(params: {
     const selectExpressions: string[] = [];
 
     for (const column of table.columns) {
-      const expression = inferColumnExpression(table.name, column, rowCountMap);
+      const expression = inferColumnExpression(table.name, column, rowCountMap, tablesByName);
       if (!expression) continue;
       insertColumns.push(`"${column.name}"`);
       selectExpressions.push(expression);
@@ -247,6 +311,10 @@ async function applySyntheticSeedFromRowCounts(params: {
 }
 
 async function readArtifactBytes(artifactRef: string): Promise<Buffer> {
+  if (/^s3:\/\//i.test(artifactRef)) {
+    return readS3ObjectViaMinioContainer(artifactRef);
+  }
+
   const isHttp = /^https?:\/\//i.test(artifactRef);
   if (isHttp) {
     const response = await fetch(artifactRef);
@@ -410,3 +478,9 @@ export async function loadDatasetIntoSandbox(params: {
     rowCounts: datasetTemplate.rowCounts,
   });
 }
+
+export const __private__ = {
+  normalizeRowCounts,
+  parseSchemaTables,
+  inferColumnExpression,
+};

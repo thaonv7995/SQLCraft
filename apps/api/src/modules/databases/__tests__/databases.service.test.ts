@@ -157,7 +157,7 @@ beforeEach(() => {
   vi.mocked(sessionsRepository.createSession).mockResolvedValue({
     id: 'session-1',
     userId: 'user-1',
-    lessonVersionId: 'lesson-version-1',
+    lessonVersionId: null,
     challengeVersionId: null,
     status: 'provisioning',
     startedAt: new Date('2026-01-04'),
@@ -202,6 +202,18 @@ describe('listDatabases()', () => {
 });
 
 describe('createDatabaseSession()', () => {
+  it('creates explorer sessions without requiring a published lesson version', async () => {
+    fixture.lessonVersions = [];
+    vi.mocked(getDb).mockReturnValue(makeDbMock(fixture) as never);
+
+    const result = await createDatabaseSession('user-1', { databaseId: 'schema-1', scale: 'tiny' });
+
+    expect(result.session.lessonVersionId).toBeNull();
+    expect(sessionsRepository.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ lessonVersionId: null }),
+    );
+  });
+
   it('defaults requested scale to source scale when omitted', async () => {
     await createDatabaseSession('user-1', { databaseId: 'schema-1' });
     expect(sessionsRepository.createSandbox).toHaveBeenCalledWith(

@@ -10,9 +10,9 @@ vi.mock('../../../db/repositories', () => ({
     createSandbox: vi.fn(),
     getSandboxBySessionId: vi.fn(),
     findDetailedSandboxBySessionId: vi.fn(),
-    getSchemaTemplateBySessionId: vi.fn(),
     listPublishedDatasetTemplatesBySchema: vi.fn(),
     findDatasetTemplateById: vi.fn(),
+    findSchemaTemplateById: vi.fn(),
     endSession: vi.fn(),
     expireSandboxBySessionId: vi.fn(),
     updateActivity: vi.fn(),
@@ -113,6 +113,7 @@ describe('listUserSessions()', () => {
         }),
         sandboxStatus: 'ready',
         lessonTitle: 'Intro to SELECT',
+        schemaTemplateName: null,
       },
     ]);
 
@@ -124,7 +125,32 @@ describe('listUserSessions()', () => {
         lessonVersionId: 'lv-1',
         challengeVersionId: 'challenge-version-1',
         lessonTitle: 'Intro to SELECT',
+        displayTitle: 'Intro to SELECT',
         sandboxStatus: 'ready',
+      }),
+    ]);
+  });
+
+  it('uses schema template name and short session code for explorer sessions', async () => {
+    vi.mocked(sessionsRepository.findByUserId).mockResolvedValue([
+      {
+        ...makeSession({
+          id: 'c05ac6c3-89cc-41a8-a82e-262d0d9b6253',
+          lessonVersionId: null,
+          status: 'active',
+        }),
+        sandboxStatus: 'ready',
+        lessonTitle: null,
+        schemaTemplateName: 'sqlcraft_demo',
+      },
+    ]);
+
+    const result = await listUserSessions('user-1');
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'c05ac6c3-89cc-41a8-a82e-262d0d9b6253',
+        displayTitle: 'sqlcraft_demo #c05ac6c3',
       }),
     ]);
   });
@@ -220,6 +246,42 @@ describe('getSession()', () => {
     );
   });
 
+  it('returns dataset context for explorer sessions without lesson linkage', async () => {
+    vi.mocked(sessionsRepository.findById).mockResolvedValue(
+      makeSession({ status: 'active', lessonVersionId: null }),
+    );
+    vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(
+      makeSandbox({ status: 'ready', dbName: 'db_1' }),
+    );
+    vi.mocked(sessionsRepository.findDetailedSandboxBySessionId).mockResolvedValue(
+      makeSandbox({
+        status: 'ready',
+        dbName: 'db_1',
+        schemaTemplateId: 'schema-1',
+        datasetTemplateId: 'dataset-small',
+      }),
+    );
+    vi.mocked(sessionsRepository.listPublishedDatasetTemplatesBySchema).mockResolvedValue([
+      makeDatasetTemplate({ id: 'dataset-small', size: 'small' }),
+      makeDatasetTemplate({
+        id: 'dataset-large',
+        size: 'large',
+        rowCounts: { users: 100_000, orders: 500_000 },
+      }),
+    ]);
+
+    const result = await getSession('session-1', 'user-1', false);
+
+    expect(result.lessonVersionId).toBeNull();
+    expect(result.dataset).toEqual(
+      expect.objectContaining({
+        selectedScale: 'small',
+        sourceScale: 'large',
+        availableScales: ['small', 'large'],
+      }),
+    );
+  });
+
   it('throws NotFoundError when session does not exist', async () => {
     vi.mocked(sessionsRepository.findById).mockResolvedValue(null);
     await expect(getSession('missing', 'user-1', false)).rejects.toThrow(NotFoundError);
@@ -273,7 +335,7 @@ describe('endSession()', () => {
 describe('getSessionSchemaDiff()', () => {
   it('returns a runtime diff against the base schema snapshot', async () => {
     vi.mocked(sessionsRepository.findById).mockResolvedValue(makeSession({ status: 'active' }));
-    vi.mocked(sessionsRepository.getSchemaTemplateBySessionId).mockResolvedValue({
+    vi.mocked(sessionsRepository.findSchemaTemplateById).mockResolvedValue({
       id: 'schema-1',
       name: 'Ecommerce',
       description: null,
@@ -341,6 +403,58 @@ describe('getSessionSchemaDiff()', () => {
       dbName: 's_schema1',
       containerRef: 'sandbox-1',
     });
+  });
+
+  it('resolves schema template from sandbox for explorer sessions without lessons', async () => {
+    vi.mocked(sessionsRepository.findById).mockResolvedValue(
+      makeSession({ status: 'active', lessonVersionId: null }),
+    );
+    vi.mocked(sessionsRepository.findDetailedSandboxBySessionId).mockResolvedValue(
+      makeSandbox({
+        status: 'ready',
+        containerRef: 'sandbox-1',
+        dbName: 's_schema1',
+        schemaTemplateId: 'schema-1',
+      }),
+    );
+    vi.mocked(sessionsRepository.findSchemaTemplateById).mockResolvedValue({
+      id: 'schema-1',
+      name: 'Ecommerce',
+      description: null,
+      version: 1,
+      definition: { tables: [{ name: 'users', columns: [] }] },
+      status: 'published',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: 'admin-1',
+    });
+    vi.mocked(sandboxSchema.parseBaseSchemaSnapshot).mockReturnValue({
+      indexes: [],
+      views: [],
+      materializedViews: [],
+      functions: [],
+      partitions: [],
+    });
+    vi.mocked(sandboxSchema.fetchSandboxSchemaSnapshot).mockResolvedValue({
+      indexes: [],
+      views: [],
+      materializedViews: [],
+      functions: [],
+      partitions: [],
+    });
+    vi.mocked(sandboxSchema.diffSandboxSchema).mockReturnValue({
+      hasChanges: false,
+      indexes: { base: [], current: [], added: [], removed: [], changed: [] },
+      views: { base: [], current: [], added: [], removed: [], changed: [] },
+      materializedViews: { base: [], current: [], added: [], removed: [], changed: [] },
+      functions: { base: [], current: [], added: [], removed: [], changed: [] },
+      partitions: { base: [], current: [], added: [], removed: [], changed: [] },
+    });
+
+    const result = await getSessionSchemaDiff('session-1', 'user-1', false);
+
+    expect(result.schemaTemplateId).toBe('schema-1');
+    expect(sessionsRepository.findSchemaTemplateById).toHaveBeenCalledWith('schema-1');
   });
 
   it('throws ForbiddenError when another user accesses the diff', async () => {

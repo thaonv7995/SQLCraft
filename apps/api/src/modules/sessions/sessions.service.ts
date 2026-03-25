@@ -1,6 +1,9 @@
 import { sessionsRepository } from '../../db/repositories';
 import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/repositories';
-import type { DatasetTemplateRow } from '../../db/repositories/sessions.repository';
+import type {
+  DatasetTemplateRow,
+  SchemaTemplateRow,
+} from '../../db/repositories/sessions.repository';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import {
   diffSandboxSchema,
@@ -118,9 +121,10 @@ export interface EndSessionResult {
 export interface SessionListItem {
   id: string;
   status: string;
-  lessonVersionId: string;
+  lessonVersionId: string | null;
   challengeVersionId: string | null;
   lessonTitle: string | null;
+  displayTitle: string;
   sandboxStatus: string | null;
   startedAt: Date;
   lastActivityAt: Date | null;
@@ -227,6 +231,69 @@ async function resolveRequestedDatasetTemplate(
   return { selectedTemplate, summary };
 }
 
+async function resolveSandboxDatasetSummary(
+  sandbox: SandboxRow | null,
+): Promise<SessionDatasetSummary> {
+  if (!sandbox?.schemaTemplateId) {
+    return buildDatasetSummary(null, null, []);
+  }
+
+  const schemaTemplates = await loadSchemaDatasetTemplates(sandbox.schemaTemplateId);
+  const selectedTemplate =
+    schemaTemplates.find((datasetTemplate) => datasetTemplate.id === sandbox.datasetTemplateId) ??
+    (sandbox.datasetTemplateId
+      ? await sessionsRepository.findDatasetTemplateById(sandbox.datasetTemplateId)
+      : null);
+
+  return buildDatasetSummary(sandbox.schemaTemplateId, selectedTemplate, schemaTemplates);
+}
+
+async function resolveSchemaTemplateForSession(
+  session: SessionRow,
+  sandbox: SandboxRow | null,
+): Promise<SchemaTemplateRow | null> {
+  if (sandbox?.schemaTemplateId) {
+    return sessionsRepository.findSchemaTemplateById(sandbox.schemaTemplateId);
+  }
+
+  if (!session.lessonVersionId) {
+    return null;
+  }
+
+  const lessonVersion = await sessionsRepository.findPublishedLessonVersion(session.lessonVersionId);
+  if (!lessonVersion?.schemaTemplateId) {
+    return null;
+  }
+
+  return sessionsRepository.findSchemaTemplateById(lessonVersion.schemaTemplateId);
+}
+
+function getSessionCode(sessionId: string): string {
+  const firstSegment = sessionId.split('-')[0]?.trim();
+  return firstSegment && firstSegment.length > 0 ? firstSegment : sessionId.slice(0, 8);
+}
+
+function buildSessionDisplayTitle(params: {
+  sessionId: string;
+  lessonTitle: string | null;
+  schemaTemplateName: string | null;
+}): string {
+  const { sessionId, lessonTitle, schemaTemplateName } = params;
+  const code = getSessionCode(sessionId);
+  const trimmedLessonTitle = lessonTitle?.trim() ?? '';
+  const trimmedSchemaTemplateName = schemaTemplateName?.trim() ?? '';
+
+  if (trimmedLessonTitle) {
+    return trimmedLessonTitle;
+  }
+
+  if (trimmedSchemaTemplateName) {
+    return `${trimmedSchemaTemplateName} #${code}`;
+  }
+
+  return `Lab session #${code}`;
+}
+
 export async function listUserSessions(userId: string, limit = 20): Promise<SessionListItem[]> {
   const rows = await sessionsRepository.findByUserId(userId, limit);
   return rows.map((row) => ({
@@ -235,6 +302,11 @@ export async function listUserSessions(userId: string, limit = 20): Promise<Sess
     lessonVersionId: row.lessonVersionId,
     challengeVersionId: row.challengeVersionId,
     lessonTitle: row.lessonTitle,
+    displayTitle: buildSessionDisplayTitle({
+      sessionId: row.id,
+      lessonTitle: row.lessonTitle,
+      schemaTemplateName: row.schemaTemplateName,
+    }),
     sandboxStatus: row.sandboxStatus,
     startedAt: row.startedAt,
     lastActivityAt: row.lastActivityAt,
@@ -326,19 +398,7 @@ export async function getSession(
 
   const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
   const detailedSandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
-  const lessonVersion = await sessionsRepository.findPublishedLessonVersion(session.lessonVersionId);
-
-  let dataset = buildDatasetSummary(null, null, []);
-
-  if (lessonVersion) {
-    const schemaTemplates = await loadSchemaDatasetTemplates(lessonVersion.schemaTemplateId ?? null);
-    const selectedTemplate =
-      schemaTemplates.find((datasetTemplate) => datasetTemplate.id === detailedSandbox?.datasetTemplateId) ??
-      schemaTemplates.find((datasetTemplate) => datasetTemplate.id === lessonVersion.datasetTemplateId) ??
-      null;
-
-    dataset = buildDatasetSummary(lessonVersion.schemaTemplateId ?? null, selectedTemplate, schemaTemplates);
-  }
+  const dataset = await resolveSandboxDatasetSummary(detailedSandbox);
 
   return {
     ...session,
@@ -361,7 +421,8 @@ export async function getSessionSchema(
   if (!session) throw new NotFoundError('Session not found');
   if (session.userId !== userId && !isAdmin) throw new ForbiddenError('Access denied to this session');
 
-  const schemaTemplate = await sessionsRepository.getSchemaTemplateBySessionId(sessionId);
+  const sandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
+  const schemaTemplate = await resolveSchemaTemplateForSession(session, sandbox);
   if (!schemaTemplate) throw new NotFoundError('No schema template linked to this session');
 
   const rawTables = parseRawSchema(schemaTemplate.definition);
@@ -385,10 +446,10 @@ export async function getSessionSchemaDiff(
   if (!session) throw new NotFoundError('Session not found');
   if (session.userId !== userId && !isAdmin) throw new ForbiddenError('Access denied to this session');
 
-  const schemaTemplate = await sessionsRepository.getSchemaTemplateBySessionId(sessionId);
+  const sandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
+  const schemaTemplate = await resolveSchemaTemplateForSession(session, sandbox);
   if (!schemaTemplate) throw new NotFoundError('No schema template linked to this session');
 
-  const sandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
   if (!sandbox?.dbName) {
     throw new ValidationError('Sandbox must be ready before schema diff is available');
   }
