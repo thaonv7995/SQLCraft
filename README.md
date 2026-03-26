@@ -4,17 +4,7 @@
 
 SQLCraft is an open-source SQL platform for sandboxed query execution, realistic datasets, execution-plan analysis, and admin-reviewed content workflows.
 <p align="center">
-  <img src="docs/system-architecture.png" alt="System Architecture" width="500" />
-</p>
-
-<h3 align="center">SQL Lab Interface</h3>
-<p align="center">
-  <img src="docs/sql-lab-interface.png" alt="SQL Lab Interface" width="700" />
-</p>
-
-<h3 align="center">Infrastructure</h3>
-<p align="center">
-  <img src="docs/docker-containers.png" alt="Docker Containers" width="700" />
+  <img src="docs/system-architecture.png" alt="System Architecture" width="300" />
 </p>
 
 ## Features
