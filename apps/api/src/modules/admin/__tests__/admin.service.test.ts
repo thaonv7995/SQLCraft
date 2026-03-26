@@ -46,13 +46,29 @@ vi.mock('../../../db/repositories', () => ({
   },
 }));
 
+vi.mock('../sql-dump-scan', () => ({
+  createStoredSqlDumpScan: vi.fn(),
+  loadStoredSqlDumpScan: vi.fn(),
+}));
+
+vi.mock('../real-dataset-artifact', () => ({
+  materializeDerivedSqlDumpArtifacts: vi.fn(),
+}));
+
 vi.mock('../../../lib/storage', () => ({
-  uploadFile: vi.fn(async (objectName: string) => objectName),
+  readFile: vi.fn(),
+  uploadFile: vi.fn(),
+}));
+
+vi.mock('../../../lib/config', () => ({
+  config: {
+    STORAGE_BUCKET: 'sqlcraft-test-bucket',
+  },
 }));
 
 import { adminRepository, usersRepository } from '../../../db/repositories';
-import { uploadFile } from '../../../lib/storage';
 import { ValidationError } from '../../../lib/errors';
+import { readFile, uploadFile } from '../../../lib/storage';
 import {
   createAdminUser,
   getAdminConfig,
@@ -62,7 +78,9 @@ import {
   updateUserRole,
   updateAdminConfig,
 } from '../admin.service';
+import { materializeDerivedSqlDumpArtifacts } from '../real-dataset-artifact';
 import type { AdminConfigBody } from '../admin.schema';
+import { loadStoredSqlDumpScan } from '../sql-dump-scan';
 import type {
   AdminConfigRow,
   SchemaTemplateRow,
@@ -175,7 +193,6 @@ const makeAdminConfigRow = (overrides: Partial<AdminConfigRow> = {}): AdminConfi
 
 beforeEach(() => {
   vi.clearAllMocks();
-  const datasetTemplates = new Map<string, DatasetTemplateRow>();
   vi.mocked(usersRepository.findRoleByName).mockResolvedValue({
     id: 'role-learner',
     name: 'learner',
@@ -217,20 +234,9 @@ beforeEach(() => {
   vi.mocked(adminRepository.createSchemaTemplate).mockImplementation(async (data: any) =>
     makeSchemaTemplate(data),
   );
-  vi.mocked(adminRepository.createDatasetTemplate).mockImplementation(async (data: any) => {
-    const row = makeDatasetTemplate(data.size, data);
-    datasetTemplates.set(row.id, row);
-    return row;
-  });
-  vi.mocked(adminRepository.updateDatasetTemplate).mockImplementation(async (id: string, data: any) => {
-    const existing = datasetTemplates.get(id);
-    const size =
-      existing?.size ??
-      (id.replace(/^dataset-/, '') as 'tiny' | 'small' | 'medium' | 'large');
-    const row = makeDatasetTemplate(size, { ...(existing ?? {}), id, ...data });
-    datasetTemplates.set(id, row);
-    return row;
-  });
+  vi.mocked(adminRepository.createDatasetTemplate).mockImplementation(async (data: any) =>
+    makeDatasetTemplate(data.size, data),
+  );
   vi.mocked(adminRepository.createSystemJob).mockImplementation(async (data: any) =>
     makeSystemJob(data),
   );
@@ -242,6 +248,10 @@ beforeEach(() => {
   vi.mocked(adminRepository.updateAdminConfig).mockImplementation(async (_scope: string, data: any) =>
     makeAdminConfigRow({ scope: 'global', ...data }),
   );
+  vi.mocked(readFile).mockResolvedValue(Buffer.from('source dump', 'utf8'));
+  vi.mocked(uploadFile).mockImplementation(async (objectName: string) => objectName);
+  vi.mocked(loadStoredSqlDumpScan).mockResolvedValue(null);
+  vi.mocked(materializeDerivedSqlDumpArtifacts).mockReturnValue([]);
 });
 
 describe('importCanonicalDatabase()', () => {
@@ -300,13 +310,11 @@ describe('importCanonicalDatabase()', () => {
       'small',
       'medium',
     ]);
-    expect(result.derivedDatasetTemplates.every((dataset) => typeof dataset.artifactUrl === 'string')).toBe(true);
     expect(result.derivedDatasetTemplates.map((dataset) => Object.values(dataset.rowCounts as Record<string, number>).reduce((total, count) => total + count, 0))).toEqual([
       100,
       10_000,
       1_000_000,
     ]);
-    expect(vi.mocked(uploadFile)).toHaveBeenCalledTimes(3);
     expect(adminRepository.createSystemJob).toHaveBeenCalledTimes(2);
     expect(result.jobs.datasetGenerationJob).not.toBeNull();
   });
@@ -354,10 +362,8 @@ describe('importCanonicalDatabase()', () => {
       }),
     );
     expect(result.sourceScale).toBe('small');
-    expect(result.sourceDatasetTemplate.artifactUrl).toMatch(/^s3:\/\/sqlcraft\/dataset-templates\/dataset-small\.sql\.gz$/);
     expect(result.derivedDatasetTemplates).toEqual([]);
     expect(result.jobs.datasetGenerationJob).toBeNull();
-    expect(vi.mocked(uploadFile)).toHaveBeenCalledTimes(1);
     expect(adminRepository.createSystemJob).toHaveBeenCalledTimes(1);
   });
 
@@ -380,6 +386,112 @@ describe('importCanonicalDatabase()', () => {
     expect(adminRepository.createSchemaTemplate).not.toHaveBeenCalled();
     expect(adminRepository.createDatasetTemplate).not.toHaveBeenCalled();
     expect(adminRepository.createSystemJob).not.toHaveBeenCalled();
+  });
+
+  it('attaches real derived artifacts for SQL dump scan imports when materialization succeeds', async () => {
+    vi.mocked(loadStoredSqlDumpScan).mockResolvedValue({
+      scanId: 'scan-1',
+      fileName: 'retail.sql',
+      databaseName: 'retail',
+      schemaName: 'public',
+      domain: 'ecommerce',
+      inferredScale: 'large',
+      totalTables: 2,
+      totalRows: 25_000_000,
+      columnCount: 5,
+      detectedPrimaryKeys: 2,
+      detectedForeignKeys: 1,
+      tables: [],
+      rowCounts: {
+        customers: 5_000_000,
+        orders: 20_000_000,
+      },
+      artifactObjectName: 'admin/sql-dumps/scan-1.sql',
+      artifactUrl: 's3://sqlcraft-test-bucket/admin/sql-dumps/scan-1.sql',
+      definition: {
+        tables: [
+          {
+            name: 'customers',
+            columns: [
+              { name: 'id', type: 'uuid PRIMARY KEY' },
+              { name: 'email', type: 'text NOT NULL' },
+            ],
+          },
+          {
+            name: 'orders',
+            columns: [
+              { name: 'id', type: 'uuid PRIMARY KEY' },
+              { name: 'customer_id', type: 'uuid NOT NULL references customers(id)' },
+              { name: 'total_cents', type: 'integer NOT NULL' },
+            ],
+          },
+        ],
+        metadata: {
+          source: 'sql_dump',
+        },
+      },
+    } as any);
+    vi.mocked(materializeDerivedSqlDumpArtifacts).mockReturnValue([
+      {
+        size: 'tiny',
+        rowCounts: { customers: 25, orders: 75 },
+        buffer: Buffer.from('tiny-artifact'),
+      },
+      {
+        size: 'small',
+        rowCounts: { customers: 2_000, orders: 8_000 },
+        buffer: Buffer.from('small-artifact'),
+      },
+    ]);
+
+    const result = await importCanonicalDatabase('admin-1', {
+      scanId: 'scan-1',
+      schemaName: 'Retail Analytics',
+      domain: 'ecommerce',
+    });
+
+    expect(readFile).toHaveBeenCalledWith('admin/sql-dumps/scan-1.sql');
+    expect(materializeDerivedSqlDumpArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSql: Buffer.from('source dump', 'utf8'),
+        derivedDatasets: expect.arrayContaining([
+          expect.objectContaining({ size: 'tiny' }),
+          expect.objectContaining({ size: 'small' }),
+          expect.objectContaining({ size: 'medium' }),
+        ]),
+      }),
+    );
+    expect(uploadFile).toHaveBeenCalledWith(
+      'admin/sql-dumps/scan-1/derived/tiny.sql.gz',
+      Buffer.from('tiny-artifact'),
+      'application/gzip',
+    );
+    expect(uploadFile).toHaveBeenCalledWith(
+      'admin/sql-dumps/scan-1/derived/small.sql.gz',
+      Buffer.from('small-artifact'),
+      'application/gzip',
+    );
+    expect(result.sourceDatasetTemplate).toEqual(
+      expect.objectContaining({
+        artifactUrl: 's3://sqlcraft-test-bucket/admin/sql-dumps/scan-1.sql',
+      }),
+    );
+    expect(result.derivedDatasetTemplates).toEqual([
+      expect.objectContaining({
+        size: 'tiny',
+        rowCounts: { customers: 25, orders: 75 },
+        artifactUrl: 's3://sqlcraft-test-bucket/admin/sql-dumps/scan-1/derived/tiny.sql.gz',
+      }),
+      expect.objectContaining({
+        size: 'small',
+        rowCounts: { customers: 2_000, orders: 8_000 },
+        artifactUrl: 's3://sqlcraft-test-bucket/admin/sql-dumps/scan-1/derived/small.sql.gz',
+      }),
+      expect.objectContaining({
+        size: 'medium',
+        artifactUrl: null,
+      }),
+    ]);
   });
 });
 

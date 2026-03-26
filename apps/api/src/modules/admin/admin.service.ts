@@ -13,7 +13,6 @@ import {
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
 import { toStoredRoleName } from '../../lib/roles';
-import { uploadFile } from '../../lib/storage';
 import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
@@ -59,50 +58,12 @@ import {
   createStoredSqlDumpScan,
   loadStoredSqlDumpScan,
 } from './sql-dump-scan';
-import {
-  buildPreparedDatasetArtifact,
-  shouldBuildPreparedDatasetArtifact,
-} from './prepared-dataset-artifact';
+import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 
 const ADMIN_CONFIG_SCOPE = 'global';
-const storageBucket = process.env.STORAGE_BUCKET?.trim() || 'sqlcraft';
 
 function cloneAdminConfig(config: AdminConfigBody): AdminConfigBody {
   return JSON.parse(JSON.stringify(config)) as AdminConfigBody;
-}
-
-function datasetArtifactObjectName(datasetTemplateId: string): string {
-  return `dataset-templates/${datasetTemplateId}.sql.gz`;
-}
-
-async function maybeAttachPreparedDatasetArtifact(params: {
-  datasetTemplateId: string;
-  definition: Record<string, unknown>;
-  rowCounts: Record<string, unknown>;
-  existingArtifactUrl: string | null;
-}): Promise<string | null> {
-  const { datasetTemplateId, definition, rowCounts, existingArtifactUrl } = params;
-
-  if (existingArtifactUrl || !shouldBuildPreparedDatasetArtifact(rowCounts)) {
-    return existingArtifactUrl;
-  }
-
-  try {
-    const artifactBuffer = buildPreparedDatasetArtifact(definition, rowCounts);
-    if (!artifactBuffer) {
-      return null;
-    }
-
-    const objectName = datasetArtifactObjectName(datasetTemplateId);
-    await uploadFile(objectName, artifactBuffer, 'application/gzip');
-    return `s3://${storageBucket}/${objectName}`;
-  } catch (error) {
-    console.warn('Prepared dataset artifact generation failed', {
-      datasetTemplateId,
-      error,
-    });
-    return existingArtifactUrl;
-  }
 }
 
 async function buildAdminUserMutationResult(userId: string): Promise<CreateAdminUserResult> {
@@ -546,9 +507,20 @@ function mergeDefinitionMetadata(
   };
 }
 
+function makeDerivedSqlArtifactObjectName(scanId: string, size: 'tiny' | 'small' | 'medium' | 'large'): string {
+  return `admin/sql-dumps/${scanId}/derived/${size}.sql.gz`;
+}
+
 async function persistCanonicalDatabaseImport(
   userId: string,
   body: DirectCanonicalDatabaseImportBody,
+  options?: {
+    materializedDerivedDatasets?: Array<{
+      size: 'tiny' | 'small' | 'medium' | 'large';
+      rowCounts: Record<string, number>;
+      artifactUrl: string;
+    }>;
+  },
 ): Promise<ImportCanonicalDatabaseResult> {
   const normalizedRowCounts = normalizeDatasetRowCounts(body.canonicalDataset.rowCounts);
   const sourceTotalRows = sumDatasetRowCounts(normalizedRowCounts);
@@ -576,62 +548,26 @@ async function persistCanonicalDatabaseImport(
     artifactUrl: body.canonicalDataset.artifactUrl ?? null,
     status: body.status,
   });
-  const sourceArtifactUrl = await maybeAttachPreparedDatasetArtifact({
-    datasetTemplateId: sourceDatasetTemplate.id,
-    definition: body.definition,
-    rowCounts: normalizedRowCounts,
-    existingArtifactUrl: sourceDatasetTemplate.artifactUrl,
-  });
-  const generatedSourcePreparedArtifact =
-    Boolean(sourceArtifactUrl) && sourceArtifactUrl !== sourceDatasetTemplate.artifactUrl;
-  const resolvedSourceDatasetTemplate =
-    sourceArtifactUrl && sourceArtifactUrl !== sourceDatasetTemplate.artifactUrl
-      ? ((await adminRepository.updateDatasetTemplate(sourceDatasetTemplate.id, {
-          artifactUrl: sourceArtifactUrl,
-        })) ?? sourceDatasetTemplate)
-      : sourceDatasetTemplate;
 
+  const materializedDerivedDatasetsBySize = new Map(
+    (options?.materializedDerivedDatasets ?? []).map((dataset) => [dataset.size, dataset]),
+  );
   const derivedDatasetTemplates =
     body.generateDerivedDatasets === false
       ? []
       : await Promise.all(
-          buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts).map((dataset) =>
-            adminRepository.createDatasetTemplate({
+          buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts).map((dataset) => {
+            const materializedDataset = materializedDerivedDatasetsBySize.get(dataset.size);
+            return adminRepository.createDatasetTemplate({
               schemaTemplateId: schemaTemplate.id,
               name: formatDatasetTemplateName(body.name, dataset.size),
               size: dataset.size,
-              rowCounts: dataset.rowCounts,
-              artifactUrl: null,
+              rowCounts: materializedDataset?.rowCounts ?? dataset.rowCounts,
+              artifactUrl: materializedDataset?.artifactUrl ?? null,
               status: body.status,
-            }),
-          ),
+            });
+          }),
         );
-  const resolvedDerivedDatasetTemplates = await Promise.all(
-    derivedDatasetTemplates.map(async (datasetTemplate) => {
-      const artifactUrl = await maybeAttachPreparedDatasetArtifact({
-        datasetTemplateId: datasetTemplate.id,
-        definition: body.definition,
-        rowCounts: datasetTemplate.rowCounts as Record<string, unknown>,
-        existingArtifactUrl: datasetTemplate.artifactUrl,
-      });
-
-      if (!artifactUrl || artifactUrl === datasetTemplate.artifactUrl) {
-        return datasetTemplate;
-      }
-
-      return (
-        (await adminRepository.updateDatasetTemplate(datasetTemplate.id, {
-          artifactUrl,
-        })) ?? datasetTemplate
-      );
-    }),
-  );
-  const preparedArtifactDatasetTemplateIds = resolvedDerivedDatasetTemplates
-    .filter((datasetTemplate) => Boolean(datasetTemplate.artifactUrl))
-    .map((datasetTemplate) => datasetTemplate.id);
-  const preparedArtifactSizes = resolvedDerivedDatasetTemplates
-    .filter((datasetTemplate) => Boolean(datasetTemplate.artifactUrl))
-    .map((datasetTemplate) => datasetTemplate.size);
 
   const now = new Date();
   const importJob = await adminRepository.createSystemJob({
@@ -645,9 +581,8 @@ async function persistCanonicalDatabaseImport(
     },
     result: {
       schemaTemplateId: schemaTemplate.id,
-      sourceDatasetTemplateId: resolvedSourceDatasetTemplate.id,
-      derivedDatasetTemplateIds: resolvedDerivedDatasetTemplates.map((dataset) => dataset.id),
-      sourcePreparedArtifact: generatedSourcePreparedArtifact,
+      sourceDatasetTemplateId: sourceDatasetTemplate.id,
+      derivedDatasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
     },
     attempts: 1,
     maxAttempts: 1,
@@ -664,13 +599,11 @@ async function persistCanonicalDatabaseImport(
           status: 'completed',
           payload: {
             schemaTemplateId: schemaTemplate.id,
-            sourceDatasetTemplateId: resolvedSourceDatasetTemplate.id,
+            sourceDatasetTemplateId: sourceDatasetTemplate.id,
           },
           result: {
-            generatedSizes: resolvedDerivedDatasetTemplates.map((dataset) => dataset.size),
-            datasetTemplateIds: resolvedDerivedDatasetTemplates.map((dataset) => dataset.id),
-            preparedArtifactSizes,
-            preparedArtifactDatasetTemplateIds,
+            generatedSizes: derivedDatasetTemplates.map((dataset) => dataset.size),
+            datasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
           },
           attempts: 1,
           maxAttempts: 1,
@@ -681,8 +614,8 @@ async function persistCanonicalDatabaseImport(
 
   return {
     schemaTemplate,
-    sourceDatasetTemplate: resolvedSourceDatasetTemplate,
-    derivedDatasetTemplates: resolvedDerivedDatasetTemplates,
+    sourceDatasetTemplate,
+    derivedDatasetTemplates,
     sourceScale,
     sourceTotalRows,
     jobs: {
@@ -721,6 +654,49 @@ export async function importCanonicalDatabase(
     storedScan.inferredScale ??
     classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(storedScan.rowCounts));
 
+  let materializedDerivedDatasets:
+    | Array<{
+        size: 'tiny' | 'small' | 'medium' | 'large';
+        rowCounts: Record<string, number>;
+        artifactUrl: string;
+      }>
+    | undefined;
+
+  try {
+    const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, storedScan.rowCounts);
+    if (requestedDerivedDatasets.length > 0) {
+      const [{ readFile, uploadFile }, { config }] = await Promise.all([
+        import('../../lib/storage'),
+        import('../../lib/config'),
+      ]);
+      const sourceSql = await readFile(storedScan.artifactObjectName);
+      const derivedArtifacts = materializeDerivedSqlDumpArtifacts({
+        sourceSql,
+        definition: storedScan.definition,
+        derivedDatasets: requestedDerivedDatasets,
+      });
+
+      materializedDerivedDatasets = (
+        await Promise.all(
+          derivedArtifacts.map(async (artifact) => {
+            const objectName = makeDerivedSqlArtifactObjectName(storedScan.scanId, artifact.size);
+            await uploadFile(objectName, artifact.buffer, 'application/gzip');
+            return {
+              size: artifact.size,
+              rowCounts: artifact.rowCounts,
+              artifactUrl: `s3://${config.STORAGE_BUCKET}/${objectName}`,
+            };
+          }),
+        )
+      ).filter((artifact) => sumDatasetRowCounts(artifact.rowCounts) > 0);
+    }
+  } catch (error) {
+    console.warn('Failed to materialize derived SQL dump artifacts from scan import', {
+      scanId: storedScan.scanId,
+      error,
+    });
+  }
+
   return persistCanonicalDatabaseImport(userId, {
     name: body.schemaName,
     description: body.description?.trim() || undefined,
@@ -738,5 +714,7 @@ export async function importCanonicalDatabase(
     },
     generateDerivedDatasets: true,
     status: 'published',
+  }, {
+    materializedDerivedDatasets,
   });
 }
