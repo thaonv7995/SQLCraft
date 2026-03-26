@@ -33,6 +33,7 @@ import {
   sandboxesApi,
   sessionsApi,
   type DatasetScale,
+  type LearningSession,
   type QueryExecution,
   type QueryResultColumn,
   type SessionSchemaTable,
@@ -56,6 +57,23 @@ function sessionIdFromParams(params: { sessionId?: string | string[] }): string 
     return decodeURIComponent(raw[0]);
   }
   return '';
+}
+
+function getEffectiveSessionStatus(
+  session?: Pick<LearningSession, 'status' | 'sandboxStatus' | 'sandbox'> | null,
+): LearningSession['status'] | undefined {
+  if (!session) {
+    return undefined;
+  }
+
+  const sandboxStatus = session.sandbox?.status ?? session.sandboxStatus ?? null;
+  const sandboxLooksReady = sandboxStatus === 'ready' || Boolean(session.sandbox?.dbName);
+
+  if (session.status === 'provisioning' && sandboxLooksReady) {
+    return 'active';
+  }
+
+  return session.status;
 }
 
 const COMPARE_TERMINAL_STATUSES = new Set<QueryExecution['status']>(['success', 'error']);
@@ -1360,6 +1378,10 @@ export default function LabPage() {
   );
   const latestChallengeAttempt = challengeAttempts[0] ?? null;
   const explainPlanMode = getExplainPlanMode(currentQuery);
+  const effectiveSessionStatus = getEffectiveSessionStatus(session);
+  const isSessionReady = effectiveSessionStatus === 'active';
+  const isInteractiveSession =
+    !session || ['active', 'provisioning', 'paused'].includes(effectiveSessionStatus ?? session.status);
   const submitAttemptMutation = useMutation({
     mutationFn: async () => {
       if (!session?.challengeVersionId) {
@@ -1489,14 +1511,19 @@ export default function LabPage() {
   const hasPersistedEditorTabs = Boolean(persistedEditorState);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || hydratedEditorSessionIdRef.current === sessionId) {
       return;
     }
 
     if (persistedEditorState) {
       hydrateEditorTabs(persistedEditorState.tabs, persistedEditorState.activeTabId);
     } else {
-      const defaultEditorState = createDefaultLabEditorState();
+      const bootstrap = readLabBootstrap(sessionId);
+      const bootstrapStarterQuery =
+        !bootstrap?.starterQueryConsumed && bootstrap?.starterQuery?.trim()
+          ? bootstrap.starterQuery
+          : undefined;
+      const defaultEditorState = createDefaultLabEditorState(bootstrapStarterQuery);
       hydrateEditorTabs(defaultEditorState.tabs, defaultEditorState.activeTabId);
     }
 
@@ -1540,7 +1567,7 @@ export default function LabPage() {
 
   // Global keyboard shortcut: Ctrl+Enter to execute (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
-    if (!sessionId || session?.status !== 'active') return;
+    if (!sessionId || !isSessionReady) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -1551,7 +1578,7 @@ export default function LabPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [session?.status, sessionId, currentQuery, isExecuting, executeQuery]);
+  }, [isSessionReady, sessionId, currentQuery, isExecuting, executeQuery]);
 
   const [leftWidth, setLeftWidth] = useState(55); // percent
   const resizing = useRef(false);
@@ -1597,7 +1624,7 @@ export default function LabPage() {
   }, [setQuery]);
   const handleScaleChange = useCallback(
     (nextScale: DatasetScale) => {
-      if (!session || session.status !== 'active' || scaleSwitchMutation.isPending) {
+      if (!session || !isSessionReady || scaleSwitchMutation.isPending) {
         return;
       }
 
@@ -1607,7 +1634,7 @@ export default function LabPage() {
 
       scaleSwitchMutation.mutate(nextScale);
     },
-    [scaleSwitchMutation, selectedScale, session],
+    [isSessionReady, scaleSwitchMutation, selectedScale, session],
   );
   const handleOpenEndSessionModal = useCallback(() => {
     setIsEndSessionModalOpen(true);
@@ -1662,7 +1689,7 @@ export default function LabPage() {
                   isExecuting ||
                   scaleSwitchMutation.isPending ||
                   resetSandboxMutation.isPending ||
-                  session?.status !== 'active'
+                  !isSessionReady
                 }
                 onClick={() => executeQuery({ sessionId, sql: currentQuery })}
                 leftIcon={
@@ -1683,7 +1710,7 @@ export default function LabPage() {
                   isExplaining ||
                   scaleSwitchMutation.isPending ||
                   resetSandboxMutation.isPending ||
-                  session?.status !== 'active'
+                  !isSessionReady
                 }
                 onClick={() => explainQuery({ sessionId, sql: currentQuery })}
                 title={
@@ -1712,7 +1739,7 @@ export default function LabPage() {
                   loading={submitAttemptMutation.isPending}
                   disabled={
                     !latestSuccessfulExecution ||
-                    session?.status === 'provisioning' ||
+                    !isSessionReady ||
                     scaleSwitchMutation.isPending ||
                     resetSandboxMutation.isPending ||
                     submitAttemptMutation.isPending
@@ -1735,7 +1762,7 @@ export default function LabPage() {
               sourceRowCount={sourceRowCount}
               availableScales={availableScales}
               isSwitching={scaleSwitchMutation.isPending}
-              sessionStatus={session?.status}
+              sessionStatus={effectiveSessionStatus}
               onChange={handleScaleChange}
             />
           </div>
@@ -1778,19 +1805,19 @@ export default function LabPage() {
               <span
                 className={cn(
                   'h-2 w-2 rounded-full',
-                  session?.status === 'active'
+                  effectiveSessionStatus === 'active'
                     ? 'bg-secondary shadow-[0_0_8px_rgba(255,255,255,0.15)]'
-                    : session?.status === 'provisioning'
+                    : effectiveSessionStatus === 'provisioning'
                       ? 'animate-pulse bg-tertiary'
                       : 'bg-outline',
                 )}
               />
               <span className="text-[11px] font-medium text-on-surface-variant">
-                {session?.status === 'provisioning'
+                {effectiveSessionStatus === 'provisioning'
                   ? 'Provisioning'
-                  : session?.status === 'active'
+                  : effectiveSessionStatus === 'active'
                     ? 'Ready'
-                    : session?.status ?? '—'}
+                    : effectiveSessionStatus ?? '—'}
               </span>
             </div>
             <Button
@@ -1816,12 +1843,12 @@ export default function LabPage() {
       />
 
       {/* ── Session expired / failed overlay ── */}
-      {session && !['active', 'provisioning', 'paused'].includes(session.status) && (
-        <LabSessionExpired status={session.status} />
+      {session && !['active', 'provisioning', 'paused'].includes(effectiveSessionStatus ?? session.status) && (
+        <LabSessionExpired status={effectiveSessionStatus ?? session.status} />
       )}
 
       {/* ── Main split pane ── */}
-      {(!session || ['active', 'provisioning', 'paused'].includes(session.status)) && (
+      {isInteractiveSession && (
       <div ref={containerRef} className="flex flex-1 overflow-hidden">
         {/* Left: Editor */}
         <div
@@ -1944,17 +1971,17 @@ export default function LabPage() {
             <div
               className={cn(
                 'w-1.5 h-1.5 rounded-full',
-                session?.status === 'active'
+                effectiveSessionStatus === 'active'
                   ? 'bg-on-surface-variant'
-                  : session?.status === 'provisioning'
+                  : effectiveSessionStatus === 'provisioning'
                   ? 'bg-on-surface-variant/70 animate-pulse'
                   : 'bg-outline'
               )}
             />
             <span className="text-[9px] font-bold uppercase text-outline tracking-widest">
-              {session?.status === 'active'
+              {effectiveSessionStatus === 'active'
                 ? 'Connected'
-                : session?.status === 'provisioning'
+                : effectiveSessionStatus === 'provisioning'
                 ? 'Provisioning'
                 : 'Offline'}
             </span>
