@@ -128,35 +128,54 @@ async function applySchemaAndDataset(params: {
   datasetTemplateId: string | null;
 }): Promise<void> {
   const { sandboxInstanceId, containerRef, dbName, schemaTemplateId, datasetTemplateId } = params;
-  let schemaDef: Awaited<ReturnType<typeof fetchSchemaTemplate>> = null;
+  const [schemaDef, datasetTemplate] = await Promise.all([
+    schemaTemplateId ? fetchSchemaTemplate(schemaTemplateId) : Promise.resolve(null),
+    datasetTemplateId ? fetchDatasetTemplate(datasetTemplateId) : Promise.resolve(null),
+  ]);
 
-  if (schemaTemplateId) {
-    const schemaStartedAt = Date.now();
-    schemaDef = await fetchSchemaTemplate(schemaTemplateId);
-    if (schemaDef?.tables?.length) {
-      const ddlStatements = buildCreateTableDdl(schemaDef.tables);
-      const sandboxPool = new Pool({
-        connectionString: sandboxConnStr(containerRef, dbName),
-        max: 1,
-      });
+  let schemaApplied = false;
 
-      try {
-        for (const ddl of ddlStatements) {
-          await sandboxPool.query(ddl);
-        }
-        logger.info(
-          {
-            sandboxInstanceId,
-            dbName,
-            tableCount: ddlStatements.length,
-            durationMs: Date.now() - schemaStartedAt,
-          },
-          'Schema DDL applied',
-        );
-      } finally {
-        await sandboxPool.end();
-      }
+  const ensureSchemaApplied = async (): Promise<void> => {
+    if (schemaApplied || !schemaDef?.tables?.length) {
+      return;
     }
+
+    const schemaStartedAt = Date.now();
+    const ddlStatements = buildCreateTableDdl(schemaDef.tables);
+    const sandboxPool = new Pool({
+      connectionString: sandboxConnStr(containerRef, dbName),
+      max: 1,
+    });
+
+    try {
+      for (const ddl of ddlStatements) {
+        await sandboxPool.query(ddl);
+      }
+      schemaApplied = true;
+      logger.info(
+        {
+          sandboxInstanceId,
+          dbName,
+          tableCount: ddlStatements.length,
+          durationMs: Date.now() - schemaStartedAt,
+        },
+        'Schema DDL applied',
+      );
+    } finally {
+      await sandboxPool.end();
+    }
+  };
+
+  const artifactIncludesSchema =
+    Boolean(datasetTemplate?.artifactUrl) && schemaDef?.metadata?.source === 'sql_dump';
+
+  if (artifactIncludesSchema) {
+    logger.info(
+      { sandboxInstanceId, datasetTemplateId, schemaTemplateId },
+      'Skipping upfront schema DDL because artifact is self-contained',
+    );
+  } else {
+    await ensureSchemaApplied();
   }
 
   if (!datasetTemplateId) {
@@ -165,7 +184,6 @@ async function applySchemaAndDataset(params: {
   }
 
   const datasetLoadStartedAt = Date.now();
-  const datasetTemplate = await fetchDatasetTemplate(datasetTemplateId);
   if (!datasetTemplate) {
     throw new Error(`Dataset template not found: ${datasetTemplateId}`);
   }
@@ -177,6 +195,7 @@ async function applySchemaAndDataset(params: {
     dbName,
     datasetTemplate,
     schema: schemaDef,
+    ensureSchemaApplied,
   });
 
   logger.info(

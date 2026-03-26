@@ -16,8 +16,14 @@ export interface RawTable {
   columns: RawColumn[];
 }
 
+export interface SchemaMetadata {
+  source?: string;
+  [key: string]: unknown;
+}
+
 export interface SchemaDefinition {
   tables: RawTable[];
+  metadata?: SchemaMetadata;
 }
 
 export interface DatasetTemplateDefinition {

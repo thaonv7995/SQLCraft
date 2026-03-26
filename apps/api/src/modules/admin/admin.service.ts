@@ -13,6 +13,7 @@ import {
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
 import { toStoredRoleName } from '../../lib/roles';
+import { uploadFile } from '../../lib/storage';
 import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
@@ -58,11 +59,50 @@ import {
   createStoredSqlDumpScan,
   loadStoredSqlDumpScan,
 } from './sql-dump-scan';
+import {
+  buildPreparedDatasetArtifact,
+  shouldBuildPreparedDatasetArtifact,
+} from './prepared-dataset-artifact';
 
 const ADMIN_CONFIG_SCOPE = 'global';
+const storageBucket = process.env.STORAGE_BUCKET?.trim() || 'sqlcraft';
 
 function cloneAdminConfig(config: AdminConfigBody): AdminConfigBody {
   return JSON.parse(JSON.stringify(config)) as AdminConfigBody;
+}
+
+function datasetArtifactObjectName(datasetTemplateId: string): string {
+  return `dataset-templates/${datasetTemplateId}.sql.gz`;
+}
+
+async function maybeAttachPreparedDatasetArtifact(params: {
+  datasetTemplateId: string;
+  definition: Record<string, unknown>;
+  rowCounts: Record<string, unknown>;
+  existingArtifactUrl: string | null;
+}): Promise<string | null> {
+  const { datasetTemplateId, definition, rowCounts, existingArtifactUrl } = params;
+
+  if (existingArtifactUrl || !shouldBuildPreparedDatasetArtifact(rowCounts)) {
+    return existingArtifactUrl;
+  }
+
+  try {
+    const artifactBuffer = buildPreparedDatasetArtifact(definition, rowCounts);
+    if (!artifactBuffer) {
+      return null;
+    }
+
+    const objectName = datasetArtifactObjectName(datasetTemplateId);
+    await uploadFile(objectName, artifactBuffer, 'application/gzip');
+    return `s3://${storageBucket}/${objectName}`;
+  } catch (error) {
+    console.warn('Prepared dataset artifact generation failed', {
+      datasetTemplateId,
+      error,
+    });
+    return existingArtifactUrl;
+  }
 }
 
 async function buildAdminUserMutationResult(userId: string): Promise<CreateAdminUserResult> {
@@ -536,6 +576,20 @@ async function persistCanonicalDatabaseImport(
     artifactUrl: body.canonicalDataset.artifactUrl ?? null,
     status: body.status,
   });
+  const sourceArtifactUrl = await maybeAttachPreparedDatasetArtifact({
+    datasetTemplateId: sourceDatasetTemplate.id,
+    definition: body.definition,
+    rowCounts: normalizedRowCounts,
+    existingArtifactUrl: sourceDatasetTemplate.artifactUrl,
+  });
+  const generatedSourcePreparedArtifact =
+    Boolean(sourceArtifactUrl) && sourceArtifactUrl !== sourceDatasetTemplate.artifactUrl;
+  const resolvedSourceDatasetTemplate =
+    sourceArtifactUrl && sourceArtifactUrl !== sourceDatasetTemplate.artifactUrl
+      ? ((await adminRepository.updateDatasetTemplate(sourceDatasetTemplate.id, {
+          artifactUrl: sourceArtifactUrl,
+        })) ?? sourceDatasetTemplate)
+      : sourceDatasetTemplate;
 
   const derivedDatasetTemplates =
     body.generateDerivedDatasets === false
@@ -552,6 +606,32 @@ async function persistCanonicalDatabaseImport(
             }),
           ),
         );
+  const resolvedDerivedDatasetTemplates = await Promise.all(
+    derivedDatasetTemplates.map(async (datasetTemplate) => {
+      const artifactUrl = await maybeAttachPreparedDatasetArtifact({
+        datasetTemplateId: datasetTemplate.id,
+        definition: body.definition,
+        rowCounts: datasetTemplate.rowCounts as Record<string, unknown>,
+        existingArtifactUrl: datasetTemplate.artifactUrl,
+      });
+
+      if (!artifactUrl || artifactUrl === datasetTemplate.artifactUrl) {
+        return datasetTemplate;
+      }
+
+      return (
+        (await adminRepository.updateDatasetTemplate(datasetTemplate.id, {
+          artifactUrl,
+        })) ?? datasetTemplate
+      );
+    }),
+  );
+  const preparedArtifactDatasetTemplateIds = resolvedDerivedDatasetTemplates
+    .filter((datasetTemplate) => Boolean(datasetTemplate.artifactUrl))
+    .map((datasetTemplate) => datasetTemplate.id);
+  const preparedArtifactSizes = resolvedDerivedDatasetTemplates
+    .filter((datasetTemplate) => Boolean(datasetTemplate.artifactUrl))
+    .map((datasetTemplate) => datasetTemplate.size);
 
   const now = new Date();
   const importJob = await adminRepository.createSystemJob({
@@ -565,8 +645,9 @@ async function persistCanonicalDatabaseImport(
     },
     result: {
       schemaTemplateId: schemaTemplate.id,
-      sourceDatasetTemplateId: sourceDatasetTemplate.id,
-      derivedDatasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
+      sourceDatasetTemplateId: resolvedSourceDatasetTemplate.id,
+      derivedDatasetTemplateIds: resolvedDerivedDatasetTemplates.map((dataset) => dataset.id),
+      sourcePreparedArtifact: generatedSourcePreparedArtifact,
     },
     attempts: 1,
     maxAttempts: 1,
@@ -583,11 +664,13 @@ async function persistCanonicalDatabaseImport(
           status: 'completed',
           payload: {
             schemaTemplateId: schemaTemplate.id,
-            sourceDatasetTemplateId: sourceDatasetTemplate.id,
+            sourceDatasetTemplateId: resolvedSourceDatasetTemplate.id,
           },
           result: {
-            generatedSizes: derivedDatasetTemplates.map((dataset) => dataset.size),
-            datasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
+            generatedSizes: resolvedDerivedDatasetTemplates.map((dataset) => dataset.size),
+            datasetTemplateIds: resolvedDerivedDatasetTemplates.map((dataset) => dataset.id),
+            preparedArtifactSizes,
+            preparedArtifactDatasetTemplateIds,
           },
           attempts: 1,
           maxAttempts: 1,
@@ -598,8 +681,8 @@ async function persistCanonicalDatabaseImport(
 
   return {
     schemaTemplate,
-    sourceDatasetTemplate,
-    derivedDatasetTemplates,
+    sourceDatasetTemplate: resolvedSourceDatasetTemplate,
+    derivedDatasetTemplates: resolvedDerivedDatasetTemplates,
     sourceScale,
     sourceTotalRows,
     jobs: {

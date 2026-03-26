@@ -46,7 +46,12 @@ vi.mock('../../../db/repositories', () => ({
   },
 }));
 
+vi.mock('../../../lib/storage', () => ({
+  uploadFile: vi.fn(async (objectName: string) => objectName),
+}));
+
 import { adminRepository, usersRepository } from '../../../db/repositories';
+import { uploadFile } from '../../../lib/storage';
 import { ValidationError } from '../../../lib/errors';
 import {
   createAdminUser,
@@ -170,6 +175,7 @@ const makeAdminConfigRow = (overrides: Partial<AdminConfigRow> = {}): AdminConfi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  const datasetTemplates = new Map<string, DatasetTemplateRow>();
   vi.mocked(usersRepository.findRoleByName).mockResolvedValue({
     id: 'role-learner',
     name: 'learner',
@@ -211,9 +217,20 @@ beforeEach(() => {
   vi.mocked(adminRepository.createSchemaTemplate).mockImplementation(async (data: any) =>
     makeSchemaTemplate(data),
   );
-  vi.mocked(adminRepository.createDatasetTemplate).mockImplementation(async (data: any) =>
-    makeDatasetTemplate(data.size, data),
-  );
+  vi.mocked(adminRepository.createDatasetTemplate).mockImplementation(async (data: any) => {
+    const row = makeDatasetTemplate(data.size, data);
+    datasetTemplates.set(row.id, row);
+    return row;
+  });
+  vi.mocked(adminRepository.updateDatasetTemplate).mockImplementation(async (id: string, data: any) => {
+    const existing = datasetTemplates.get(id);
+    const size =
+      existing?.size ??
+      (id.replace(/^dataset-/, '') as 'tiny' | 'small' | 'medium' | 'large');
+    const row = makeDatasetTemplate(size, { ...(existing ?? {}), id, ...data });
+    datasetTemplates.set(id, row);
+    return row;
+  });
   vi.mocked(adminRepository.createSystemJob).mockImplementation(async (data: any) =>
     makeSystemJob(data),
   );
@@ -232,7 +249,25 @@ describe('importCanonicalDatabase()', () => {
     const result = await importCanonicalDatabase('admin-1', {
       name: 'Retail Analytics',
       description: 'Retail warehouse',
-      definition: { tables: [{ name: 'orders' }] },
+      definition: {
+        tables: [
+          {
+            name: 'customers',
+            columns: [
+              { name: 'id', type: 'serial primary key' },
+              { name: 'email', type: 'text unique not null' },
+            ],
+          },
+          {
+            name: 'orders',
+            columns: [
+              { name: 'id', type: 'serial primary key' },
+              { name: 'customer_id', type: 'integer not null references customers(id)' },
+              { name: 'total_cents', type: 'integer not null' },
+            ],
+          },
+        ],
+      },
       canonicalDataset: {
         artifactUrl: 'https://cdn.example.com/datasets/retail-large.dump',
         rowCounts: {
@@ -265,11 +300,13 @@ describe('importCanonicalDatabase()', () => {
       'small',
       'medium',
     ]);
+    expect(result.derivedDatasetTemplates.every((dataset) => typeof dataset.artifactUrl === 'string')).toBe(true);
     expect(result.derivedDatasetTemplates.map((dataset) => Object.values(dataset.rowCounts as Record<string, number>).reduce((total, count) => total + count, 0))).toEqual([
       100,
       10_000,
       1_000_000,
     ]);
+    expect(vi.mocked(uploadFile)).toHaveBeenCalledTimes(3);
     expect(adminRepository.createSystemJob).toHaveBeenCalledTimes(2);
     expect(result.jobs.datasetGenerationJob).not.toBeNull();
   });
@@ -281,7 +318,25 @@ describe('importCanonicalDatabase()', () => {
 
     const result = await importCanonicalDatabase('admin-1', {
       name: 'Retail Analytics',
-      definition: { tables: [{ name: 'events' }] },
+      definition: {
+        tables: [
+          {
+            name: 'sessions',
+            columns: [
+              { name: 'id', type: 'serial primary key' },
+              { name: 'started_at', type: 'timestamp not null' },
+            ],
+          },
+          {
+            name: 'events',
+            columns: [
+              { name: 'id', type: 'serial primary key' },
+              { name: 'session_id', type: 'integer not null references sessions(id)' },
+              { name: 'event_name', type: 'text not null' },
+            ],
+          },
+        ],
+      },
       canonicalDataset: {
         name: 'Retail Analytics Import',
         rowCounts: {
@@ -299,8 +354,10 @@ describe('importCanonicalDatabase()', () => {
       }),
     );
     expect(result.sourceScale).toBe('small');
+    expect(result.sourceDatasetTemplate.artifactUrl).toMatch(/^s3:\/\/sqlcraft\/dataset-templates\/dataset-small\.sql\.gz$/);
     expect(result.derivedDatasetTemplates).toEqual([]);
     expect(result.jobs.datasetGenerationJob).toBeNull();
+    expect(vi.mocked(uploadFile)).toHaveBeenCalledTimes(1);
     expect(adminRepository.createSystemJob).toHaveBeenCalledTimes(1);
   });
 

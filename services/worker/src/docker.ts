@@ -190,7 +190,7 @@ export async function runPsqlInSandboxContainer(params: {
   containerRef: string;
   dbUser: string;
   dbName: string;
-  sql: string;
+  sql: string | Buffer;
 }): Promise<void> {
   const { containerRef, dbUser, dbName, sql } = params;
   await runDockerWithInput(

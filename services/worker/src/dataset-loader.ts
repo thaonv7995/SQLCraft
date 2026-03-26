@@ -408,14 +408,14 @@ async function restoreFromArtifact(params: {
       containerRef,
       dbUser,
       dbName,
-      sql: bytes.toString('utf8'),
+      sql: bytes,
     });
     logger.info({ artifactRef }, 'Dataset restored from .sql artifact');
     return true;
   }
 
   if (extension === '.sql.gz') {
-    const sql = gunzipSync(bytes).toString('utf8');
+    const sql = gunzipSync(bytes);
     await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql });
     logger.info({ artifactRef }, 'Dataset restored from .sql.gz artifact');
     return true;
@@ -442,8 +442,9 @@ export async function loadDatasetIntoSandbox(params: {
   dbName: string;
   datasetTemplate: DatasetTemplateDefinition;
   schema: SchemaDefinition | null;
+  ensureSchemaApplied?: () => Promise<void>;
 }): Promise<void> {
-  const { logger, containerRef, dbUser, dbName, datasetTemplate, schema } = params;
+  const { logger, containerRef, dbUser, dbName, datasetTemplate, schema, ensureSchemaApplied } = params;
 
   if (datasetTemplate.artifactUrl) {
     try {
@@ -468,6 +469,8 @@ export async function loadDatasetIntoSandbox(params: {
       );
     }
   }
+
+  await ensureSchemaApplied?.();
 
   await applySyntheticSeedFromRowCounts({
     logger,
