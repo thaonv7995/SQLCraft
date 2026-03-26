@@ -2,7 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
-import { sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
+import { schemaCompletionSource, sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { Prec } from '@codemirror/state';
@@ -97,6 +97,10 @@ type SchemaCompletion = {
   detail?: string;
   info?: string;
   boost?: number;
+  section?: {
+    name: string;
+    rank: number;
+  };
 };
 
 type SqlNamespaceTag = {
@@ -107,6 +111,35 @@ type SqlNamespaceTag = {
 function isNamespaceTag(value: unknown): value is SqlNamespaceTag {
   return !!value && typeof value === 'object' && !Array.isArray(value) && 'self' in value;
 }
+
+const TABLE_COMPLETION_SECTION = {
+  name: 'Tables',
+  rank: 1,
+} as const;
+
+const FIELD_COMPLETION_SECTION = {
+  name: 'Fields',
+  rank: 0,
+} as const;
+
+type SqlCompletionContextKind = 'table' | 'field' | 'any';
+
+type SqlCompletionResult = {
+  from: number;
+  to?: number;
+  options: readonly SchemaCompletion[];
+  validFor?: RegExp | ((text: string, from: number, to: number, state: unknown) => boolean);
+  filter?: boolean;
+  getMatch?: (completion: SchemaCompletion, matched?: readonly number[]) => readonly number[];
+  update?: (
+    current: SqlCompletionResult,
+    from: number,
+    to: number,
+    context: { state: { doc: { toString(): string } }; pos: number },
+  ) => SqlCompletionResult | null;
+  map?: unknown;
+  commitCharacters?: readonly string[];
+};
 
 function buildColumnDetail(column: SqlEditorSchemaColumn): string | undefined {
   const parts = [column.type, column.isPrimary ? 'PK' : null, column.isForeign ? 'FK' : null].filter(Boolean);
@@ -120,6 +153,7 @@ function buildColumnCompletion(column: SqlEditorSchemaColumn, info?: string): Sc
     detail: buildColumnDetail(column),
     info,
     boost: column.isPrimary ? 100 : column.isForeign ? 98 : 96,
+    section: FIELD_COMPLETION_SECTION,
   };
 }
 
@@ -130,6 +164,7 @@ function buildTableNamespace(table: SqlEditorSchemaTable): SqlNamespaceTag {
       type: 'table',
       detail: `${table.columns.length} cols`,
       boost: 99,
+      section: TABLE_COMPLETION_SECTION,
     },
     children: table.columns.map((column) =>
       buildColumnCompletion(
@@ -199,6 +234,101 @@ function buildCompletionSchema(schema?: readonly SqlEditorSchemaTable[]): SQLNam
   return namespace;
 }
 
+function getSqlCompletionContext(value: string, cursor = value.length): SqlCompletionContextKind {
+  const beforeCursor = value.slice(0, cursor);
+  const currentIdentifierMatch = /(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|[a-z_][\w$]*)?$/i.exec(beforeCursor);
+  const contextBeforeIdentifier = currentIdentifierMatch
+    ? beforeCursor.slice(0, currentIdentifierMatch.index)
+    : beforeCursor;
+  const trimmedContext = contextBeforeIdentifier.trimEnd();
+
+  if (/(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|[a-z_][\w$]*)\.\s*$/i.test(trimmedContext)) {
+    return 'field';
+  }
+
+  if (
+    /\b(?:from|join|update|into|table)\s+$/i.test(contextBeforeIdentifier) ||
+    /\bdelete\s+from\s+$/i.test(contextBeforeIdentifier) ||
+    /\btruncate(?:\s+table)?\s+$/i.test(contextBeforeIdentifier)
+  ) {
+    return 'table';
+  }
+
+  return 'any';
+}
+
+function filterCompletionOptionsForContext(
+  options: readonly SchemaCompletion[],
+  context: SqlCompletionContextKind,
+): readonly SchemaCompletion[] {
+  if (context === 'table') {
+    return options.filter((option) => option.type === 'table');
+  }
+
+  if (context === 'field') {
+    return options.filter((option) => option.type === 'property');
+  }
+
+  return options;
+}
+
+function filterCompletionResultForContext(
+  result: SqlCompletionResult | null,
+  context: SqlCompletionContextKind,
+): SqlCompletionResult | null {
+  if (!result) {
+    return null;
+  }
+
+  const options = filterCompletionOptionsForContext(result.options, context);
+
+  if (options.length === result.options.length) {
+    return result;
+  }
+
+  if (options.length === 0) {
+    return null;
+  }
+
+  return {
+    ...result,
+    options,
+  };
+}
+
+function isPromiseLike<T>(value: unknown): value is Promise<T> {
+  return !!value && typeof value === 'object' && 'then' in value && typeof value.then === 'function';
+}
+
+function buildSqlSchemaCompletionSource(schema?: SQLNamespace) {
+  if (!schema) {
+    return () => null;
+  }
+
+  const source = schemaCompletionSource({
+    dialect: PostgreSQL,
+    schema,
+  });
+
+  return (context: {
+    state: {
+      doc: {
+        toString(): string;
+      };
+    };
+    pos: number;
+  }) => {
+    const completionContext = getSqlCompletionContext(context.state.doc.toString(), context.pos);
+    const result = source(context as never);
+
+    if (isPromiseLike<SqlCompletionResult | null>(result)) {
+      return result.then((resolved) => filterCompletionResultForContext(resolved, completionContext));
+    }
+
+    return filterCompletionResultForContext(result as SqlCompletionResult | null, completionContext);
+  };
+}
+
 export interface SqlEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -229,11 +359,19 @@ export function SqlEditor({
 
   const extensions = useCallback(() => {
     const exts = [
-      sql({ dialect: PostgreSQL, schema: completionSchema }),
+      sql({ dialect: PostgreSQL }),
       sqlForgeTheme,
       EditorView.lineWrapping,
       keymap.of([indentWithTab, ...defaultKeymap]),
     ];
+
+    if (completionSchema) {
+      exts.push(
+        PostgreSQL.language.data.of({
+          autocomplete: buildSqlSchemaCompletionSource(completionSchema),
+        }),
+      );
+    }
 
     if (onExecute) {
       exts.push(
@@ -325,5 +463,8 @@ export function SqlEditor({
 
 export const __private__ = {
   buildCompletionSchema,
+  buildSqlSchemaCompletionSource,
+  filterCompletionOptionsForContext,
+  getSqlCompletionContext,
   isNamespaceTag,
 };

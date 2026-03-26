@@ -93,3 +93,61 @@ describe('buildCompletionSchema', () => {
     });
   });
 });
+
+describe('buildSqlSchemaCompletionSource', () => {
+  const schema = [
+    {
+      name: 'countries',
+      columns: [
+        { name: 'code', type: 'char(2)', isPrimary: true },
+        { name: 'name', type: 'text' },
+      ],
+    },
+    {
+      name: 'cities',
+      columns: [
+        { name: 'id', type: 'integer', isPrimary: true },
+        { name: 'country_code', type: 'char(2)', isForeign: true, references: 'countries.code' },
+        { name: 'name', type: 'text' },
+      ],
+    },
+  ] satisfies SqlEditorSchemaTable[];
+
+  const completionSchema = __private__.buildCompletionSchema(schema) as Record<string, unknown>;
+  const options = Object.values(completionSchema)
+    .filter(__private__.isNamespaceTag)
+    .map((entry) => entry.self);
+
+  it('detects table-only completion contexts after FROM-like clauses', () => {
+    expect(__private__.getSqlCompletionContext('SELECT * FROM c')).toBe('table');
+    expect(__private__.getSqlCompletionContext('DELETE FROM c')).toBe('table');
+  });
+
+  it('detects field-only completion contexts after a qualified table prefix', () => {
+    expect(__private__.getSqlCompletionContext('SELECT countries.')).toBe('field');
+    expect(__private__.getSqlCompletionContext('SELECT countries.c')).toBe('field');
+  });
+
+  it('filters mixed completion options down to tables in table contexts', () => {
+    const filtered = __private__.filterCompletionOptionsForContext(options, 'table');
+    const labels = filtered.map((option) => option.label);
+
+    expect(labels).toEqual(expect.arrayContaining(['cities', 'countries']));
+    expect(labels).not.toEqual(expect.arrayContaining(['country_code', 'code', 'name']));
+  });
+
+  it('filters mixed completion options down to fields in field contexts', () => {
+    const filtered = __private__.filterCompletionOptionsForContext(options, 'field');
+    const labels = filtered.map((option) => option.label);
+
+    expect(labels).toEqual(expect.arrayContaining(['country_code', 'code', 'name']));
+    expect(labels).not.toEqual(expect.arrayContaining(['cities', 'countries']));
+  });
+
+  it('groups tables and fields into separate sections', () => {
+    const byLabel = new Map(options.map((option) => [option.label, option]));
+
+    expect(byLabel.get('countries')?.section).toMatchObject({ name: 'Tables' });
+    expect(byLabel.get('country_code')?.section).toMatchObject({ name: 'Fields' });
+  });
+});
