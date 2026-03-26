@@ -14,16 +14,6 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 - **Dataset Scaling** — Same schema across 4 scales (100 → 10M+ rows) to reveal real performance differences.
 - **Optimization Labs** — Side-by-side query benchmarking with index management and schema diff.
 
-## Access Model
-
-- **Roles** — SQLCraft uses only two system roles: **User** and **Admin**.
-- **User contributions** — Content submission is a workflow available to signed-in users, not a separate RBAC role.
-
-## Legacy Naming Note
-
-- Some internal routes, tables, and components still use historical names such as `tracks`, `lessons`, `challenges`, and `learning_sessions`.
-- Those names are implementation debt, not the canonical product framing.
-
 ## Tech Stack
 
 | Layer | Technology |
