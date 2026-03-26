@@ -4,6 +4,7 @@ vi.mock('../../../db/repositories', () => ({
   sessionsRepository: {
     findPublishedLessonVersion: vi.fn(),
     findPublishedChallengeVersion: vi.fn(),
+    findPublishedChallengeVersionWithLesson: vi.fn(),
     findByUserId: vi.fn(),
     findById: vi.fn(),
     expireSession: vi.fn(),
@@ -41,7 +42,7 @@ import {
   getSessionSchemaDiff,
   listUserSessions,
 } from '../sessions.service';
-import { NotFoundError, ForbiddenError } from '../../../lib/errors';
+import { NotFoundError, ForbiddenError, ValidationError } from '../../../lib/errors';
 import type { SessionRow, SandboxRow } from '../../../db/repositories';
 import type { DatasetTemplateRow } from '../../../db/repositories/sessions.repository';
 
@@ -55,6 +56,28 @@ const makeLessonVersion = (overrides = {}) => ({
   isPublished: true,
   schemaTemplateId: null,
   datasetTemplateId: null,
+  publishedAt: new Date(),
+  createdAt: new Date(),
+  createdBy: 'admin-1',
+  ...overrides,
+});
+
+const makeChallengeVersionWithLesson = (overrides = {}) => ({
+  id: 'cv-1',
+  challengeId: 'challenge-1',
+  lessonId: 'lesson-1',
+  versionNo: 1,
+  problemStatement: 'Return active users.',
+  hintText: null,
+  expectedResultColumns: ['id', 'email'],
+  referenceSolution: 'SELECT id, email FROM users WHERE active = true;',
+  validatorType: 'result_set',
+  validatorConfig: null,
+  isPublished: true,
+  reviewStatus: 'approved' as const,
+  reviewNotes: null,
+  reviewedBy: 'admin-1',
+  reviewedAt: new Date(),
   publishedAt: new Date(),
   createdAt: new Date(),
   createdBy: 'admin-1',
@@ -268,6 +291,19 @@ describe('createSession()', () => {
     expect(sessionsRepository.createSandbox).toHaveBeenCalledWith(
       expect.objectContaining({ datasetTemplateId: 'dataset-large' }),
     );
+  });
+
+  it('throws ValidationError when the challenge version belongs to a different lesson', async () => {
+    vi.mocked(sessionsRepository.findPublishedLessonVersion).mockResolvedValue(
+      makeLessonVersion({ lessonId: 'lesson-1' }),
+    );
+    vi.mocked(sessionsRepository.findPublishedChallengeVersionWithLesson).mockResolvedValue(
+      makeChallengeVersionWithLesson({ id: 'cv-1', lessonId: 'lesson-2' }),
+    );
+
+    await expect(
+      createSession('user-1', { lessonVersionId: 'lv-1', challengeVersionId: 'cv-1' }),
+    ).rejects.toThrow(ValidationError);
   });
 });
 

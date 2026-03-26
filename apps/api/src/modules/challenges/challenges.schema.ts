@@ -33,7 +33,7 @@ export const GlobalLeaderboardQuerySchema = z.object({
 // Body schemas
 export const SubmitAttemptSchema = z.object({
   learningSessionId: z.string().uuid(),
-  challengeVersionId: z.string().uuid(),
+  challengeVersionId: z.string().uuid().optional(),
   queryExecutionId: z.string().uuid(),
 });
 

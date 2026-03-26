@@ -209,15 +209,18 @@ export interface ChallengeVersionDetail {
 
 export interface ChallengeEvaluation {
   isCorrect: boolean;
+  passesChallenge?: boolean;
   score?: number;
-  correctnessScore?: number;
-  performanceScore?: number;
-  indexScore?: number;
   feedbackText?: string;
   pointsPossible?: number;
   baselineDurationMs?: number | null;
   latestDurationMs?: number | null;
+  meetsPerformanceTarget?: boolean | null;
+  requiresIndexOptimization?: boolean;
   usedIndexing?: boolean;
+  queryTotalCost?: number | null;
+  queryActualTime?: number | null;
+  schemaDiff?: Record<string, unknown> | null;
 }
 
 export interface ChallengeAttempt {
@@ -235,16 +238,21 @@ export interface ChallengeAttempt {
     status: string;
     rowsReturned: number | null;
     durationMs: number | null;
+    totalCost: number | null;
   };
 }
 
 export interface ChallengeLeaderboardEntry {
   rank: number;
+  attemptId: string;
+  queryExecutionId: string;
   userId: string;
   username: string;
   displayName: string;
   avatarUrl?: string | null;
-  bestScore: number;
+  bestDurationMs: number | null;
+  bestTotalCost: number | null;
+  sqlText: string;
   attemptsCount: number;
   passedAttempts: number;
   lastSubmittedAt: string;
@@ -1455,7 +1463,7 @@ export const challengesApi = {
 
   submitAttempt: (payload: {
     learningSessionId: string;
-    challengeVersionId: string;
+    challengeVersionId?: string;
     queryExecutionId: string;
   }) => api.post<ChallengeAttempt>('/challenge-attempts', payload).then((r) => r.data),
 

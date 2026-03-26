@@ -1,0 +1,3 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "challenge_attempts_query_execution_uidx" ON "challenge_attempts" ("query_execution_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "challenge_attempts_session_version_attempt_no_uidx" ON "challenge_attempts" ("learning_session_id","challenge_version_id","attempt_no");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "challenge_attempts_session_challenge_submitted_idx" ON "challenge_attempts" ("learning_session_id","challenge_version_id","submitted_at");

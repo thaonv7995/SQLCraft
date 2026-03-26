@@ -192,7 +192,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['learningSessionId', 'challengeVersionId', 'queryExecutionId'],
+          required: ['learningSessionId', 'queryExecutionId'],
           properties: {
             learningSessionId: { type: 'string', format: 'uuid' },
             challengeVersionId: { type: 'string', format: 'uuid' },

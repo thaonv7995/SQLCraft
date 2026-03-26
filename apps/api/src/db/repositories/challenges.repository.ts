@@ -63,12 +63,17 @@ export interface ChallengeAttemptWithExecutionRow {
 }
 
 export interface ChallengeLeaderboardAttemptRow {
+  attemptId: string;
+  queryExecutionId: string;
   userId: string;
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
+  sqlText: string;
+  durationMs: number | null;
   score: number | null;
   status: ChallengeAttemptRow['status'];
+  evaluation: unknown;
   submittedAt: Date;
 }
 
@@ -88,6 +93,12 @@ export interface SessionExecutionSummaryRow {
   status: QueryExecutionRow['status'];
   durationMs: number | null;
   submittedAt: Date;
+}
+
+export interface SessionSubmissionContextRow {
+  userId: string;
+  challengeVersionId: string | null;
+  lessonVersionId: string | null;
 }
 
 export interface ChallengeCatalogRow {
@@ -156,6 +167,41 @@ export interface EditableChallengeDetailRow {
 export class ChallengesRepository {
   private get db() {
     return getDb();
+  }
+
+  private async getVersionMetadataMap(
+    versionIds: string[],
+  ): Promise<
+    Map<
+      string,
+      Pick<
+        ChallengeVersionRow,
+        | 'id'
+        | 'versionNo'
+        | 'validatorType'
+        | 'reviewStatus'
+        | 'reviewNotes'
+        | 'reviewedAt'
+      >
+    >
+  > {
+    if (versionIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.db
+      .select({
+        id: schema.challengeVersions.id,
+        versionNo: schema.challengeVersions.versionNo,
+        validatorType: schema.challengeVersions.validatorType,
+        reviewStatus: schema.challengeVersions.reviewStatus,
+        reviewNotes: schema.challengeVersions.reviewNotes,
+        reviewedAt: schema.challengeVersions.reviewedAt,
+      })
+      .from(schema.challengeVersions)
+      .where(inArray(schema.challengeVersions.id, versionIds));
+
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   private async getLatestVersionMap(
@@ -369,6 +415,20 @@ export class ChallengesRepository {
       .orderBy(asc(schema.queryExecutions.submittedAt));
   }
 
+  async findSessionSubmissionContext(sessionId: string): Promise<SessionSubmissionContextRow | null> {
+    const [row] = await this.db
+      .select({
+        userId: schema.learningSessions.userId,
+        challengeVersionId: schema.learningSessions.challengeVersionId,
+        lessonVersionId: schema.learningSessions.lessonVersionId,
+      })
+      .from(schema.learningSessions)
+      .where(eq(schema.learningSessions.id, sessionId))
+      .limit(1);
+
+    return row ?? null;
+  }
+
   async countAttempts(sessionId: string, challengeVersionId: string): Promise<number> {
     const [row] = await this.db
       .select({ count: count() })
@@ -393,6 +453,16 @@ export class ChallengesRepository {
       .from(schema.challengeAttempts)
       .where(eq(schema.challengeAttempts.id, id))
       .limit(1);
+    return row ?? null;
+  }
+
+  async findAttemptByQueryExecutionId(queryExecutionId: string): Promise<ChallengeAttemptRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.challengeAttempts)
+      .where(eq(schema.challengeAttempts.queryExecutionId, queryExecutionId))
+      .limit(1);
+
     return row ?? null;
   }
 
@@ -439,12 +509,17 @@ export class ChallengesRepository {
   ): Promise<ChallengeLeaderboardAttemptRow[]> {
     return this.db
       .select({
+        attemptId: schema.challengeAttempts.id,
+        queryExecutionId: schema.challengeAttempts.queryExecutionId,
         userId: schema.users.id,
         username: schema.users.username,
         displayName: schema.users.displayName,
         avatarUrl: schema.users.avatarUrl,
+        sqlText: schema.queryExecutions.sqlText,
+        durationMs: schema.queryExecutions.durationMs,
         score: schema.challengeAttempts.score,
         status: schema.challengeAttempts.status,
+        evaluation: schema.challengeAttempts.evaluation,
         submittedAt: schema.challengeAttempts.submittedAt,
       })
       .from(schema.challengeAttempts)
@@ -452,9 +527,13 @@ export class ChallengesRepository {
         schema.learningSessions,
         eq(schema.challengeAttempts.learningSessionId, schema.learningSessions.id),
       )
+      .innerJoin(
+        schema.queryExecutions,
+        eq(schema.challengeAttempts.queryExecutionId, schema.queryExecutions.id),
+      )
       .innerJoin(schema.users, eq(schema.learningSessions.userId, schema.users.id))
       .where(eq(schema.challengeAttempts.challengeVersionId, challengeVersionId))
-      .orderBy(desc(schema.challengeAttempts.score), desc(schema.challengeAttempts.submittedAt));
+      .orderBy(desc(schema.challengeAttempts.submittedAt));
   }
 
   async listPassedAttemptsForGlobalLeaderboard(
@@ -530,18 +609,24 @@ export class ChallengesRepository {
         asc(schema.challenges.sortOrder),
       );
 
-    const latestVersionMap = await this.getLatestVersionMap(rows.map((row) => row.id));
+    const publishedVersionMap = await this.getVersionMetadataMap(
+      rows
+        .map((row) => row.publishedVersionId)
+        .filter((versionId): versionId is string => typeof versionId === 'string'),
+    );
 
     return rows.map((row) => {
-      const latestVersion = latestVersionMap.get(row.id);
+      const publishedVersion = row.publishedVersionId
+        ? publishedVersionMap.get(row.publishedVersionId)
+        : null;
       return {
         ...row,
-        latestVersionId: latestVersion?.id ?? null,
-        latestVersionNo: latestVersion?.versionNo ?? null,
-        validatorType: latestVersion?.validatorType ?? null,
-        latestVersionReviewStatus: latestVersion?.reviewStatus ?? null,
-        latestVersionReviewNotes: latestVersion?.reviewNotes ?? null,
-        latestVersionReviewedAt: latestVersion?.reviewedAt ?? null,
+        latestVersionId: publishedVersion?.id ?? null,
+        latestVersionNo: publishedVersion?.versionNo ?? null,
+        validatorType: publishedVersion?.validatorType ?? null,
+        latestVersionReviewStatus: publishedVersion?.reviewStatus ?? null,
+        latestVersionReviewNotes: publishedVersion?.reviewNotes ?? null,
+        latestVersionReviewedAt: publishedVersion?.reviewedAt ?? null,
       };
     });
   }

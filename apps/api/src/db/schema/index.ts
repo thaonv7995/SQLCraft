@@ -354,23 +354,39 @@ export const queryExecutionPlans = pgTable('query_execution_plans', {
   createdAt: timestamp('created_at').notNull().default(sql`now()`),
 });
 
-export const challengeAttempts = pgTable('challenge_attempts', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  learningSessionId: uuid('learning_session_id')
-    .notNull()
-    .references(() => learningSessions.id),
-  challengeVersionId: uuid('challenge_version_id')
-    .notNull()
-    .references(() => challengeVersions.id),
-  queryExecutionId: uuid('query_execution_id')
-    .notNull()
-    .references(() => queryExecutions.id),
-  attemptNo: integer('attempt_no').notNull().default(1),
-  status: attemptStatusEnum('status').notNull().default('pending'),
-  score: integer('score'),
-  evaluation: jsonb('evaluation'),
-  submittedAt: timestamp('submitted_at').notNull().default(sql`now()`),
-});
+export const challengeAttempts = pgTable(
+  'challenge_attempts',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    learningSessionId: uuid('learning_session_id')
+      .notNull()
+      .references(() => learningSessions.id),
+    challengeVersionId: uuid('challenge_version_id')
+      .notNull()
+      .references(() => challengeVersions.id),
+    queryExecutionId: uuid('query_execution_id')
+      .notNull()
+      .references(() => queryExecutions.id),
+    attemptNo: integer('attempt_no').notNull().default(1),
+    status: attemptStatusEnum('status').notNull().default('pending'),
+    score: integer('score'),
+    evaluation: jsonb('evaluation'),
+    submittedAt: timestamp('submitted_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    queryExecutionUniqueIdx: uniqueIndex('challenge_attempts_query_execution_uidx').on(
+      table.queryExecutionId,
+    ),
+    sessionChallengeAttemptNoUniqueIdx: uniqueIndex(
+      'challenge_attempts_session_version_attempt_no_uidx',
+    ).on(table.learningSessionId, table.challengeVersionId, table.attemptNo),
+    sessionChallengeSubmittedIdx: index('challenge_attempts_session_challenge_submitted_idx').on(
+      table.learningSessionId,
+      table.challengeVersionId,
+      table.submittedAt,
+    ),
+  }),
+);
 
 // Platform Ops
 export const auditLogs = pgTable('audit_logs', {

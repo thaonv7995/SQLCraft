@@ -8,7 +8,7 @@ const ITEMS = [
   { href: '/dashboard', label: 'Home', icon: 'dashboard' },
   { href: '/explore', label: 'Data', icon: 'database' },
   { href: '/lab', label: 'Lab', icon: 'terminal' },
-  { href: '/leaderboard', label: 'Rankings', icon: 'military_tech' },
+  { href: '/leaderboard', label: 'Challenges', icon: 'target' },
 ] as const;
 
 export function MobileAppNav() {

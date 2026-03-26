@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Documentation',
-  description: 'Hướng dẫn sử dụng SQLCraft: luyện SQL, rankings, submissions và phím tắt.',
+  description: 'Hướng dẫn sử dụng SQLCraft: luyện SQL, challenge hub, top users và phím tắt.',
 };
 
 const SECTIONS = [
@@ -26,10 +26,10 @@ const SECTIONS = [
     icon: 'terminal',
   },
   {
-    title: 'Rankings',
-    description: 'Theo dõi bảng xếp hạng SQL practice theo điểm và tiến độ challenge.',
+    title: 'Challenges',
+    description: 'Mở challenge hub, xem top users theo điểm, rồi đi vào từng bài để add submission.',
     href: '/leaderboard',
-    icon: 'military_tech',
+    icon: 'target',
   },
 ] as const;
 
@@ -86,9 +86,9 @@ export default function DocsPage() {
 
       <div className="rounded-xl border border-dashed border-outline-variant/25 bg-surface-container-low/50 p-5 text-sm text-on-surface-variant">
         <p>
-          Cần hỗ trợ về challenge drafts? Mở{' '}
-          <Link href="/submissions" className="font-medium text-on-surface underline-offset-2 hover:underline">
-            Submissions
+          Cần quay lại challenge hub? Mở{' '}
+          <Link href="/leaderboard" className="font-medium text-on-surface underline-offset-2 hover:underline">
+            Challenges
           </Link>
           {' '}hoặc liên hệ quản trị qua menu tài khoản nếu bạn cần hỗ trợ hệ thống.
         </p>

@@ -1,6 +1,7 @@
 import { sessionsRepository } from '../../db/repositories';
 import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/repositories';
 import type {
+  ChallengeVersionWithLessonRow,
   DatasetTemplateRow,
   SchemaTemplateRow,
 } from '../../db/repositories/sessions.repository';
@@ -369,10 +370,20 @@ export async function createSession(
     throw new NotFoundError('Lesson version not found or not published');
   }
 
+  let challengeVersion: ChallengeVersionWithLessonRow | null = null;
+
   if (body.challengeVersionId) {
-    const cv = await sessionsRepository.findPublishedChallengeVersion(body.challengeVersionId);
+    challengeVersion = await sessionsRepository.findPublishedChallengeVersionWithLesson(
+      body.challengeVersionId,
+    );
+
+    const cv = challengeVersion;
     if (!cv) {
       throw new NotFoundError('Challenge version not found or not published');
+    }
+
+    if (cv.lessonId !== lessonVersion.lessonId) {
+      throw new ValidationError('Challenge version does not belong to the selected lesson');
     }
   }
 

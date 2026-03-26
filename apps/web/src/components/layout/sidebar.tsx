@@ -15,8 +15,7 @@ const MAIN_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/explore', label: 'Databases', icon: 'database' },
   { href: '/lab', label: 'SQL Lab', icon: 'terminal' },
-  { href: '/leaderboard', label: 'Rankings', icon: 'military_tech' },
-  { href: '/submissions', label: 'Submissions', icon: 'volunteer_activism' },
+  { href: '/leaderboard', label: 'Challenges', icon: 'target' },
   { href: '/docs', label: 'Documentation', icon: 'menu_book' },
 ];
 

@@ -59,6 +59,17 @@ function sessionIdFromParams(params: { sessionId?: string | string[] }): string 
   return '';
 }
 
+function normalizeMetric(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function compareNullableAscending(left: number | null, right: number | null) {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
+}
+
 function getEffectiveSessionStatus(
   session?: Pick<LearningSession, 'status' | 'sandboxStatus' | 'sandbox'> | null,
 ): LearningSession['status'] | undefined {
@@ -1366,16 +1377,37 @@ export default function LabPage() {
   const challengeTitle = lessonContext?.challengeTitle ?? fallbackChallenge?.title;
   const latestSuccessfulExecution =
     queryHistory.find((execution) => execution.status === 'success') ?? null;
-  const bestChallengeAttempt = challengeAttempts.reduce<(typeof challengeAttempts)[number] | null>(
-    (best, attempt) => {
+  const bestChallengeAttempt = challengeAttempts
+    .filter((attempt) => attempt.status === 'passed')
+    .reduce<(typeof challengeAttempts)[number] | null>((best, attempt) => {
       if (!best) {
         return attempt;
       }
 
-      return (attempt.score ?? -1) > (best.score ?? -1) ? attempt : best;
-    },
-    null,
-  );
+      const durationComparison = compareNullableAscending(
+        normalizeMetric(attempt.queryExecution.durationMs),
+        normalizeMetric(best.queryExecution.durationMs),
+      );
+      if (durationComparison < 0) {
+        return attempt;
+      }
+      if (durationComparison > 0) {
+        return best;
+      }
+
+      const costComparison = compareNullableAscending(
+        normalizeMetric(attempt.queryExecution.totalCost),
+        normalizeMetric(best.queryExecution.totalCost),
+      );
+      if (costComparison < 0) {
+        return attempt;
+      }
+      if (costComparison > 0) {
+        return best;
+      }
+
+      return new Date(attempt.submittedAt) < new Date(best.submittedAt) ? attempt : best;
+    }, null);
   const latestChallengeAttempt = challengeAttempts[0] ?? null;
   const explainPlanMode = getExplainPlanMode(currentQuery);
   const effectiveSessionStatus = getEffectiveSessionStatus(session);
@@ -1394,7 +1426,6 @@ export default function LabPage() {
 
       return challengesApi.submitAttempt({
         learningSessionId: sessionId,
-        challengeVersionId: session.challengeVersionId,
         queryExecutionId: latestSuccessfulExecution.id,
       });
     },
@@ -1404,9 +1435,13 @@ export default function LabPage() {
       });
       const feedback = attempt.evaluation?.feedbackText;
       toast.success(
-        feedback
-          ? `Attempt scored ${attempt.score ?? 0} pts. ${feedback}`
-          : `Attempt scored ${attempt.score ?? 0} pts.`,
+        attempt.status === 'passed'
+          ? feedback
+            ? `Challenge passed. +${attempt.score ?? 0} pts. ${feedback}`
+            : `Challenge passed. +${attempt.score ?? 0} pts.`
+          : feedback
+            ? `Challenge requirements not met. ${feedback}`
+            : 'Challenge requirements not met.',
         { duration: 4000 },
       );
       setActiveTab('history');
@@ -1792,7 +1827,7 @@ export default function LabPage() {
             )}
             {session?.challengeVersionId && bestChallengeAttempt ? (
               <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant lg:inline-flex">
-                Best {bestChallengeAttempt.score ?? 0} pts
+                Best {bestChallengeAttempt.queryExecution.durationMs != null ? `${bestChallengeAttempt.queryExecution.durationMs} ms` : 'validated run'}
               </span>
             ) : null}
             {session?.challengeVersionId && latestChallengeAttempt?.evaluation?.feedbackText ? (

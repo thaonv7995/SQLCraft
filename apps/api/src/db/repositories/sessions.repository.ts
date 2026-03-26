@@ -11,6 +11,7 @@ export type InsertSession = InferInsertModel<typeof schema.learningSessions>;
 export type InsertSandbox = InferInsertModel<typeof schema.sandboxInstances>;
 export type LessonVersionRow = InferSelectModel<typeof schema.lessonVersions>;
 export type ChallengeVersionRow = InferSelectModel<typeof schema.challengeVersions>;
+export type ChallengeVersionWithLessonRow = ChallengeVersionRow & { lessonId: string };
 
 export class SessionsRepository {
   private get db() {
@@ -32,6 +33,45 @@ export class SessionsRepository {
       .from(schema.challengeVersions)
       .where(and(eq(schema.challengeVersions.id, id), eq(schema.challengeVersions.isPublished, true)))
       .limit(1);
+    return row ?? null;
+  }
+
+  async findPublishedChallengeVersionWithLesson(
+    id: string,
+  ): Promise<ChallengeVersionWithLessonRow | null> {
+    const [row] = await this.db
+      .select({
+        id: schema.challengeVersions.id,
+        challengeId: schema.challengeVersions.challengeId,
+        lessonId: schema.challenges.lessonId,
+        versionNo: schema.challengeVersions.versionNo,
+        problemStatement: schema.challengeVersions.problemStatement,
+        hintText: schema.challengeVersions.hintText,
+        expectedResultColumns: schema.challengeVersions.expectedResultColumns,
+        referenceSolution: schema.challengeVersions.referenceSolution,
+        validatorType: schema.challengeVersions.validatorType,
+        validatorConfig: schema.challengeVersions.validatorConfig,
+        isPublished: schema.challengeVersions.isPublished,
+        reviewStatus: schema.challengeVersions.reviewStatus,
+        reviewNotes: schema.challengeVersions.reviewNotes,
+        reviewedBy: schema.challengeVersions.reviewedBy,
+        reviewedAt: schema.challengeVersions.reviewedAt,
+        publishedAt: schema.challengeVersions.publishedAt,
+        createdAt: schema.challengeVersions.createdAt,
+        createdBy: schema.challengeVersions.createdBy,
+      })
+      .from(schema.challengeVersions)
+      .innerJoin(schema.challenges, eq(schema.challenges.id, schema.challengeVersions.challengeId))
+      .where(
+        and(
+          eq(schema.challengeVersions.id, id),
+          eq(schema.challengeVersions.isPublished, true),
+          eq(schema.challenges.status, 'published'),
+          eq(schema.challenges.publishedVersionId, id),
+        ),
+      )
+      .limit(1);
+
     return row ?? null;
   }
 

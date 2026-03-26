@@ -7,12 +7,15 @@ import LeaderboardPage from './page';
 const mocks = vi.hoisted(() => ({
   challengesApi: {
     listPublished: vi.fn(),
-    getLeaderboard: vi.fn(),
+  },
+  leaderboardApi: {
+    get: vi.fn(),
   },
 }));
 
 vi.mock('@/lib/api', () => ({
   challengesApi: mocks.challengesApi,
+  leaderboardApi: mocks.leaderboardApi,
 }));
 
 function renderLeaderboardPage() {
@@ -80,56 +83,80 @@ describe('LeaderboardPage', () => {
       },
     ]);
 
-    mocks.challengesApi.getLeaderboard.mockImplementation(async (challengeVersionId: string) => {
-      if (challengeVersionId === 'challenge-version-2') {
+    mocks.leaderboardApi.get.mockImplementation(
+      async (period: 'weekly' | 'monthly' | 'alltime') => {
+        if (period === 'monthly') {
+          return [
+            {
+              rank: 1,
+              userId: 'user-2',
+              username: 'bob',
+              displayName: 'Bob',
+              avatarUrl: null,
+              points: 450,
+              challengesCompleted: 4,
+              streak: 6,
+            },
+          ];
+        }
+
         return [
           {
             rank: 1,
-            userId: 'user-2',
-            username: 'bob',
-            displayName: 'Bob',
+            userId: 'user-1',
+            username: 'alice',
+            displayName: 'Alice',
             avatarUrl: null,
-            bestScore: 300,
-            attemptsCount: 2,
-            passedAttempts: 2,
-            lastSubmittedAt: '2026-03-24T00:10:00.000Z',
+            points: 820,
+            challengesCompleted: 7,
+            streak: 12,
+          },
+          {
+            rank: 2,
+            userId: 'user-3',
+            username: 'carol',
+            displayName: 'Carol',
+            avatarUrl: null,
+            points: 710,
+            challengesCompleted: 6,
+            streak: 8,
           },
         ];
-      }
-
-      return [
-        {
-          rank: 1,
-          userId: 'user-1',
-          username: 'alice',
-          displayName: 'Alice',
-          avatarUrl: null,
-          bestScore: 200,
-          attemptsCount: 1,
-          passedAttempts: 1,
-          lastSubmittedAt: '2026-03-24T00:05:00.000Z',
-        },
-      ];
-    });
+      },
+    );
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders the published challenge catalog and switches leaderboard data when a challenge is selected', async () => {
+  it('renders the challenges hub with top users and challenge submission links', async () => {
     const user = userEvent.setup();
 
     renderLeaderboardPage();
 
-    expect(await screen.findByRole('heading', { name: /challenge leaderboard/i })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /filter active users/i })).toBeInTheDocument();
-    expect(await screen.findByText('Alice')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /optimize user lookup/i }));
+    expect(await screen.findByRole('heading', { name: /challenges/i })).toBeInTheDocument();
+    expect(await screen.findByText(/pick a challenge, add a submission, and compare against the top users by point/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /top users/i })).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(mocks.challengesApi.getLeaderboard).toHaveBeenCalledWith('challenge-version-2', 10);
+      expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('alltime', 25);
+    });
+
+    expect(await screen.findByText('Alice')).toBeInTheDocument();
+
+    const arenaLink = await screen.findByRole('link', {
+      name: /add submission for filter active users/i,
+    });
+    expect(arenaLink).toHaveAttribute(
+      'href',
+      '/tracks/track-1/lessons/lesson-1/challenges/challenge-1',
+    );
+
+    await user.click(screen.getByRole('button', { name: /monthly/i }));
+
+    await waitFor(() => {
+      expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('monthly', 25);
     });
 
     expect(await screen.findByText('Bob')).toBeInTheDocument();

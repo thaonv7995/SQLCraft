@@ -122,6 +122,7 @@ describe('ChallengePage', () => {
       description: 'Return only active users.',
       difficulty: 'intermediate',
       sortOrder: 1,
+      points: 100,
       problemStatement: 'Return the id and email of active users only.',
       hintText: 'Use the active flag.',
       expectedResultColumns: ['id', 'email'],
@@ -153,11 +154,15 @@ describe('ChallengePage', () => {
     mocks.challengesApi.getLeaderboard.mockResolvedValue([
       {
         rank: 1,
+        attemptId: 'attempt-1',
+        queryExecutionId: 'query-1',
         userId: 'user-1',
         username: 'alice',
         displayName: 'Alice',
         avatarUrl: null,
-        bestScore: 100,
+        bestDurationMs: 18,
+        bestTotalCost: 40,
+        sqlText: 'SELECT id, email FROM users WHERE active = true;',
         attemptsCount: 1,
         passedAttempts: 1,
         lastSubmittedAt: '2026-03-24T00:05:00.000Z',
@@ -172,7 +177,7 @@ describe('ChallengePage', () => {
     vi.clearAllMocks();
   });
 
-  it('renders challenge detail, attempts, leaderboard, and starts a challenge lab', async () => {
+  it('renders a merged challenge arena and starts a challenge lab', async () => {
     const user = userEvent.setup();
 
     renderChallengePage();
@@ -180,8 +185,12 @@ describe('ChallengePage', () => {
     expect(await screen.findByRole('heading', { name: 'Filter active users' })).toBeInTheDocument();
     expect(screen.getByText('Return the id and email of active users only.')).toBeInTheDocument();
     expect(screen.getByText('Use the active flag.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /challenge arena/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /top users/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Your Attempts' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Leaderboard' })).not.toBeInTheDocument();
     expect(screen.getByText('Alice')).toBeInTheDocument();
-    expect(screen.getAllByText('Correct!')).toHaveLength(2);
+    expect(screen.getAllByText('Correct!').length).toBeGreaterThan(0);
 
     await user.click(await screen.findByRole('button', { name: /start challenge lab/i }));
 

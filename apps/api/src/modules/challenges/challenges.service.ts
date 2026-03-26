@@ -16,6 +16,7 @@ import type {
 import { ForbiddenError, NotFoundError, QueryExecutionFailedError, ValidationError } from '../../lib/errors';
 import type { ExplainResult } from '../../services/query-executor';
 import { executeSql, getExplainPlan, validateSql } from '../../services/query-executor';
+import { getSessionSchemaDiff, type SessionSchemaDiffResult } from '../sessions/sessions.service';
 import type {
   CreateChallengeBody,
   CreateChallengeVersionBody,
@@ -26,15 +27,18 @@ import type {
 
 export interface AttemptEvaluation {
   isCorrect: boolean;
+  passesChallenge: boolean;
   score: number;
-  correctnessScore: number;
-  performanceScore: number;
-  indexScore: number;
   feedbackText: string;
   pointsPossible: number;
   baselineDurationMs: number | null;
   latestDurationMs: number | null;
+  meetsPerformanceTarget?: boolean | null;
+  requiresIndexOptimization?: boolean;
   usedIndexing: boolean;
+  queryTotalCost?: number | null;
+  queryActualTime?: number | null;
+  schemaDiff?: SessionSchemaDiffResult | null;
 }
 
 export interface AttemptResult {
@@ -97,16 +101,21 @@ export interface ChallengeAttemptListItem {
     status: string;
     rowsReturned: number | null;
     durationMs: number | null;
+    totalCost: number | null;
   };
 }
 
 export interface ChallengeLeaderboardEntry {
   rank: number;
+  attemptId: string;
+  queryExecutionId: string;
   userId: string;
   username: string;
   displayName: string;
   avatarUrl: string | null;
-  bestScore: number;
+  bestDurationMs: number | null;
+  bestTotalCost: number | null;
+  sqlText: string;
   attemptsCount: number;
   passedAttempts: number;
   lastSubmittedAt: Date;
@@ -207,6 +216,10 @@ interface AttemptEvaluationContext {
   explainPlan?: ExplainResult | null;
 }
 
+const QUERY_EXECUTION_ATTEMPT_UNIQUE_CONSTRAINT = 'challenge_attempts_query_execution_uidx';
+const SESSION_CHALLENGE_ATTEMPT_NO_UNIQUE_CONSTRAINT =
+  'challenge_attempts_session_version_attempt_no_uidx';
+
 function normalizeDescription(value: string | null | undefined): string {
   return value ?? '';
 }
@@ -269,7 +282,24 @@ function normalizeChallengeVersionDetail(
   };
 }
 
+function normalizeAttemptEvaluation(value: unknown): AttemptEvaluation | null {
+  return value && typeof value === 'object' ? (value as AttemptEvaluation) : null;
+}
+
+function normalizeNullableMetric(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function compareNullableAscending(left: number | null, right: number | null): number {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left - right;
+}
+
 function mapAttemptRow(row: ChallengeAttemptWithExecutionRow): ChallengeAttemptListItem {
+  const evaluation = normalizeAttemptEvaluation(row.evaluation);
+
   return {
     id: row.id,
     learningSessionId: row.learningSessionId,
@@ -278,13 +308,14 @@ function mapAttemptRow(row: ChallengeAttemptWithExecutionRow): ChallengeAttemptL
     attemptNo: row.attemptNo,
     status: row.status,
     score: row.score,
-    evaluation: (row.evaluation as AttemptEvaluation | null) ?? null,
+    evaluation,
     submittedAt: row.submittedAt,
     queryExecution: {
       sqlText: row.sqlText,
       status: row.queryStatus,
       rowsReturned: row.rowsReturned,
       durationMs: row.durationMs,
+      totalCost: evaluation?.queryTotalCost ?? null,
     },
   };
 }
@@ -466,26 +497,48 @@ function buildLeaderboard(
 ): ChallengeLeaderboardEntry[] {
   const byUser = new Map<
     string,
-    Omit<ChallengeLeaderboardEntry, 'rank'> & { bestSubmittedAt: Date }
+    {
+      attemptId: string | null;
+      queryExecutionId: string | null;
+      userId: string;
+      username: string;
+      displayName: string;
+      avatarUrl: string | null;
+      bestDurationMs: number | null;
+      bestTotalCost: number | null;
+      sqlText: string | null;
+      attemptsCount: number;
+      passedAttempts: number;
+      lastSubmittedAt: Date;
+      bestSubmittedAt: Date | null;
+    }
   >();
 
   for (const row of rows) {
     const displayName = row.displayName ?? row.username;
-    const score = row.score ?? 0;
+    const evaluation = normalizeAttemptEvaluation(row.evaluation);
+    const durationMs = row.durationMs;
+    const totalCost = normalizeNullableMetric(evaluation?.queryTotalCost);
     const existing = byUser.get(row.userId);
 
     if (!existing) {
-      byUser.set(row.userId, {
+      const entry = {
+        attemptId: row.status === 'passed' ? row.attemptId : null,
+        queryExecutionId: row.status === 'passed' ? row.queryExecutionId : null,
         userId: row.userId,
         username: row.username,
         displayName,
         avatarUrl: row.avatarUrl,
-        bestScore: score,
+        bestDurationMs: row.status === 'passed' ? durationMs : null,
+        bestTotalCost: row.status === 'passed' ? totalCost : null,
+        sqlText: row.status === 'passed' ? row.sqlText : null,
         attemptsCount: 1,
         passedAttempts: row.status === 'passed' ? 1 : 0,
         lastSubmittedAt: row.submittedAt,
-        bestSubmittedAt: row.submittedAt,
-      });
+        bestSubmittedAt: row.status === 'passed' ? row.submittedAt : null,
+      };
+
+      byUser.set(row.userId, entry);
       continue;
     }
 
@@ -495,28 +548,80 @@ function buildLeaderboard(
     if (row.status === 'passed') {
       existing.passedAttempts += 1;
     }
+
+    if (row.status !== 'passed') {
+      continue;
+    }
+
+    if (existing.attemptId === null || existing.bestSubmittedAt === null) {
+      existing.attemptId = row.attemptId;
+      existing.queryExecutionId = row.queryExecutionId;
+      existing.bestDurationMs = durationMs;
+      existing.bestTotalCost = totalCost;
+      existing.sqlText = row.sqlText;
+      existing.bestSubmittedAt = row.submittedAt;
+      continue;
+    }
+
+    const durationComparison = compareNullableAscending(durationMs, existing.bestDurationMs);
+    const costComparison = compareNullableAscending(totalCost, existing.bestTotalCost);
     if (
-      score > existing.bestScore ||
-      (score === existing.bestScore && row.submittedAt < existing.bestSubmittedAt)
+      durationComparison < 0 ||
+      (durationComparison === 0 && costComparison < 0) ||
+      (durationComparison === 0 &&
+        costComparison === 0 &&
+        row.submittedAt < existing.bestSubmittedAt)
     ) {
-      existing.bestScore = score;
+      existing.attemptId = row.attemptId;
+      existing.queryExecutionId = row.queryExecutionId;
+      existing.bestDurationMs = durationMs;
+      existing.bestTotalCost = totalCost;
+      existing.sqlText = row.sqlText;
       existing.bestSubmittedAt = row.submittedAt;
     }
   }
 
   return Array.from(byUser.values())
+    .filter(
+      (
+        entry,
+      ): entry is {
+        attemptId: string;
+        queryExecutionId: string;
+        userId: string;
+        username: string;
+        displayName: string;
+        avatarUrl: string | null;
+        bestDurationMs: number | null;
+        bestTotalCost: number | null;
+        sqlText: string;
+        attemptsCount: number;
+        passedAttempts: number;
+        lastSubmittedAt: Date;
+        bestSubmittedAt: Date;
+      } => entry.attemptId !== null && entry.queryExecutionId !== null && entry.sqlText !== null && entry.bestSubmittedAt !== null,
+    )
     .sort((a, b) => {
-      if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
+      const durationComparison = compareNullableAscending(a.bestDurationMs, b.bestDurationMs);
+      if (durationComparison !== 0) return durationComparison;
+
+      const costComparison = compareNullableAscending(a.bestTotalCost, b.bestTotalCost);
+      if (costComparison !== 0) return costComparison;
+
       return a.bestSubmittedAt.getTime() - b.bestSubmittedAt.getTime();
     })
     .slice(0, limit)
     .map((entry, index) => ({
       rank: index + 1,
+      attemptId: entry.attemptId,
+      queryExecutionId: entry.queryExecutionId,
       userId: entry.userId,
       username: entry.username,
       displayName: entry.displayName,
       avatarUrl: entry.avatarUrl,
-      bestScore: entry.bestScore,
+      bestDurationMs: entry.bestDurationMs,
+      bestTotalCost: entry.bestTotalCost,
+      sqlText: entry.sqlText,
       attemptsCount: entry.attemptsCount,
       passedAttempts: entry.passedAttempts,
       lastSubmittedAt: entry.lastSubmittedAt,
@@ -858,59 +963,36 @@ function detectIndexUsage(
   return hasIndex;
 }
 
-function buildScoreWeights(
-  totalPoints: number,
-  includePerformance: boolean,
-  includeIndex: boolean,
-): { correctness: number; performance: number; index: number } {
-  if (!includePerformance && !includeIndex) {
-    return {
-      correctness: totalPoints,
-      performance: 0,
-      index: 0,
-    };
-  }
-
-  const correctness = Math.round(totalPoints * 0.5);
-
-  if (includePerformance && includeIndex) {
-    const performance = Math.round(totalPoints * 0.35);
-    return {
-      correctness,
-      performance,
-      index: Math.max(0, totalPoints - correctness - performance),
-    };
-  }
-
-  const remainder = Math.max(0, totalPoints - correctness);
-  return {
-    correctness,
-    performance: includePerformance ? remainder : 0,
-    index: includeIndex ? remainder : 0,
-  };
-}
-
 function buildFeedback(evaluation: AttemptEvaluation): string {
   if (!evaluation.isCorrect) {
     return evaluation.feedbackText;
   }
 
-  const notes: string[] = ['Correct result set.'];
+  const notes: string[] = [
+    evaluation.passesChallenge ? 'Challenge passed.' : 'Challenge requirements not met.',
+    'Result set matches the validator.',
+  ];
 
-  if (evaluation.performanceScore > 0 && evaluation.baselineDurationMs) {
-    notes.push(
-      `Performance beat the ${evaluation.baselineDurationMs} ms baseline with ${evaluation.latestDurationMs ?? 'unknown'} ms.`,
-    );
-  } else if (evaluation.baselineDurationMs) {
-    notes.push(
-      `Result is correct, but the query is still slower than the ${evaluation.baselineDurationMs} ms target.`,
-    );
+  if (evaluation.baselineDurationMs !== null) {
+    if (evaluation.meetsPerformanceTarget === true) {
+      notes.push(
+        `Runtime target met: ${evaluation.latestDurationMs ?? 'unknown'} ms against the ${evaluation.baselineDurationMs} ms limit.`,
+      );
+    } else if (evaluation.latestDurationMs === null) {
+      notes.push(`Runtime target could not be verified against the ${evaluation.baselineDurationMs} ms limit.`);
+    } else {
+      notes.push(
+        `Runtime target missed: ${evaluation.latestDurationMs} ms is above the ${evaluation.baselineDurationMs} ms limit.`,
+      );
+    }
   }
 
-  if (evaluation.indexScore > 0) {
-    notes.push('Index optimization detected.');
-  } else if (evaluation.pointsPossible > evaluation.correctnessScore + evaluation.performanceScore) {
-    notes.push('No index optimization detected yet.');
+  if (evaluation.requiresIndexOptimization) {
+    notes.push(
+      evaluation.usedIndexing
+        ? 'Execution plan confirmed the required index usage.'
+        : 'Execution plan did not confirm the required index usage.',
+    );
   }
 
   return notes.join(' ');
@@ -940,23 +1022,18 @@ export function evaluateAttempt(
     typeof config.baselineDurationMs === 'number' ? config.baselineDurationMs : null;
   const requiresIndexOptimization = config.requiresIndexOptimization === true;
   const totalPoints = Math.max(0, challengeVersion.points ?? 100);
-  const weights = buildScoreWeights(
-    totalPoints,
-    baselineDurationMs !== null,
-    requiresIndexOptimization,
-  );
 
   if (queryExecution.status !== 'succeeded') {
     return {
       isCorrect: false,
+      passesChallenge: false,
       score: 0,
-      correctnessScore: 0,
-      performanceScore: 0,
-      indexScore: 0,
       feedbackText: `Query execution failed: ${queryExecution.errorMessage ?? 'Unknown error'}`,
       pointsPossible: totalPoints,
       baselineDurationMs,
       latestDurationMs: queryExecution.durationMs ?? null,
+      meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+      requiresIndexOptimization,
       usedIndexing: false,
     };
   }
@@ -968,14 +1045,14 @@ export function evaluateAttempt(
     if (resultPreview.columns.length === 0) {
       return {
         isCorrect: false,
+        passesChallenge: false,
         score: 0,
-        correctnessScore: 0,
-        performanceScore: 0,
-        indexScore: 0,
         feedbackText: 'No results returned',
         pointsPossible: totalPoints,
         baselineDurationMs,
         latestDurationMs: queryExecution.durationMs ?? null,
+        meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+        requiresIndexOptimization,
         usedIndexing: false,
       };
     }
@@ -990,56 +1067,55 @@ export function evaluateAttempt(
       if (!comparison.matches) {
         return {
           isCorrect: false,
+          passesChallenge: false,
           score: 0,
-          correctnessScore: 0,
-          performanceScore: 0,
-          indexScore: 0,
           feedbackText: comparison.feedbackText ?? 'Result set does not match the reference solution.',
           pointsPossible: totalPoints,
           baselineDurationMs,
           latestDurationMs: queryExecution.durationMs ?? null,
+          meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+          requiresIndexOptimization,
           usedIndexing: false,
         };
       }
     } else if (expectedColumns.length > 0 && !compareColumnLists(resultPreview.columns, expectedColumns)) {
       return {
         isCorrect: false,
+        passesChallenge: false,
         score: 0,
-        correctnessScore: 0,
-        performanceScore: 0,
-        indexScore: 0,
         feedbackText: `Expected columns: ${expectedColumns.join(', ')}. Got: ${resultPreview.columns.join(', ')}`,
         pointsPossible: totalPoints,
         baselineDurationMs,
         latestDurationMs: queryExecution.durationMs ?? null,
+        meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+        requiresIndexOptimization,
         usedIndexing: false,
       };
     }
   }
 
   const latestDurationMs = queryExecution.durationMs ?? null;
-  let performanceScore = 0;
-  if (baselineDurationMs !== null && latestDurationMs !== null && weights.performance > 0) {
-    const ratio = baselineDurationMs / Math.max(latestDurationMs, 1);
-    performanceScore = Math.max(0, Math.round(weights.performance * Math.min(1, ratio)));
-  }
+  const meetsPerformanceTarget =
+    baselineDurationMs === null ? null : latestDurationMs !== null && latestDurationMs <= baselineDurationMs;
 
   const usedIndexing =
-    requiresIndexOptimization && weights.index > 0
+    requiresIndexOptimization
       ? detectIndexUsage(sessionExecutions, queryExecution.id, context.explainPlan)
       : false;
-  const indexScore = usedIndexing ? weights.index : 0;
+  const passesChallenge =
+    (baselineDurationMs === null || meetsPerformanceTarget === true) &&
+    (!requiresIndexOptimization || usedIndexing);
 
   const evaluation: AttemptEvaluation = {
     isCorrect: true,
-    score: weights.correctness + performanceScore + indexScore,
-    correctnessScore: weights.correctness,
-    performanceScore,
-    indexScore,
+    passesChallenge,
+    score: passesChallenge ? totalPoints : 0,
     feedbackText: '',
     pointsPossible: totalPoints,
     baselineDurationMs,
     latestDurationMs,
+    meetsPerformanceTarget,
+    requiresIndexOptimization,
     usedIndexing,
   };
   evaluation.feedbackText = buildFeedback(evaluation);
@@ -1110,30 +1186,115 @@ async function buildEvaluationContext(
   }
 
   if (
-    validatorConfig.requiresIndexOptimization === true &&
-    shouldExplainAnalyze(queryExecution.sqlText)
+    shouldExplainAnalyze(queryExecution.sqlText) &&
+    (validatorConfig.requiresIndexOptimization === true || challengeVersion.validatorType === 'result_set')
   ) {
-    context.explainPlan = await getExplainPlan(connectionString, queryExecution.sqlText, 'explain_analyze');
+    try {
+      context.explainPlan = await getExplainPlan(
+        connectionString,
+        queryExecution.sqlText,
+        'explain_analyze',
+      );
+    } catch {
+      context.explainPlan = null;
+    }
   }
 
   return context;
+}
+
+function isUniqueConstraintViolation(error: unknown, constraintName: string): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const code = 'code' in error ? error.code : undefined;
+  const constraint = 'constraint' in error ? error.constraint : undefined;
+
+  return code === '23505' && constraint === constraintName;
+}
+
+async function createAttemptWithRetry(params: {
+  learningSessionId: string;
+  challengeVersionId: string;
+  queryExecutionId: string;
+  status: 'passed' | 'failed';
+  score: number;
+  evaluation: AttemptEvaluation;
+}): Promise<ChallengeAttemptRow> {
+  let attemptNo =
+    (await challengesRepository.countAttempts(
+      params.learningSessionId,
+      params.challengeVersionId,
+    )) + 1;
+
+  for (let retry = 0; retry < 3; retry += 1) {
+    try {
+      return await challengesRepository.createAttempt({
+        learningSessionId: params.learningSessionId,
+        challengeVersionId: params.challengeVersionId,
+        queryExecutionId: params.queryExecutionId,
+        attemptNo,
+        status: params.status,
+        score: params.score,
+        evaluation: params.evaluation as unknown as Record<string, unknown>,
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error, QUERY_EXECUTION_ATTEMPT_UNIQUE_CONSTRAINT)) {
+        throw new ValidationError('This query execution has already been submitted');
+      }
+
+      if (isUniqueConstraintViolation(error, SESSION_CHALLENGE_ATTEMPT_NO_UNIQUE_CONSTRAINT)) {
+        attemptNo =
+          (await challengesRepository.countAttempts(
+            params.learningSessionId,
+            params.challengeVersionId,
+          )) + 1;
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new ValidationError('Could not record the challenge attempt safely. Please retry.');
+}
+
+async function buildChallengeAttemptSchemaDiffSnapshot(
+  learningSessionId: string,
+  userId: string,
+): Promise<SessionSchemaDiffResult | null> {
+  try {
+    return await getSessionSchemaDiff(learningSessionId, userId, false);
+  } catch {
+    return null;
+  }
 }
 
 export async function submitAttempt(
   data: SubmitAttemptBody,
   userId: string,
 ): Promise<AttemptResult> {
-  const sessionUserId = await challengesRepository.getSessionUserId(data.learningSessionId);
+  const session = await challengesRepository.findSessionSubmissionContext(data.learningSessionId);
 
-  if (!sessionUserId) {
+  if (!session) {
     throw new NotFoundError('Learning session not found');
   }
 
-  if (sessionUserId !== userId) {
+  if (session.userId !== userId) {
     throw new ForbiddenError('Access denied to this session');
   }
 
-  const challengeVersion = await challengesRepository.findPublishedVersionById(data.challengeVersionId);
+  if (!session.challengeVersionId) {
+    throw new ValidationError('This session is not attached to a challenge');
+  }
+
+  if (data.challengeVersionId && data.challengeVersionId !== session.challengeVersionId) {
+    throw new ValidationError('Submitted challenge version does not match the session challenge');
+  }
+
+  const challengeVersionId = session.challengeVersionId;
+  const challengeVersion = await challengesRepository.findPublishedVersionById(challengeVersionId);
 
   if (!challengeVersion) {
     throw new NotFoundError('Challenge version not found or not published');
@@ -1149,32 +1310,38 @@ export async function submitAttempt(
     throw new NotFoundError('Query execution not found or does not belong to this session');
   }
 
-  const existingCount = await challengesRepository.countAttempts(
-    data.learningSessionId,
-    data.challengeVersionId,
-  );
-  const attemptNo = existingCount + 1;
+  const existingAttempt = await challengesRepository.findAttemptByQueryExecutionId(data.queryExecutionId);
+
+  if (existingAttempt) {
+    throw new ValidationError('This query execution has already been submitted');
+  }
 
   const sessionExecutions = await challengesRepository.listSessionExecutions(
     data.learningSessionId,
     userId,
   );
   const evaluationContext = await buildEvaluationContext(challengeVersion, queryExecution);
-  const evaluation = evaluateAttempt(
+  const baseEvaluation = evaluateAttempt(
     challengeVersion,
     queryExecution,
     sessionExecutions,
     evaluationContext,
   );
+  const schemaDiff = await buildChallengeAttemptSchemaDiffSnapshot(data.learningSessionId, userId);
+  const evaluation: AttemptEvaluation = {
+    ...baseEvaluation,
+    queryTotalCost: normalizeNullableMetric(evaluationContext.explainPlan?.planSummary?.totalCost),
+    queryActualTime: normalizeNullableMetric(evaluationContext.explainPlan?.planSummary?.actualTime),
+    schemaDiff,
+  };
 
-  const attempt = await challengesRepository.createAttempt({
+  const attempt = await createAttemptWithRetry({
     learningSessionId: data.learningSessionId,
-    challengeVersionId: data.challengeVersionId,
+    challengeVersionId,
     queryExecutionId: data.queryExecutionId,
-    attemptNo,
-    status: evaluation.isCorrect ? 'passed' : 'failed',
+    status: evaluation.passesChallenge ? 'passed' : 'failed',
     score: evaluation.score,
-    evaluation: evaluation as unknown as Record<string, unknown>,
+    evaluation,
   });
 
   return {

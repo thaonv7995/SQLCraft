@@ -5,11 +5,13 @@ vi.mock('../../../db/repositories', () => ({
     findPublishedVersionById: vi.fn(),
     findPublishedVersionDetailById: vi.fn(),
     findEditableChallengeById: vi.fn(),
+    findSessionSubmissionContext: vi.fn(),
     findQueryExecution: vi.fn(),
     listSessionExecutions: vi.fn(),
     countAttempts: vi.fn(),
     createAttempt: vi.fn(),
     findAttemptById: vi.fn(),
+    findAttemptByQueryExecutionId: vi.fn(),
     getSessionUserId: vi.fn(),
     listAttemptsForUser: vi.fn(),
     listAttemptsForChallengeVersion: vi.fn(),
@@ -41,8 +43,13 @@ vi.mock('../../../services/query-executor', () => ({
   validateSql: vi.fn(),
 }));
 
+vi.mock('../../sessions/sessions.service', () => ({
+  getSessionSchemaDiff: vi.fn(),
+}));
+
 import { challengesRepository, lessonsRepository, sandboxesRepository } from '../../../db/repositories';
 import { executeSql, getExplainPlan, validateSql } from '../../../services/query-executor';
+import { getSessionSchemaDiff } from '../../sessions/sessions.service';
 import {
   createChallengeVersion,
   getGlobalLeaderboard,
@@ -63,6 +70,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(validateSql).mockReturnValue({ valid: true });
   vi.mocked(lessonsRepository.existsById).mockResolvedValue(true);
+  vi.mocked(getSessionSchemaDiff).mockRejectedValue(new Error('schema diff unavailable'));
 });
 
 describe('getChallengeVersionDetail()', () => {
@@ -164,8 +172,12 @@ describe('listUserAttempts()', () => {
 });
 
 describe('submitAttempt()', () => {
-  it('returns correctness, performance, and index breakdown for optimization challenges', async () => {
-    vi.mocked(challengesRepository.getSessionUserId).mockResolvedValue('user-1');
+  it('awards the fixed challenge points when the query meets all pass requirements', async () => {
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: 'challenge-version-1',
+      lessonVersionId: 'lv-1',
+    } as never);
     vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
       id: 'challenge-version-1',
       challengeId: 'challenge-1',
@@ -253,6 +265,7 @@ describe('submitAttempt()', () => {
         submittedAt: new Date('2026-03-24T00:05:00.000Z'),
       },
     ] as never);
+    vi.mocked(challengesRepository.findAttemptByQueryExecutionId).mockResolvedValue(null);
     vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
     vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
       id: 'attempt-1',
@@ -263,7 +276,6 @@ describe('submitAttempt()', () => {
     const result = await submitAttempt(
       {
         learningSessionId: 'session-1',
-        challengeVersionId: 'challenge-version-1',
         queryExecutionId: 'query-1',
       },
       'user-1',
@@ -275,9 +287,7 @@ describe('submitAttempt()', () => {
         score: 200,
         evaluation: expect.objectContaining({
           isCorrect: true,
-          correctnessScore: 100,
-          performanceScore: 70,
-          indexScore: 30,
+          passesChallenge: true,
           usedIndexing: true,
           baselineDurationMs: 200,
           latestDurationMs: 100,
@@ -287,7 +297,11 @@ describe('submitAttempt()', () => {
   });
 
   it('fails the attempt when the submitted result rows do not match the reference solution', async () => {
-    vi.mocked(challengesRepository.getSessionUserId).mockResolvedValue('user-1');
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: 'challenge-version-1',
+      lessonVersionId: 'lv-1',
+    } as never);
     vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
       id: 'challenge-version-1',
       challengeId: 'challenge-1',
@@ -352,6 +366,7 @@ describe('submitAttempt()', () => {
         submittedAt: new Date('2026-03-24T00:05:00.000Z'),
       },
     ] as never);
+    vi.mocked(challengesRepository.findAttemptByQueryExecutionId).mockResolvedValue(null);
     vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
     vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
       id: 'attempt-2',
@@ -373,7 +388,7 @@ describe('submitAttempt()', () => {
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         isCorrect: false,
-        correctnessScore: 0,
+        passesChallenge: false,
         feedbackText: expect.stringMatching(/result set/i),
       }),
     );
@@ -384,8 +399,12 @@ describe('submitAttempt()', () => {
     );
   });
 
-  it('does not award index score from history alone when the explain plan does not use an index', async () => {
-    vi.mocked(challengesRepository.getSessionUserId).mockResolvedValue('user-1');
+  it('fails when index optimization is required but the winning plan does not use an index', async () => {
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: 'challenge-version-1',
+      lessonVersionId: 'lv-1',
+    } as never);
     vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
       id: 'challenge-version-1',
       challengeId: 'challenge-1',
@@ -472,6 +491,7 @@ describe('submitAttempt()', () => {
         submittedAt: new Date('2026-03-24T00:05:00.000Z'),
       },
     ] as never);
+    vi.mocked(challengesRepository.findAttemptByQueryExecutionId).mockResolvedValue(null);
     vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
     vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
       id: 'attempt-3',
@@ -488,14 +508,233 @@ describe('submitAttempt()', () => {
       'user-1',
     );
 
+    expect(result.status).toBe('failed');
+    expect(result.score).toBe(0);
     expect(result.evaluation).toEqual(
       expect.objectContaining({
         isCorrect: true,
-        performanceScore: 70,
-        indexScore: 0,
+        passesChallenge: false,
         usedIndexing: false,
+        feedbackText: expect.stringMatching(/index/i),
       }),
     );
+  });
+
+  it('fails when the result set is correct but the runtime target is missed', async () => {
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: 'challenge-version-1',
+      lessonVersionId: 'lv-1',
+    } as never);
+    vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users under the target runtime.',
+      hintText: null,
+      expectedResultColumns: ['id', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true;',
+      validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs: 200,
+      },
+      isPublished: true,
+      publishedAt: new Date('2026-03-24T00:00:00.000Z'),
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      points: 150,
+    } as never);
+    vi.mocked(challengesRepository.findQueryExecution).mockResolvedValue({
+      id: 'query-1',
+      learningSessionId: 'session-1',
+      sandboxInstanceId: 'sandbox-1',
+      userId: 'user-1',
+      sqlText: 'SELECT id, email FROM users WHERE active = true;',
+      normalizedSql: null,
+      status: 'succeeded',
+      durationMs: 280,
+      rowsReturned: 1,
+      rowsScanned: 420,
+      resultPreview: {
+        columns: ['id', 'email'],
+        rows: [[1, 'ada@example.com']],
+        truncated: false,
+      },
+      errorMessage: null,
+      errorCode: null,
+      submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(sandboxesRepository.findById).mockResolvedValue({
+      id: 'sandbox-1',
+      learningSessionId: 'session-1',
+      schemaTemplateId: 'schema-1',
+      datasetTemplateId: null,
+      status: 'ready',
+      containerRef: 'sandbox-1',
+      dbName: 's_session1',
+      expiresAt: new Date('2026-03-24T02:05:00.000Z'),
+      createdAt: new Date('2026-03-24T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(executeSql).mockResolvedValue({
+      columns: ['id', 'email'],
+      rows: [[1, 'ada@example.com']],
+      rowCount: 1,
+      truncated: false,
+      durationMs: 12,
+    });
+    vi.mocked(getExplainPlan).mockResolvedValue({
+      rawPlan: {
+        Plan: {
+          'Node Type': 'Seq Scan',
+          'Actual Total Time': 280,
+        },
+      },
+      planSummary: {
+        nodeType: 'Seq Scan',
+        actualTime: 280,
+      },
+    });
+    vi.mocked(challengesRepository.listSessionExecutions).mockResolvedValue([
+      {
+        id: 'query-1',
+        sqlText: 'SELECT id, email FROM users WHERE active = true;',
+        status: 'succeeded',
+        durationMs: 280,
+        submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+      },
+    ] as never);
+    vi.mocked(challengesRepository.findAttemptByQueryExecutionId).mockResolvedValue(null);
+    vi.mocked(challengesRepository.countAttempts).mockResolvedValue(0);
+    vi.mocked(challengesRepository.createAttempt).mockImplementation(async (data) => ({
+      id: 'attempt-4',
+      submittedAt: new Date('2026-03-24T00:06:00.000Z'),
+      ...data,
+    }) as never);
+
+    const result = await submitAttempt(
+      {
+        learningSessionId: 'session-1',
+        queryExecutionId: 'query-1',
+      },
+      'user-1',
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.score).toBe(0);
+    expect(result.evaluation).toEqual(
+      expect.objectContaining({
+        isCorrect: true,
+        passesChallenge: false,
+        baselineDurationMs: 200,
+        latestDurationMs: 280,
+        feedbackText: expect.stringMatching(/runtime target/i),
+      }),
+    );
+  });
+
+  it('rejects submissions from sessions that are not challenge sessions', async () => {
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: null,
+      lessonVersionId: 'lv-1',
+    } as never);
+
+    await expect(
+      submitAttempt(
+        {
+          learningSessionId: 'session-1',
+          queryExecutionId: 'query-1',
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects submissions when the provided challengeVersionId does not match the session challenge', async () => {
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: 'challenge-version-2',
+      lessonVersionId: 'lv-1',
+    } as never);
+
+    await expect(
+      submitAttempt(
+        {
+          learningSessionId: 'session-1',
+          challengeVersionId: 'challenge-version-1',
+          queryExecutionId: 'query-1',
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  it('rejects duplicate submissions for the same query execution', async () => {
+    vi.mocked(challengesRepository.findSessionSubmissionContext).mockResolvedValue({
+      userId: 'user-1',
+      challengeVersionId: 'challenge-version-1',
+      lessonVersionId: 'lv-1',
+    } as never);
+    vi.mocked(challengesRepository.findPublishedVersionById).mockResolvedValue({
+      id: 'challenge-version-1',
+      challengeId: 'challenge-1',
+      versionNo: 1,
+      problemStatement: 'Return active users.',
+      hintText: null,
+      expectedResultColumns: ['id', 'email'],
+      referenceSolution: 'SELECT id, email FROM users WHERE active = true;',
+      validatorType: 'result_set',
+      validatorConfig: null,
+      isPublished: true,
+      publishedAt: new Date('2026-03-24T00:00:00.000Z'),
+      createdBy: 'user-1',
+      createdAt: new Date('2026-03-20T00:00:00.000Z'),
+      points: 100,
+    } as never);
+    vi.mocked(challengesRepository.findQueryExecution).mockResolvedValue({
+      id: 'query-1',
+      learningSessionId: 'session-1',
+      sandboxInstanceId: 'sandbox-1',
+      userId: 'user-1',
+      sqlText: 'SELECT id, email FROM users WHERE active = true;',
+      normalizedSql: null,
+      status: 'succeeded',
+      durationMs: 44,
+      rowsReturned: 1,
+      rowsScanned: 10,
+      resultPreview: {
+        columns: ['id', 'email'],
+        rows: [[1, 'ada@example.com']],
+        truncated: false,
+      },
+      errorMessage: null,
+      errorCode: null,
+      submittedAt: new Date('2026-03-24T00:05:00.000Z'),
+    } as never);
+    vi.mocked(challengesRepository.findAttemptByQueryExecutionId).mockResolvedValue({
+      id: 'attempt-existing',
+      learningSessionId: 'session-1',
+      challengeVersionId: 'challenge-version-1',
+      queryExecutionId: 'query-1',
+      attemptNo: 1,
+      status: 'passed',
+      score: 100,
+      evaluation: { isCorrect: true },
+      submittedAt: new Date('2026-03-24T00:06:00.000Z'),
+    } as never);
+
+    await expect(
+      submitAttempt(
+        {
+          learningSessionId: 'session-1',
+          queryExecutionId: 'query-1',
+        },
+        'user-1',
+      ),
+    ).rejects.toThrow(ValidationError);
+
+    expect(challengesRepository.createAttempt).not.toHaveBeenCalled();
   });
 });
 
@@ -982,7 +1221,7 @@ describe('reviewChallengeVersion()', () => {
 });
 
 describe('getChallengeLeaderboard()', () => {
-  it('aggregates best score per user and sorts ties by earlier best submission', async () => {
+  it('ranks passed attempts by duration then cost, while still counting total attempts per user', async () => {
     vi.mocked(challengesRepository.findPublishedVersionDetailById).mockResolvedValue({
       id: 'challenge-version-1',
       challengeId: 'challenge-1',
@@ -1003,30 +1242,59 @@ describe('getChallengeLeaderboard()', () => {
     });
     vi.mocked(challengesRepository.listAttemptsForChallengeVersion).mockResolvedValue([
       {
+        attemptId: 'attempt-1',
+        queryExecutionId: 'query-1',
         userId: 'user-1',
         username: 'alice',
         displayName: 'Alice',
         avatarUrl: null,
+        sqlText: 'SELECT * FROM users;',
+        durationMs: 7,
         score: 95,
         status: 'passed',
+        evaluation: { queryTotalCost: 120 },
         submittedAt: new Date('2026-03-24T00:10:00.000Z'),
       },
       {
+        attemptId: 'attempt-2',
+        queryExecutionId: 'query-2',
         userId: 'user-2',
         username: 'bob',
         displayName: 'Bob',
         avatarUrl: null,
+        sqlText: 'SELECT * FROM users;',
+        durationMs: 7,
         score: 95,
         status: 'passed',
+        evaluation: { queryTotalCost: 80 },
         submittedAt: new Date('2026-03-24T00:05:00.000Z'),
       },
       {
+        attemptId: 'attempt-3',
+        queryExecutionId: 'query-3',
         userId: 'user-1',
         username: 'alice',
         displayName: 'Alice',
         avatarUrl: null,
+        sqlText: 'SELECT * FROM users WHERE active = true;',
+        durationMs: 12,
         score: 30,
         status: 'failed',
+        evaluation: { queryTotalCost: 200 },
+        submittedAt: new Date('2026-03-24T00:02:00.000Z'),
+      },
+      {
+        attemptId: 'attempt-4',
+        queryExecutionId: 'query-4',
+        userId: 'user-3',
+        username: 'carol',
+        displayName: 'Carol',
+        avatarUrl: null,
+        sqlText: 'SELECT * FROM users;',
+        durationMs: 3,
+        score: 0,
+        status: 'failed',
+        evaluation: { queryTotalCost: 20 },
         submittedAt: new Date('2026-03-24T00:02:00.000Z'),
       },
     ]);
@@ -1037,14 +1305,16 @@ describe('getChallengeLeaderboard()', () => {
       expect.objectContaining({
         rank: 1,
         userId: 'user-2',
-        bestScore: 95,
+        bestDurationMs: 7,
+        bestTotalCost: 80,
         attemptsCount: 1,
         passedAttempts: 1,
       }),
       expect.objectContaining({
         rank: 2,
         userId: 'user-1',
-        bestScore: 95,
+        bestDurationMs: 7,
+        bestTotalCost: 120,
         attemptsCount: 2,
         passedAttempts: 1,
       }),

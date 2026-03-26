@@ -19,7 +19,6 @@ function buildUserMenuItems(user: User) {
     { href: '/settings', label: 'Settings', icon: 'settings' },
     { href: '/docs', label: 'Documentation', icon: 'menu_book' },
     { href: '/history', label: 'Query History', icon: 'history' },
-    { href: '/submissions', label: 'Submissions', icon: 'code' },
   ];
   if (isAdminUser(user)) {
     items.push({ href: '/admin', label: 'Admin Panel', icon: 'admin_panel_settings' });

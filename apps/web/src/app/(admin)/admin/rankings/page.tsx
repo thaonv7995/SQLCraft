@@ -258,7 +258,7 @@ export default function AdminRankingsPage() {
               <TableRow>
                 <TableHead>Rank</TableHead>
                 <TableHead>User</TableHead>
-                <TableHead>Best Score</TableHead>
+                <TableHead>Best Run</TableHead>
                 <TableHead>Attempts</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
@@ -298,7 +298,10 @@ export default function AdminRankingsPage() {
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-sm text-secondary">
-                      {entry.bestScore.toLocaleString()}
+                      <div>{entry.bestDurationMs != null ? `${entry.bestDurationMs} ms` : '—'}</div>
+                      <div className="text-xs text-on-surface-variant">
+                        cost {entry.bestTotalCost != null ? Math.round(entry.bestTotalCost) : '—'}
+                      </div>
                     </TableCell>
                     <TableCell className="text-xs text-on-surface-variant">
                       {entry.attemptsCount}
