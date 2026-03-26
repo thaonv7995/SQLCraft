@@ -18,7 +18,9 @@ import type {
 import {
   createAdminUserHandler,
   createTrackHandler,
+  clearStaleSessionsHandler,
   deleteAdminUserHandler,
+  deleteDatabaseHandler,
   updateTrackHandler,
   createLessonHandler,
   createLessonVersionHandler,
@@ -396,6 +398,24 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
 
   // ─── Database Imports ───────────────────────────────────────────────────────
 
+  fastify.delete<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/:id',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Delete a published database and its dataset templates',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    deleteDatabaseHandler,
+  );
+
   fastify.post(
     '/v1/admin/databases/scan',
     {
@@ -537,6 +557,19 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     listSystemJobsHandler,
+  );
+
+  fastify.post(
+    '/v1/admin/system/sessions/clear-stale',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Expire stale learning sessions and enqueue sandbox cleanup',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    clearStaleSessionsHandler,
   );
 
   fastify.get(

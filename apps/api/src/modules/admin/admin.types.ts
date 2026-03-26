@@ -86,6 +86,18 @@ export interface UpdateAdminUserResult extends AdminUserMutationResult {}
 
 export interface DeleteAdminUserResult extends AdminUserMutationResult {}
 
+export interface DeleteDatabaseResult {
+  id: string;
+  name: string;
+  deletedDatasetTemplates: number;
+}
+
+export interface ClearStaleSessionsResult {
+  clearedCount: number;
+  sessionIds: string[];
+  thresholdMinutes: number;
+}
+
 export interface SystemHealthResult {
   status: 'healthy';
   timestamp: string;

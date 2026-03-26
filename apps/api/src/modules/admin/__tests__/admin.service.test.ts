@@ -31,11 +31,22 @@ vi.mock('../../../db/repositories', () => ({
     setUserRole: vi.fn(),
     getRoleNames: vi.fn(),
   },
+  sessionsRepository: {
+    findStaleSessions: vi.fn(),
+    expireSession: vi.fn(),
+    expireSandboxBySessionId: vi.fn(),
+    getSandboxBySessionId: vi.fn(),
+  },
   adminRepository: {
     getSystemHealthStats: vi.fn(),
     findLatestSchemaTemplateByName: vi.fn(),
+    findSchemaTemplateById: vi.fn(),
     createSchemaTemplate: vi.fn(),
     findDatasetTemplateBySchemaAndSize: vi.fn(),
+    listDatasetTemplatesBySchemaTemplateId: vi.fn(),
+    getDatabaseReferenceSummary: vi.fn(),
+    deleteDatasetTemplatesBySchemaTemplateId: vi.fn(),
+    deleteSchemaTemplateById: vi.fn(),
     createDatasetTemplate: vi.fn(),
     updateDatasetTemplate: vi.fn(),
     createSystemJob: vi.fn(),
@@ -66,11 +77,18 @@ vi.mock('../../../lib/config', () => ({
   },
 }));
 
-import { adminRepository, usersRepository } from '../../../db/repositories';
-import { ValidationError } from '../../../lib/errors';
+vi.mock('../../../lib/queue', () => ({
+  enqueueDestroySandbox: vi.fn(),
+}));
+
+import { adminRepository, usersRepository, sessionsRepository } from '../../../db/repositories';
+import { ConflictError, NotFoundError, ValidationError } from '../../../lib/errors';
 import { readFile, uploadFile } from '../../../lib/storage';
+import { enqueueDestroySandbox } from '../../../lib/queue';
 import {
+  clearStaleSessions,
   createAdminUser,
+  deleteDatabase,
   getAdminConfig,
   importCanonicalDatabase,
   listSystemJobs,
@@ -230,9 +248,23 @@ beforeEach(() => {
     updatedAt: new Date('2026-01-01T00:00:00Z'),
   });
   vi.mocked(usersRepository.getRoleNames).mockResolvedValue(['learner']);
+  vi.mocked(sessionsRepository.findStaleSessions).mockResolvedValue([]);
+  vi.mocked(sessionsRepository.expireSession).mockResolvedValue(null);
+  vi.mocked(sessionsRepository.expireSandboxBySessionId).mockResolvedValue(undefined);
+  vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(null);
   vi.mocked(adminRepository.findLatestSchemaTemplateByName).mockResolvedValue(null);
+  vi.mocked(adminRepository.findSchemaTemplateById).mockResolvedValue(null);
   vi.mocked(adminRepository.createSchemaTemplate).mockImplementation(async (data: any) =>
     makeSchemaTemplate(data),
+  );
+  vi.mocked(adminRepository.listDatasetTemplatesBySchemaTemplateId).mockResolvedValue([]);
+  vi.mocked(adminRepository.getDatabaseReferenceSummary).mockResolvedValue({
+    lessonVersionCount: 0,
+    sandboxInstanceCount: 0,
+  });
+  vi.mocked(adminRepository.deleteDatasetTemplatesBySchemaTemplateId).mockResolvedValue(0);
+  vi.mocked(adminRepository.deleteSchemaTemplateById).mockImplementation(async (id: string) =>
+    makeSchemaTemplate({ id }),
   );
   vi.mocked(adminRepository.createDatasetTemplate).mockImplementation(async (data: any) =>
     makeDatasetTemplate(data.size, data),
@@ -509,6 +541,139 @@ describe('listSystemJobs()', () => {
       type: 'canonical-dataset-import',
     });
     expect(result.items).toHaveLength(1);
+  });
+});
+
+describe('clearStaleSessions()', () => {
+  it('expires stale sessions and queues sandbox cleanup', async () => {
+    vi.mocked(sessionsRepository.findStaleSessions).mockResolvedValue([
+      {
+        id: 'session-stale-1',
+        userId: 'user-1',
+        lessonVersionId: 'lesson-version-1',
+        challengeVersionId: null,
+        status: 'provisioning',
+        startedAt: new Date('2026-03-25T00:00:00Z'),
+        lastActivityAt: new Date('2026-03-25T00:00:00Z'),
+        endedAt: null,
+        createdAt: new Date('2026-03-25T00:00:00Z'),
+      },
+    ]);
+    vi.mocked(sessionsRepository.expireSession).mockResolvedValue({
+      id: 'session-stale-1',
+      status: 'expired',
+      endedAt: new Date('2026-03-26T00:00:00Z'),
+      lastActivityAt: new Date('2026-03-26T00:00:00Z'),
+    });
+    vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue({
+      id: 'sandbox-stale-1',
+      status: 'expiring',
+      dbName: null,
+      expiresAt: null,
+      updatedAt: new Date('2026-03-26T00:00:00Z'),
+    });
+
+    const result = await clearStaleSessions();
+
+    expect(sessionsRepository.findStaleSessions).toHaveBeenCalledWith(
+      expect.any(Date),
+      ['provisioning', 'active', 'paused'],
+      100,
+    );
+    expect(sessionsRepository.expireSession).toHaveBeenCalledWith('session-stale-1');
+    expect(sessionsRepository.expireSandboxBySessionId).toHaveBeenCalledWith('session-stale-1');
+    expect(enqueueDestroySandbox).toHaveBeenCalledWith({
+      sandboxInstanceId: 'sandbox-stale-1',
+      learningSessionId: 'session-stale-1',
+    });
+    expect(result).toEqual({
+      clearedCount: 1,
+      sessionIds: ['session-stale-1'],
+      thresholdMinutes: 120,
+    });
+  });
+
+  it('returns an empty result when no stale sessions are found', async () => {
+    const result = await clearStaleSessions();
+
+    expect(sessionsRepository.expireSession).not.toHaveBeenCalled();
+    expect(enqueueDestroySandbox).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      clearedCount: 0,
+      sessionIds: [],
+      thresholdMinutes: 120,
+    });
+  });
+});
+
+describe('deleteDatabase()', () => {
+  it('deletes dataset templates before removing the schema template', async () => {
+    vi.mocked(adminRepository.findSchemaTemplateById).mockResolvedValue(
+      makeSchemaTemplate({
+        id: 'schema-template-delete',
+        name: 'Retail Cleanup',
+      }),
+    );
+    vi.mocked(adminRepository.listDatasetTemplatesBySchemaTemplateId).mockResolvedValue([
+      makeDatasetTemplate('small', {
+        id: 'dataset-small',
+        schemaTemplateId: 'schema-template-delete',
+      }),
+      makeDatasetTemplate('large', {
+        id: 'dataset-large',
+        schemaTemplateId: 'schema-template-delete',
+      }),
+    ]);
+
+    const result = await deleteDatabase('schema-template-delete');
+
+    expect(adminRepository.getDatabaseReferenceSummary).toHaveBeenCalledWith(
+      'schema-template-delete',
+      ['dataset-small', 'dataset-large'],
+    );
+    expect(adminRepository.deleteDatasetTemplatesBySchemaTemplateId).toHaveBeenCalledWith(
+      'schema-template-delete',
+    );
+    expect(adminRepository.deleteSchemaTemplateById).toHaveBeenCalledWith('schema-template-delete');
+    expect(result).toEqual({
+      id: 'schema-template-delete',
+      name: 'Retail Cleanup',
+      deletedDatasetTemplates: 2,
+    });
+  });
+
+  it('throws NotFoundError when the database does not exist', async () => {
+    await expect(deleteDatabase('missing-database')).rejects.toThrow(NotFoundError);
+
+    expect(adminRepository.deleteDatasetTemplatesBySchemaTemplateId).not.toHaveBeenCalled();
+    expect(adminRepository.deleteSchemaTemplateById).not.toHaveBeenCalled();
+  });
+
+  it('throws ConflictError when lesson versions or sandboxes still reference the database', async () => {
+    vi.mocked(adminRepository.findSchemaTemplateById).mockResolvedValue(
+      makeSchemaTemplate({
+        id: 'schema-template-blocked',
+        name: 'Retail Blocked',
+      }),
+    );
+    vi.mocked(adminRepository.listDatasetTemplatesBySchemaTemplateId).mockResolvedValue([
+      makeDatasetTemplate('medium', {
+        id: 'dataset-medium',
+        schemaTemplateId: 'schema-template-blocked',
+      }),
+    ]);
+    vi.mocked(adminRepository.getDatabaseReferenceSummary).mockResolvedValue({
+      lessonVersionCount: 2,
+      sandboxInstanceCount: 1,
+    });
+
+    await expect(deleteDatabase('schema-template-blocked')).rejects.toThrow(ConflictError);
+    await expect(deleteDatabase('schema-template-blocked')).rejects.toThrow(
+      'Delete blocked: 2 lesson version(s) and 1 sandbox instance(s) still reference this database.',
+    );
+
+    expect(adminRepository.deleteDatasetTemplatesBySchemaTemplateId).not.toHaveBeenCalled();
+    expect(adminRepository.deleteSchemaTemplateById).not.toHaveBeenCalled();
   });
 });
 

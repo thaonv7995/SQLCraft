@@ -26,7 +26,9 @@ import {
   UpdateAdminUserSchema,
 } from './admin.schema';
 import {
+  clearStaleSessions,
   createAdminUser,
+  deleteDatabase,
   createTrack,
   deleteAdminUser,
   updateTrack,
@@ -183,6 +185,22 @@ export async function deleteAdminUserHandler(
   const actorUserId = (request.user as JwtPayload).sub;
   const result = await deleteAdminUser(actorUserId, request.params.id);
   reply.send(success(result, 'User deleted successfully'));
+}
+
+export async function deleteDatabaseHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await deleteDatabase(request.params.id);
+  reply.send(success(result, 'Database deleted successfully'));
+}
+
+export async function clearStaleSessionsHandler(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await clearStaleSessions();
+  reply.send(success(result, 'Stale sessions cleared successfully'));
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────

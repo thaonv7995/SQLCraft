@@ -1,4 +1,4 @@
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, or } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -8,6 +8,11 @@ export interface SystemHealthStats {
   lessons: number;
   activeSessions: number;
   pendingJobs: number;
+}
+
+export interface DatabaseReferenceSummary {
+  lessonVersionCount: number;
+  sandboxInstanceCount: number;
 }
 
 export type SchemaTemplateRow = InferSelectModel<typeof schema.schemaTemplates>;
@@ -65,6 +70,16 @@ export class AdminRepository {
     return row ?? null;
   }
 
+  async findSchemaTemplateById(id: string): Promise<SchemaTemplateRow | null> {
+    const [row] = await this.db
+      .select()
+      .from(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.id, id))
+      .limit(1);
+
+    return row ?? null;
+  }
+
   async createSchemaTemplate(
     data: Omit<InsertSchemaTemplate, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<SchemaTemplateRow> {
@@ -90,6 +105,49 @@ export class AdminRepository {
     return row ?? null;
   }
 
+  async listDatasetTemplatesBySchemaTemplateId(
+    schemaTemplateId: string,
+  ): Promise<DatasetTemplateRow[]> {
+    return this.db
+      .select()
+      .from(schema.datasetTemplates)
+      .where(eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId));
+  }
+
+  async getDatabaseReferenceSummary(
+    schemaTemplateId: string,
+    datasetTemplateIds: string[],
+  ): Promise<DatabaseReferenceSummary> {
+    const lessonVersionFilter =
+      datasetTemplateIds.length > 0
+        ? or(
+            eq(schema.lessonVersions.schemaTemplateId, schemaTemplateId),
+            inArray(schema.lessonVersions.datasetTemplateId, datasetTemplateIds),
+          )
+        : eq(schema.lessonVersions.schemaTemplateId, schemaTemplateId);
+
+    const sandboxInstanceFilter =
+      datasetTemplateIds.length > 0
+        ? or(
+            eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId),
+            inArray(schema.sandboxInstances.datasetTemplateId, datasetTemplateIds),
+          )
+        : eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId);
+
+    const [lessonVersionCount, sandboxInstanceCount] = await Promise.all([
+      this.db.select({ count: count() }).from(schema.lessonVersions).where(lessonVersionFilter),
+      this.db
+        .select({ count: count() })
+        .from(schema.sandboxInstances)
+        .where(sandboxInstanceFilter),
+    ]);
+
+    return {
+      lessonVersionCount: lessonVersionCount[0]?.count ?? 0,
+      sandboxInstanceCount: sandboxInstanceCount[0]?.count ?? 0,
+    };
+  }
+
   async createDatasetTemplate(
     data: Omit<InsertDatasetTemplate, 'id' | 'createdAt'>,
   ): Promise<DatasetTemplateRow> {
@@ -105,6 +163,24 @@ export class AdminRepository {
       .update(schema.datasetTemplates)
       .set(data)
       .where(eq(schema.datasetTemplates.id, id))
+      .returning();
+
+    return row ?? null;
+  }
+
+  async deleteDatasetTemplatesBySchemaTemplateId(schemaTemplateId: string): Promise<number> {
+    const deletedRows = await this.db
+      .delete(schema.datasetTemplates)
+      .where(eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId))
+      .returning({ id: schema.datasetTemplates.id });
+
+    return deletedRows.length;
+  }
+
+  async deleteSchemaTemplateById(id: string): Promise<SchemaTemplateRow | null> {
+    const [row] = await this.db
+      .delete(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.id, id))
       .returning();
 
     return row ?? null;

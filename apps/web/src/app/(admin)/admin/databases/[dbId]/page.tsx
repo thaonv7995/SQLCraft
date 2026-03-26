@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import toast from 'react-hot-toast';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -407,6 +408,8 @@ function DetailSkeleton() {
 }
 
 export default function AdminDatabaseDetailPage() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const params = useParams<{ dbId: string | string[] }>();
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
@@ -450,6 +453,21 @@ export default function AdminDatabaseDetailPage() {
     staleTime: 30_000,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => adminApi.deleteDatabase(id),
+    onSuccess: async (_result, deletedId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-database-catalog'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-database-detail', deletedId] }),
+      ]);
+      toast.success('Database deleted');
+      router.push('/admin/databases');
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete database');
+    },
+  });
+
   if (isLoading) {
     return <DetailSkeleton />;
   }
@@ -466,6 +484,22 @@ export default function AdminDatabaseDetailPage() {
 
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
+
+  const handleDeleteDatabase = () => {
+    if (!databaseId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete "${database.name}"? This removes its schema template and published dataset variants. If any lesson versions or sandboxes still reference it, the delete will be blocked.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    deleteMutation.mutate(databaseId);
+  };
 
   return (
     <div className="page-shell-wide page-stack">
@@ -507,6 +541,13 @@ export default function AdminDatabaseDetailPage() {
             <Link href={`/explore/${database.id}`}>
               <Button variant="ghost">Open in Explorer</Button>
             </Link>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteDatabase}
+              loading={deleteMutation.isPending}
+            >
+              Delete Database
+            </Button>
           </div>
         </div>
       </div>

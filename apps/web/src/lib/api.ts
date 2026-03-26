@@ -690,6 +690,12 @@ export interface AdminSystemHealth {
   };
 }
 
+export interface ClearStaleSessionsResult {
+  clearedCount: number;
+  sessionIds: string[];
+  thresholdMinutes: number;
+}
+
 export interface AdminConfig {
   platform: {
     defaultDialect: 'postgresql-16' | 'mysql-8' | 'sqlite-3';
@@ -923,6 +929,12 @@ export interface SqlDumpImportResult {
   schemaTemplateId: string;
   datasetTemplateId?: string | null;
   databaseId?: string;
+}
+
+export interface DeleteDatabaseResult {
+  id: string;
+  name: string;
+  deletedDatasetTemplates: number;
 }
 
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
@@ -1712,6 +1724,16 @@ export const adminApi = {
 
   triggerMigration: () =>
     api.post('/admin/migrations/run').then((r) => r.data),
+
+  clearStaleSessions: () =>
+    api
+      .post<ClearStaleSessionsResult>('/admin/system/sessions/clear-stale')
+      .then((r) => r.data),
+
+  deleteDatabase: (databaseId: string) =>
+    api
+      .delete<DeleteDatabaseResult>(`/admin/databases/${databaseId}`)
+      .then((r) => r.data),
 
   listLessonVersions: (lessonId: string) =>
     api

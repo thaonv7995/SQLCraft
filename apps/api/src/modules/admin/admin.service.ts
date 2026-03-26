@@ -4,6 +4,7 @@ import {
   lessonsRepository,
   challengesRepository,
   usersRepository,
+  sessionsRepository,
   adminRepository,
 } from '../../db/repositories';
 import {
@@ -14,6 +15,7 @@ import {
 } from '../../lib/dataset-scales';
 import { toStoredRoleName } from '../../lib/roles';
 import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
+import { enqueueDestroySandbox } from '../../lib/queue';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
   AdminConfigBody,
@@ -47,6 +49,8 @@ import type {
   CreateAdminUserResult,
   UpdateAdminUserResult,
   DeleteAdminUserResult,
+  DeleteDatabaseResult,
+  ClearStaleSessionsResult,
   UpdateUserStatusResult,
   UpdateUserRoleResult,
   SystemHealthResult,
@@ -61,6 +65,13 @@ import {
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 
 const ADMIN_CONFIG_SCOPE = 'global';
+const STALE_SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const STALE_SESSION_THRESHOLD_MINUTES = STALE_SESSION_TIMEOUT_MS / 60_000;
+const STALE_SESSION_STATUSES: Array<'provisioning' | 'active' | 'paused'> = [
+  'provisioning',
+  'active',
+  'paused',
+];
 
 function cloneAdminConfig(config: AdminConfigBody): AdminConfigBody {
   return JSON.parse(JSON.stringify(config)) as AdminConfigBody;
@@ -400,6 +411,75 @@ export async function deleteAdminUser(
   }
 
   return buildAdminUserMutationResult(id);
+}
+
+export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> {
+  const schemaTemplate = await adminRepository.findSchemaTemplateById(id);
+  if (!schemaTemplate) {
+    throw new NotFoundError('Database not found');
+  }
+
+  const datasetTemplates = await adminRepository.listDatasetTemplatesBySchemaTemplateId(id);
+  const referenceSummary = await adminRepository.getDatabaseReferenceSummary(
+    id,
+    datasetTemplates.map((datasetTemplate) => datasetTemplate.id),
+  );
+
+  if (
+    referenceSummary.lessonVersionCount > 0 ||
+    referenceSummary.sandboxInstanceCount > 0
+  ) {
+    throw new ConflictError(
+      `Delete blocked: ${referenceSummary.lessonVersionCount} lesson version(s) and ${referenceSummary.sandboxInstanceCount} sandbox instance(s) still reference this database.`,
+    );
+  }
+
+  await adminRepository.deleteDatasetTemplatesBySchemaTemplateId(id);
+
+  const deletedSchemaTemplate = await adminRepository.deleteSchemaTemplateById(id);
+  if (!deletedSchemaTemplate) {
+    throw new NotFoundError('Database not found');
+  }
+
+  return {
+    id: deletedSchemaTemplate.id,
+    name: schemaTemplate.name,
+    deletedDatasetTemplates: datasetTemplates.length,
+  };
+}
+
+export async function clearStaleSessions(
+  limit = 100,
+): Promise<ClearStaleSessionsResult> {
+  const cutoff = new Date(Date.now() - STALE_SESSION_TIMEOUT_MS);
+  const staleSessions = await sessionsRepository.findStaleSessions(
+    cutoff,
+    STALE_SESSION_STATUSES,
+    limit,
+  );
+
+  const sessionIds: string[] = [];
+
+  for (const session of staleSessions) {
+    await sessionsRepository.expireSession(session.id);
+    await sessionsRepository.expireSandboxBySessionId(session.id);
+
+    const sandbox = await sessionsRepository.getSandboxBySessionId(session.id);
+    if (sandbox) {
+      await enqueueDestroySandbox({
+        sandboxInstanceId: sandbox.id,
+        learningSessionId: session.id,
+      });
+    }
+
+    sessionIds.push(session.id);
+  }
+
+  return {
+    clearedCount: sessionIds.length,
+    sessionIds,
+    thresholdMinutes: STALE_SESSION_THRESHOLD_MINUTES,
+  };
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────

@@ -26,6 +26,9 @@ import type { DatasetSize } from '@sqlcraft/types';
 import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue';
 import type { CreateSessionBody } from './sessions.schema';
 
+const SESSION_INACTIVITY_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const AUTO_EXPIRE_SESSION_STATUSES: SessionRow['status'][] = ['provisioning', 'active', 'paused'];
+
 // ─── Schema types ─────────────────────────────────────────────────────────────
 
 export interface SessionSchemaColumn {
@@ -140,6 +143,44 @@ export interface SessionDatasetSummary {
   totalRows: number | null;
   sourceTotalRows: number | null;
   rowCounts: Record<string, number> | null;
+}
+
+function getSessionActivityTimestamp(session: SessionRow): Date {
+  return session.lastActivityAt ?? session.startedAt ?? session.createdAt;
+}
+
+function shouldAutoExpireSession(session: SessionRow, now = new Date()): boolean {
+  if (!AUTO_EXPIRE_SESSION_STATUSES.includes(session.status)) {
+    return false;
+  }
+
+  return now.getTime() - getSessionActivityTimestamp(session).getTime() >= SESSION_INACTIVITY_TIMEOUT_MS;
+}
+
+async function expireSessionForTimeout<T extends SessionRow>(
+  session: T,
+): Promise<T> {
+  if (!shouldAutoExpireSession(session)) {
+    return session;
+  }
+
+  const expiredSession = await sessionsRepository.expireSession(session.id);
+  await sessionsRepository.expireSandboxBySessionId(session.id);
+
+  const sandbox = await sessionsRepository.getSandboxBySessionId(session.id);
+  if (sandbox) {
+    await enqueueDestroySandbox({
+      sandboxInstanceId: sandbox.id,
+      learningSessionId: session.id,
+    });
+  }
+
+  return {
+    ...session,
+    status: expiredSession?.status ?? 'expired',
+    endedAt: expiredSession?.endedAt ?? new Date(),
+    lastActivityAt: expiredSession?.lastActivityAt ?? new Date(),
+  };
 }
 
 function normalizeRowCounts(rowCounts: unknown): Record<string, number> | null {
@@ -296,7 +337,9 @@ function buildSessionDisplayTitle(params: {
 
 export async function listUserSessions(userId: string, limit = 20): Promise<SessionListItem[]> {
   const rows = await sessionsRepository.findByUserId(userId, limit);
-  return rows.map((row) => ({
+  const normalizedRows = await Promise.all(rows.map((row) => expireSessionForTimeout(row)));
+
+  return normalizedRows.map((row) => ({
     id: row.id,
     status: row.status,
     lessonVersionId: row.lessonVersionId,
@@ -396,12 +439,14 @@ export async function getSession(
     throw new ForbiddenError('Access denied to this session');
   }
 
+  const normalizedSession = await expireSessionForTimeout(session);
+
   const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
   const detailedSandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
   const dataset = await resolveSandboxDatasetSummary(detailedSandbox);
 
   return {
-    ...session,
+    ...normalizedSession,
     sandbox: sandbox ?? null,
     dataset,
     sourceScale: dataset.sourceScale,

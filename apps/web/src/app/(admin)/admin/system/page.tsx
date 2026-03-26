@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { adminApi } from '@/lib/api';
 import { AdminConfigPanel } from '@/components/admin/admin-config-panel';
 import { StatusBadge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -46,6 +48,7 @@ const isSystemTab = (value: string | null): value is SystemTab =>
   value !== null && SYSTEM_TABS.includes(value as SystemTab);
 
 export default function AdminSystemPage() {
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const requestedTab = searchParams?.get('tab') ?? null;
   const [activeTab, setActiveTab] = useState<SystemTab>(
@@ -64,6 +67,27 @@ export default function AdminSystemPage() {
     queryKey: ['admin-system-jobs-page'],
     queryFn: () => adminApi.systemJobs({ limit: 50 }),
     staleTime: 15_000,
+  });
+
+  const clearStaleSessionsMutation = useMutation({
+    mutationFn: () => adminApi.clearStaleSessions(),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-system-health-page'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-system-health-dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['sessions'] }),
+      ]);
+
+      if (result.clearedCount === 0) {
+        toast.success('No stale sessions found');
+        return;
+      }
+
+      toast.success(`Cleared ${result.clearedCount} stale session${result.clearedCount === 1 ? '' : 's'}`);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Failed to clear stale sessions');
+    },
   });
 
   const health = healthQuery.data;
@@ -142,26 +166,46 @@ export default function AdminSystemPage() {
       </div>
 
       {activeTab === 'health' ? (
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Users</p>
-            <p className="mt-2 text-2xl font-semibold text-on-surface">{totalUsers}</p>
-          </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Tracks</p>
-            <p className="mt-2 text-2xl font-semibold text-on-surface">{totalTracks}</p>
-          </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Lessons</p>
-            <p className="mt-2 text-2xl font-semibold text-on-surface">{totalLessons}</p>
-          </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Timestamp</p>
-            <p className="mt-2 text-sm text-on-surface">
-              {health ? formatRelativeTime(health.timestamp) : 'Awaiting health payload'}
-            </p>
-          </div>
-        </section>
+        <div className="space-y-4">
+          <section className="section-card flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-3xl">
+              <h2 className="page-section-title">Session Recovery</h2>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                Manually expire stale lab sessions older than 2 hours and enqueue sandbox cleanup
+                for anything stuck in provisioning or paused states.
+              </p>
+            </div>
+
+            <Button
+              variant="destructive"
+              onClick={() => clearStaleSessionsMutation.mutate()}
+              loading={clearStaleSessionsMutation.isPending}
+            >
+              Clear Stale Sessions
+            </Button>
+          </section>
+
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Users</p>
+              <p className="mt-2 text-2xl font-semibold text-on-surface">{totalUsers}</p>
+            </div>
+            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Tracks</p>
+              <p className="mt-2 text-2xl font-semibold text-on-surface">{totalTracks}</p>
+            </div>
+            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Lessons</p>
+              <p className="mt-2 text-2xl font-semibold text-on-surface">{totalLessons}</p>
+            </div>
+            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Timestamp</p>
+              <p className="mt-2 text-sm text-on-surface">
+                {health ? formatRelativeTime(health.timestamp) : 'Awaiting health payload'}
+              </p>
+            </div>
+          </section>
+        </div>
       ) : null}
 
       {activeTab === 'queues' ? (

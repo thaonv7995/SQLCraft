@@ -6,6 +6,7 @@ vi.mock('../../../db/repositories', () => ({
     findPublishedChallengeVersion: vi.fn(),
     findByUserId: vi.fn(),
     findById: vi.fn(),
+    expireSession: vi.fn(),
     createSession: vi.fn(),
     createSandbox: vi.fn(),
     getSandboxBySessionId: vi.fn(),
@@ -151,6 +152,61 @@ describe('listUserSessions()', () => {
       expect.objectContaining({
         id: 'c05ac6c3-89cc-41a8-a82e-262d0d9b6253',
         displayTitle: 'sqlcraft_demo #c05ac6c3',
+      }),
+    ]);
+  });
+
+  it('auto-expires stale provisioning sessions and queues sandbox cleanup', async () => {
+    const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000);
+    const expiredAt = new Date();
+
+    vi.mocked(sessionsRepository.findByUserId).mockResolvedValue([
+      {
+        ...makeSession({
+          id: '03d30041-89cc-41a8-a82e-262d0d9b6253',
+          lessonVersionId: null,
+          status: 'provisioning',
+          startedAt: eightHoursAgo,
+          lastActivityAt: null,
+        }),
+        sandboxStatus: 'provisioning',
+        lessonTitle: null,
+        schemaTemplateName: 'extreme_ecommerce',
+      },
+    ]);
+    vi.mocked(sessionsRepository.expireSession).mockResolvedValue({
+      id: '03d30041-89cc-41a8-a82e-262d0d9b6253',
+      status: 'expired',
+      endedAt: expiredAt,
+      lastActivityAt: expiredAt,
+    });
+    vi.mocked(sessionsRepository.expireSandboxBySessionId).mockResolvedValue(undefined);
+    vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(
+      makeSandbox({
+        id: 'sandbox-stale-1',
+        learningSessionId: '03d30041-89cc-41a8-a82e-262d0d9b6253',
+        status: 'expiring',
+      }),
+    );
+    vi.mocked(queue.enqueueDestroySandbox).mockResolvedValue(undefined);
+
+    const result = await listUserSessions('user-1');
+
+    expect(sessionsRepository.expireSession).toHaveBeenCalledWith(
+      '03d30041-89cc-41a8-a82e-262d0d9b6253',
+    );
+    expect(sessionsRepository.expireSandboxBySessionId).toHaveBeenCalledWith(
+      '03d30041-89cc-41a8-a82e-262d0d9b6253',
+    );
+    expect(queue.enqueueDestroySandbox).toHaveBeenCalledWith({
+      sandboxInstanceId: 'sandbox-stale-1',
+      learningSessionId: '03d30041-89cc-41a8-a82e-262d0d9b6253',
+    });
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: '03d30041-89cc-41a8-a82e-262d0d9b6253',
+        status: 'expired',
+        displayTitle: 'extreme_ecommerce #03d30041',
       }),
     ]);
   });
@@ -300,6 +356,45 @@ describe('getSession()', () => {
 
     const result = await getSession('session-1', 'admin-id', true);
     expect(result.id).toBe('session-1');
+  });
+
+  it('auto-expires a stale provisioning session before returning it', async () => {
+    const eightHoursAgo = new Date(Date.now() - 8 * 60 * 60 * 1000);
+    const expiredAt = new Date();
+
+    vi.mocked(sessionsRepository.findById).mockResolvedValue(
+      makeSession({
+        id: 'session-stale-1',
+        status: 'provisioning',
+        startedAt: eightHoursAgo,
+        lastActivityAt: null,
+      }),
+    );
+    vi.mocked(sessionsRepository.expireSession).mockResolvedValue({
+      id: 'session-stale-1',
+      status: 'expired',
+      endedAt: expiredAt,
+      lastActivityAt: expiredAt,
+    });
+    vi.mocked(sessionsRepository.expireSandboxBySessionId).mockResolvedValue(undefined);
+    vi.mocked(sessionsRepository.getSandboxBySessionId).mockResolvedValue(
+      makeSandbox({
+        id: 'sandbox-stale-2',
+        learningSessionId: 'session-stale-1',
+        status: 'expiring',
+      }),
+    );
+    vi.mocked(sessionsRepository.findDetailedSandboxBySessionId).mockResolvedValue(null);
+    vi.mocked(queue.enqueueDestroySandbox).mockResolvedValue(undefined);
+
+    const result = await getSession('session-stale-1', 'user-1', false);
+
+    expect(result.status).toBe('expired');
+    expect(sessionsRepository.expireSession).toHaveBeenCalledWith('session-stale-1');
+    expect(queue.enqueueDestroySandbox).toHaveBeenCalledWith({
+      sandboxInstanceId: 'sandbox-stale-2',
+      learningSessionId: 'session-stale-1',
+    });
   });
 });
 

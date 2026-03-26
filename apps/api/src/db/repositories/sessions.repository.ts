@@ -1,4 +1,4 @@
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray, lte, sql } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -60,6 +60,24 @@ export class SessionsRepository {
         status: schema.learningSessions.status,
         endedAt: schema.learningSessions.endedAt,
       });
+    return row ?? null;
+  }
+
+  async expireSession(
+    id: string,
+  ): Promise<Pick<SessionRow, 'id' | 'status' | 'endedAt' | 'lastActivityAt'> | null> {
+    const now = new Date();
+    const [row] = await this.db
+      .update(schema.learningSessions)
+      .set({ status: 'expired', endedAt: now, lastActivityAt: now })
+      .where(eq(schema.learningSessions.id, id))
+      .returning({
+        id: schema.learningSessions.id,
+        status: schema.learningSessions.status,
+        endedAt: schema.learningSessions.endedAt,
+        lastActivityAt: schema.learningSessions.lastActivityAt,
+      });
+
     return row ?? null;
   }
 
@@ -144,6 +162,27 @@ export class SessionsRepository {
         schemaTemplateName: string | null;
       }
     >;
+  }
+
+  async findStaleSessions(
+    cutoff: Date,
+    statuses: SessionRow['status'][],
+    limit = 100,
+  ): Promise<SessionRow[]> {
+    return this.db
+      .select()
+      .from(schema.learningSessions)
+      .where(
+        and(
+          inArray(schema.learningSessions.status, statuses),
+          lte(
+            sql`coalesce(${schema.learningSessions.lastActivityAt}, ${schema.learningSessions.startedAt}, ${schema.learningSessions.createdAt})`,
+            cutoff,
+          ),
+        ),
+      )
+      .orderBy(desc(schema.learningSessions.startedAt))
+      .limit(limit);
   }
 
   async expireSandboxBySessionId(sessionId: string): Promise<void> {
