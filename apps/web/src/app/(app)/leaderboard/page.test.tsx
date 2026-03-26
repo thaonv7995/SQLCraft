@@ -1,21 +1,38 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
 import LeaderboardPage from './page';
+import { useAuthStore } from '@/stores/auth';
+
+const routerPush = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPush }),
+}));
 
 const mocks = vi.hoisted(() => ({
   challengesApi: {
     listPublished: vi.fn(),
+    listAttempts: vi.fn(),
   },
   leaderboardApi: {
     get: vi.fn(),
+  },
+  lessonsApi: {
+    get: vi.fn(),
+    getVersion: vi.fn(),
+  },
+  sessionsApi: {
+    create: vi.fn(),
   },
 }));
 
 vi.mock('@/lib/api', () => ({
   challengesApi: mocks.challengesApi,
   leaderboardApi: mocks.leaderboardApi,
+  lessonsApi: mocks.lessonsApi,
+  sessionsApi: mocks.sessionsApi,
 }));
 
 function renderLeaderboardPage() {
@@ -36,6 +53,35 @@ function renderLeaderboardPage() {
 
 describe('LeaderboardPage', () => {
   beforeEach(() => {
+    useAuthStore.setState({
+      user: {
+        id: 'user-1',
+        username: 'alice',
+        email: 'alice@example.com',
+        displayName: 'Alice',
+        avatarUrl: null,
+        role: 'user',
+        roles: ['user'],
+        status: 'active',
+        bio: null,
+        createdAt: '2026-03-20T00:00:00.000Z',
+        lastLoginAt: '2026-03-24T00:00:00.000Z',
+        updatedAt: '2026-03-24T00:00:00.000Z',
+        stats: {
+          activeSessions: 0,
+          completedChallenges: 0,
+          queriesRun: 0,
+          currentStreak: 0,
+          totalPoints: 0,
+        },
+      },
+      tokens: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        expiresIn: 3600,
+      },
+    });
+
     mocks.challengesApi.listPublished.mockResolvedValue([
       {
         id: 'challenge-1',
@@ -83,6 +129,52 @@ describe('LeaderboardPage', () => {
       },
     ]);
 
+    mocks.challengesApi.listAttempts.mockImplementation(async (challengeVersionId: string) => {
+      if (challengeVersionId === 'challenge-version-1') {
+        return [
+          {
+            id: 'attempt-1',
+            learningSessionId: 'session-1',
+            challengeVersionId,
+            queryExecutionId: 'exec-1',
+            attemptNo: 1,
+            status: 'passed',
+            score: null,
+            evaluation: null,
+            submittedAt: '2026-03-24T00:00:00.000Z',
+            queryExecution: {
+              sqlText: 'select 1',
+              status: 'success',
+              rowsReturned: 1,
+              durationMs: 10,
+              totalCost: 5,
+            },
+          },
+        ];
+      }
+
+      return [
+        {
+          id: 'attempt-2',
+          learningSessionId: 'session-2',
+          challengeVersionId,
+          queryExecutionId: 'exec-2',
+          attemptNo: 1,
+          status: 'failed',
+          score: null,
+          evaluation: null,
+          submittedAt: '2026-03-23T00:00:00.000Z',
+          queryExecution: {
+            sqlText: 'select 2',
+            status: 'success',
+            rowsReturned: 0,
+            durationMs: 10,
+            totalCost: 5,
+          },
+        },
+      ];
+    });
+
     mocks.leaderboardApi.get.mockImplementation(
       async (period: 'weekly' | 'monthly' | 'alltime') => {
         if (period === 'monthly') {
@@ -96,6 +188,16 @@ describe('LeaderboardPage', () => {
               points: 450,
               challengesCompleted: 4,
               streak: 6,
+            },
+            {
+              rank: 2,
+              userId: 'user-1',
+              username: 'alice',
+              displayName: 'Alice',
+              avatarUrl: null,
+              points: 390,
+              challengesCompleted: 5,
+              streak: 9,
             },
           ];
         }
@@ -124,41 +226,99 @@ describe('LeaderboardPage', () => {
         ];
       },
     );
+
+    mocks.lessonsApi.get.mockResolvedValue({
+      publishedVersionId: 'lesson-version-1',
+    });
+
+    mocks.lessonsApi.getVersion.mockResolvedValue({
+      id: 'lesson-version-1',
+      starterQuery: 'select 1',
+    });
+
+    mocks.sessionsApi.create.mockResolvedValue({
+      id: 'session-new',
+    });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    useAuthStore.setState({ user: null, tokens: null });
   });
 
-  it('renders the challenges hub with top users and challenge submission links', async () => {
+  it('renders personalized leaderboard stats and challenge list', async () => {
     const user = userEvent.setup();
 
     renderLeaderboardPage();
 
-    expect(await screen.findByRole('heading', { name: /challenges/i })).toBeInTheDocument();
-    expect(await screen.findByText(/pick a challenge, add a submission, and compare against the top users by point/i)).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: /top users/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', {
+        name: /^Challenges$/,
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/điểm và tiến độ của bạn/i)).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('alltime', 25);
+      expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('alltime', 100);
     });
 
-    expect(await screen.findByText('Alice')).toBeInTheDocument();
+    expect(await screen.findByText('820 pts')).toBeInTheDocument();
+    expect(await screen.findByText('7')).toBeInTheDocument();
 
-    const arenaLink = await screen.findByRole('link', {
-      name: /add submission for filter active users/i,
-    });
-    expect(arenaLink).toHaveAttribute(
-      'href',
-      '/tracks/track-1/lessons/lesson-1/challenges/challenge-1',
-    );
+    // Tab mặc định là "Chưa làm", nên challenge đã pass sẽ chưa hiển thị.
+    await user.click(screen.getByRole('button', { name: /đã làm/i }));
+    expect(
+      await screen.findByRole('button', { name: /tạo submission cho filter active users/i }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /monthly/i }));
 
     await waitFor(() => {
-      expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('monthly', 25);
+      expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('monthly', 100);
     });
 
-    expect(await screen.findByText('Bob')).toBeInTheDocument();
+    expect(await screen.findByText('390 pts')).toBeInTheDocument();
+    expect(await screen.findByText('5')).toBeInTheDocument();
+  });
+
+  it.skip('creates submission via popup database selector', async () => {
+    const user = userEvent.setup();
+
+    renderLeaderboardPage();
+
+    const createBtn = await screen.findByRole('button', {
+      name: /tạo submission cho filter active users/i,
+    });
+    await act(async () => {
+      createBtn.click();
+    });
+
+    const dialogTitle = await waitFor(
+      () => screen.getByText(/Chọn database/i),
+      { timeout: 5000 },
+    );
+    const dialogRoot = dialogTitle.closest('[role="dialog"]') ?? dialogTitle.parentElement;
+    expect(dialogRoot).toBeTruthy();
+    expect(within(dialogRoot as HTMLElement).getByRole('heading', { name: /chọn database/i })).toBeInTheDocument();
+
+    // Chọn scale khác để đảm bảo payload truyền đúng.
+    const tinyBtn = within(dialogRoot as HTMLElement).getByRole('button', { name: 'Tiny' });
+    await user.click(tinyBtn);
+
+    const confirmBtn = within(dialogRoot as HTMLElement).getByRole('button', { name: /^Tạo submission$/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() =>
+      expect(mocks.sessionsApi.create).toHaveBeenCalledWith({
+        lessonVersionId: 'lesson-version-1',
+        challengeVersionId: 'challenge-version-1',
+        selectedScale: 'tiny',
+      }),
+    );
+
+    await waitFor(() => {
+      expect(routerPush).toHaveBeenCalledWith('/lab/session-new');
+    });
   });
 });

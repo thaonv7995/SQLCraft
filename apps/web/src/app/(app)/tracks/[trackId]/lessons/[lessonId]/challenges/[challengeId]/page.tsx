@@ -2,31 +2,44 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '@/stores/auth';
 import { Badge, DifficultyBadge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { challengesApi, lessonsApi, sessionsApi, type ChallengeVersionDetail } from '@/lib/api';
+import {
+  challengesApi,
+  lessonsApi,
+  sessionsApi,
+  type ChallengeAttempt,
+  type ChallengeEvaluation,
+  type ChallengeLeaderboardEntry,
+  type ChallengeVersionDetail,
+} from '@/lib/api';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
-import { formatMinutes, formatRelativeTime, truncateSql } from '@/lib/utils';
+import { cn, formatDuration, formatMinutes, formatRelativeTime, generateInitials, truncateSql } from '@/lib/utils';
+
+type SessionListItem = Awaited<ReturnType<typeof sessionsApi.list>>[number];
+type SignalTone = 'default' | 'success' | 'warning';
 
 function ChallengePageSkeleton() {
   return (
-    <div className="page-shell-narrow page-stack">
+    <div className="page-shell-wide page-stack">
       <div className="h-8 w-48 animate-pulse rounded bg-surface-container-low" />
-      <div className="h-72 animate-pulse rounded-2xl bg-surface-container-low" />
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
-        <div className="space-y-4">
-          <div className="h-72 animate-pulse rounded-2xl bg-surface-container-low" />
-          <div className="h-64 animate-pulse rounded-2xl bg-surface-container-low" />
+      <div className="h-[28rem] animate-pulse rounded-[2rem] bg-surface-container-low" />
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)]">
+        <div className="space-y-6">
+          <div className="h-72 animate-pulse rounded-[1.75rem] bg-surface-container-low" />
+          <div className="h-80 animate-pulse rounded-[1.75rem] bg-surface-container-low" />
         </div>
-        <div className="space-y-4">
-          <div className="h-64 animate-pulse rounded-2xl bg-surface-container-low" />
-          <div className="h-72 animate-pulse rounded-2xl bg-surface-container-low" />
+        <div className="space-y-6">
+          <div className="h-80 animate-pulse rounded-[1.75rem] bg-surface-container-low" />
+          <div className="h-72 animate-pulse rounded-[1.75rem] bg-surface-container-low" />
         </div>
       </div>
+      <div className="h-[28rem] animate-pulse rounded-[1.75rem] bg-surface-container-low" />
     </div>
   );
 }
@@ -42,13 +55,21 @@ function compareNullableAscending(left: number | null, right: number | null) {
   return left - right;
 }
 
+function formatDurationMetric(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? formatDuration(Math.max(0, value)) : '—';
+}
+
+function formatCostMetric(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value).toLocaleString('en-US') : '—';
+}
+
 function AttemptStatusBadge({ status }: { status: string }) {
   if (status === 'passed') {
-    return <Badge variant="success" dot>Passed</Badge>;
+    return <Badge variant="success" dot>Đạt</Badge>;
   }
 
   if (status === 'failed' || status === 'error') {
-    return <Badge variant="error" dot>{status === 'failed' ? 'Failed' : 'Error'}</Badge>;
+    return <Badge variant="error" dot>{status === 'failed' ? 'Chưa đạt' : 'Lỗi'}</Badge>;
   }
 
   return <StatusBadge status={status} />;
@@ -71,68 +92,110 @@ function resolveChallengeRules(detail: ChallengeVersionDetail) {
   };
 }
 
-function ChallengeRuleCard({
+function MissionStatCard({
   label,
   value,
-  description,
+  supporting,
+  accent = 'default',
 }: {
   label: string;
   value: string;
+  supporting: string;
+  accent?: SignalTone;
+}) {
+  const accentClasses =
+    accent === 'success'
+      ? 'border-secondary/20 bg-secondary/10'
+      : accent === 'warning'
+        ? 'border-tertiary/20 bg-tertiary/10'
+        : 'border-outline-variant/10 bg-surface-container-low/80';
+
+  return (
+    <div className={cn('rounded-[1.35rem] border px-4 py-4', accentClasses)}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tracking-tight text-on-surface">{value}</p>
+      <p className="mt-2 text-sm leading-6 text-on-surface-variant">{supporting}</p>
+    </div>
+  );
+}
+
+function MissionLoopItem({
+  step,
+  title,
+  description,
+}: {
+  step: string;
+  title: string;
   description: string;
 }) {
   return (
-    <div className="rounded-xl bg-surface-container-high p-4">
-      <p className="font-medium text-on-surface">{label}</p>
-      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-outline">{value}</p>
+    <div className="rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">{step}</p>
+      <p className="mt-2 text-base font-semibold text-on-surface">{title}</p>
       <p className="mt-2 text-sm leading-6 text-on-surface-variant">{description}</p>
     </div>
   );
 }
 
-function ArenaMetricCard({
-  label,
-  value,
-  supporting,
-  tone = 'default',
-  children,
+function ConditionRow({
+  title,
+  description,
+  statusLabel,
+  tone,
+  icon,
 }: {
-  label: string;
-  value: string;
-  supporting: string;
-  tone?: 'default' | 'success' | 'warning';
-  children?: ReactNode;
+  title: string;
+  description: string;
+  statusLabel: string;
+  tone: SignalTone;
+  icon: string;
 }) {
-  const toneClasses =
+  const iconClasses =
     tone === 'success'
-      ? 'border-secondary/20 bg-secondary/10'
+      ? 'bg-secondary/15 text-secondary'
       : tone === 'warning'
-        ? 'border-tertiary/20 bg-tertiary/10'
-        : 'border-outline-variant/10 bg-surface';
+        ? 'bg-tertiary/15 text-tertiary'
+        : 'bg-surface-container-high text-on-surface-variant';
 
   return (
-    <div className={`rounded-2xl border px-4 py-4 ${toneClasses}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">{label}</p>
-      <p className="mt-2 text-xl font-semibold text-on-surface">{value}</p>
-      <p className="mt-1 text-sm leading-6 text-on-surface-variant">{supporting}</p>
-      {children}
+    <div className="flex items-start gap-3 rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+      <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl', iconClasses)}>
+        <span className="material-symbols-outlined text-[20px]">{icon}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-on-surface">{title}</p>
+          <span className="rounded-full bg-surface px-2.5 py-1 text-[11px] font-medium text-on-surface-variant">
+            {statusLabel}
+          </span>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-on-surface-variant">{description}</p>
+      </div>
     </div>
   );
 }
 
-function AttemptEvaluationSummary({
-  evaluation,
+function PersonalSignalRow({
+  label,
+  value,
+  supporting,
 }: {
-  evaluation: {
-    passesChallenge?: boolean;
-    score?: number;
-    pointsPossible?: number;
-    baselineDurationMs?: number | null;
-    latestDurationMs?: number | null;
-    meetsPerformanceTarget?: boolean | null;
-    requiresIndexOptimization?: boolean;
-    usedIndexing?: boolean;
-  } | null | undefined;
+  label: string;
+  value: string;
+  supporting: string;
 }) {
+  return (
+    <div className="rounded-[1.1rem] border border-outline-variant/10 bg-surface-container-low/70 px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">{label}</p>
+        <p className="text-base font-semibold text-on-surface">{value}</p>
+      </div>
+      <p className="mt-2 text-sm leading-6 text-on-surface-variant">{supporting}</p>
+    </div>
+  );
+}
+
+function AttemptEvaluationSummary({ evaluation }: { evaluation: ChallengeEvaluation | null | undefined }) {
   if (!evaluation) {
     return null;
   }
@@ -140,31 +203,31 @@ function AttemptEvaluationSummary({
   const items = [
     typeof evaluation.score === 'number' && typeof evaluation.pointsPossible === 'number'
       ? {
-          label: evaluation.passesChallenge ? 'Reward unlocked' : 'Reward locked',
+          label: evaluation.passesChallenge ? 'Điểm mở khóa' : 'Điểm hiện tại',
           value: evaluation.passesChallenge
-            ? `${evaluation.score}/${evaluation.pointsPossible} pts`
-            : `0/${evaluation.pointsPossible} pts`,
+            ? `${evaluation.score}/${evaluation.pointsPossible}`
+            : `0/${evaluation.pointsPossible}`,
         }
       : null,
     evaluation.baselineDurationMs != null
       ? {
-          label: 'Runtime target',
+          label: 'Mốc thời gian',
           value:
             evaluation.meetsPerformanceTarget === false
-              ? `${evaluation.latestDurationMs ?? 'unknown'} ms vs ${evaluation.baselineDurationMs} ms`
-              : `${evaluation.baselineDurationMs} ms`,
+              ? `${formatDurationMetric(evaluation.latestDurationMs)} / ${formatDurationMetric(evaluation.baselineDurationMs)}`
+              : `${formatDurationMetric(evaluation.baselineDurationMs)}`,
         }
       : null,
     evaluation.latestDurationMs != null
       ? {
-          label: 'Recorded run',
-          value: `${evaluation.latestDurationMs} ms`,
+          label: 'Run đã ghi nhận',
+          value: formatDurationMetric(evaluation.latestDurationMs),
         }
       : null,
     evaluation.requiresIndexOptimization
       ? {
           label: 'Index evidence',
-          value: evaluation.usedIndexing ? 'Confirmed' : 'Missing',
+          value: evaluation.usedIndexing ? 'Đủ bằng chứng' : 'Chưa xác nhận',
         }
       : null,
   ].filter((item): item is { label: string; value: string } => item !== null);
@@ -175,16 +238,157 @@ function AttemptEvaluationSummary({
 
   return (
     <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
-        {items.map((item) => (
-          <span
-            key={item.label}
-            className="rounded-full bg-surface-container-high px-2 py-1"
-          >
-            {item.label}: {item.value}
-          </span>
-        ))}
+      {items.map((item) => (
+        <span key={item.label} className="rounded-full bg-surface px-2.5 py-1">
+          {item.label}: {item.value}
+        </span>
+      ))}
     </div>
   );
+}
+
+function AttemptTimelineItem({
+  attempt,
+  rewardPoints,
+}: {
+  attempt: ChallengeAttempt;
+  rewardPoints: number;
+}) {
+  return (
+    <div className="rounded-[1.35rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <AttemptStatusBadge status={attempt.status} />
+        <span className="rounded-full bg-surface px-2.5 py-1 text-[11px] font-medium text-on-surface-variant">
+          Attempt #{attempt.attemptNo}
+        </span>
+        <span className="text-sm font-semibold text-on-surface">
+          {attempt.status === 'passed' ? `+${rewardPoints} pts` : 'Reward locked'}
+        </span>
+        <span className="ml-auto text-xs text-outline">{formatRelativeTime(attempt.submittedAt)}</span>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
+        <span className="rounded-full bg-surface px-2.5 py-1">
+          Query {attempt.queryExecution.status}
+        </span>
+        {attempt.queryExecution.rowsReturned != null ? (
+          <span className="rounded-full bg-surface px-2.5 py-1">
+            {attempt.queryExecution.rowsReturned} rows
+          </span>
+        ) : null}
+        {attempt.queryExecution.durationMs != null ? (
+          <span className="rounded-full bg-surface px-2.5 py-1">
+            {formatDurationMetric(attempt.queryExecution.durationMs)}
+          </span>
+        ) : null}
+        {attempt.queryExecution.totalCost != null ? (
+          <span className="rounded-full bg-surface px-2.5 py-1">
+            cost {formatCostMetric(attempt.queryExecution.totalCost)}
+          </span>
+        ) : null}
+      </div>
+
+      <p className="mt-3 text-xs leading-6 text-on-surface-variant">
+        {truncateSql(attempt.queryExecution.sqlText, 180)}
+      </p>
+
+      {attempt.evaluation?.feedbackText ? (
+        <>
+          <p className="mt-3 text-sm leading-6 text-on-surface-variant">{attempt.evaluation.feedbackText}</p>
+          <AttemptEvaluationSummary evaluation={attempt.evaluation} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function LeaderboardCard({
+  entry,
+  highlight,
+}: {
+  entry: ChallengeLeaderboardEntry;
+  highlight: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 rounded-[1.25rem] border px-4 py-3',
+        highlight
+          ? 'border-secondary/25 bg-secondary/10'
+          : 'border-outline-variant/10 bg-surface-container-low/70',
+      )}
+    >
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-sm font-semibold text-on-surface">
+        #{entry.rank}
+      </div>
+
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface-container-high text-sm font-semibold text-on-surface-variant">
+        {generateInitials(entry.displayName)}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-semibold text-on-surface">{entry.displayName}</p>
+          {highlight ? <Badge variant="success">Bạn</Badge> : null}
+        </div>
+        <p className="text-xs text-on-surface-variant">
+          {entry.attemptsCount} attempts • {entry.passedAttempts} passed
+        </p>
+        <p className="mt-2 truncate font-mono text-[11px] text-on-surface-variant">{entry.sqlText}</p>
+      </div>
+
+      <div className="text-right">
+        <p className="text-sm font-semibold text-secondary">{formatDurationMetric(entry.bestDurationMs)}</p>
+        <p className="text-[11px] text-outline">
+          cost {formatCostMetric(entry.bestTotalCost)} • {formatRelativeTime(entry.lastSubmittedAt)}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function resolveChallengeState({
+  bestAttempt,
+  latestAttempt,
+  resumableSession,
+}: {
+  bestAttempt: ChallengeAttempt | null;
+  latestAttempt: ChallengeAttempt | null;
+  resumableSession: SessionListItem | null;
+}) {
+  if (bestAttempt) {
+    return {
+      label: 'Đã unlock challenge',
+      description: 'Bạn đã có ít nhất một run hợp lệ. Giờ mục tiêu là tiếp tục tune để kéo runtime và cost xuống thấp hơn.',
+      icon: 'military_tech',
+      tone: 'success' as const,
+    };
+  }
+
+  if (latestAttempt?.status === 'failed' || latestAttempt?.status === 'error') {
+    return {
+      label: 'Đang tuning để pass',
+      description: 'Run mới nhất chưa qua toàn bộ điều kiện. Xem checklist pass bên dưới để biết bạn còn thiếu gì.',
+      icon: 'tune',
+      tone: 'warning' as const,
+    };
+  }
+
+  if (resumableSession) {
+    return {
+      label: 'Lab đang mở',
+      description: 'Bạn đã có sandbox sẵn. Tiếp tục lab hiện tại để chạy thêm query hoặc submit một run mới.',
+      icon: 'terminal',
+      tone: 'default' as const,
+    };
+  }
+
+  return {
+    label: 'Sẵn sàng xuất phát',
+    description: 'Challenge này đang chờ run đầu tiên của bạn. Mở Challenge Lab để bắt đầu từ starter query của lesson.',
+    icon: 'flag',
+    tone: 'default' as const,
+  };
 }
 
 export default function ChallengePage() {
@@ -194,6 +398,7 @@ export default function ChallengePage() {
     challengeId: string;
   }>();
   const router = useRouter();
+  const viewerId = useAuthStore((state) => state.user?.id ?? null);
   const [starting, setStarting] = useState(false);
 
   const { data: lesson, isLoading: lessonLoading } = useQuery({
@@ -261,9 +466,17 @@ export default function ChallengePage() {
         ) ?? null
       : null;
 
-  const bestAttempt = attempts
+  const sortedAttempts = attempts
+    .slice()
+    .sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime());
+
+  const rankedEntries = leaderboard
+    .slice()
+    .sort((left, right) => left.rank - right.rank || left.displayName.localeCompare(right.displayName));
+
+  const bestAttempt = sortedAttempts
     .filter((attempt) => attempt.status === 'passed')
-    .reduce<(typeof attempts)[number] | null>((best, attempt) => {
+    .reduce<ChallengeAttempt | null>((best, attempt) => {
       if (!best) {
         return attempt;
       }
@@ -292,11 +505,12 @@ export default function ChallengePage() {
 
       return new Date(attempt.submittedAt) < new Date(best.submittedAt) ? attempt : best;
     }, null);
-  const latestAttempt = attempts[0] ?? null;
+
+  const latestAttempt = sortedAttempts[0] ?? null;
 
   const handleStartChallengeLab = async () => {
     if (!lessonVersion || !challengeSummary?.publishedVersionId) {
-      toast.error('This challenge is not available yet');
+      toast.error('Challenge này chưa sẵn sàng');
       return;
     }
 
@@ -320,7 +534,7 @@ export default function ChallengePage() {
 
       router.push(`/lab/${session.id}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start challenge lab');
+      toast.error(err instanceof Error ? err.message : 'Không thể mở Challenge Lab');
       setStarting(false);
     }
   };
@@ -360,27 +574,27 @@ export default function ChallengePage() {
     challengeError
   ) {
     return (
-      <div className="page-shell-narrow page-stack">
+      <div className="page-shell-wide page-stack">
         <Link
           href={`/tracks/${params.trackId}/lessons/${params.lessonId}`}
           className="inline-flex w-fit items-center gap-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
         >
           <span className="material-symbols-outlined text-base">arrow_back</span>
-          Back to lesson
+          Quay lại lesson
         </Link>
 
-        <Card className="rounded-2xl">
+        <Card className="rounded-[1.75rem] border border-outline-variant/10">
           <CardContent className="flex flex-col gap-4 py-8">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-3xl text-outline">target</span>
               <div>
-                <CardTitle>Challenge unavailable</CardTitle>
+                <CardTitle>Không thể tải challenge</CardTitle>
                 <CardDescription className="mt-1">
                   {challengeError instanceof Error
                     ? challengeError.message
                     : versionError instanceof Error
                       ? versionError.message
-                      : 'This challenge could not be loaded from the published lesson version.'}
+                      : 'Challenge này chưa thể lấy từ phiên bản lesson đã publish.'}
                 </CardDescription>
               </div>
             </div>
@@ -392,13 +606,13 @@ export default function ChallengePage() {
                   void refetchChallenge();
                 }}
               >
-                Try again
+                Thử lại
               </Button>
               <Button
                 variant="secondary"
                 onClick={() => router.push(`/tracks/${params.trackId}/lessons/${params.lessonId}`)}
               >
-                Back to lesson
+                Quay lại lesson
               </Button>
             </div>
           </CardContent>
@@ -407,439 +621,539 @@ export default function ChallengePage() {
     );
   }
 
+  const challengeRules = resolveChallengeRules(challengeVersion);
+  const arenaLeader = rankedEntries[0] ?? null;
+  const viewerEntry = viewerId ? rankedEntries.find((entry) => entry.userId === viewerId) ?? null : null;
+  const challengeState = resolveChallengeState({ bestAttempt, latestAttempt, resumableSession });
   const latestFeedback =
     latestAttempt?.evaluation?.feedbackText ??
     (latestAttempt?.status === 'passed'
-      ? 'Latest attempt passed all challenge requirements.'
+      ? 'Run mới nhất đã vượt qua toàn bộ điều kiện của challenge.'
       : latestAttempt?.status === 'failed'
-        ? 'Latest attempt did not satisfy the challenge requirements yet.'
+        ? 'Run mới nhất vẫn chưa pass hết điều kiện.'
         : null);
-  const challengeRules = resolveChallengeRules(challengeVersion);
-  const arenaLeader = leaderboard[0] ?? null;
+
+  const progressProbe = bestAttempt?.evaluation ?? latestAttempt?.evaluation ?? null;
+  const passConditions = [
+    {
+      key: 'correctness',
+      title: 'Kết quả đúng',
+      description: 'Validator phải xác nhận result-set đúng với output chuẩn của challenge.',
+      statusLabel:
+        bestAttempt || progressProbe?.isCorrect
+          ? 'Đã đúng output'
+          : 'Chưa có run đúng',
+      tone: (bestAttempt || progressProbe?.isCorrect ? 'success' : latestAttempt ? 'warning' : 'default') as SignalTone,
+      icon: bestAttempt || progressProbe?.isCorrect ? 'check_circle' : latestAttempt ? 'priority_high' : 'radio_button_unchecked',
+      satisfied: Boolean(bestAttempt || progressProbe?.isCorrect),
+    },
+    challengeRules.baselineDurationMs != null
+      ? {
+          key: 'speed',
+          title: 'Mốc hiệu năng',
+          description: `Run pass phải nhanh hơn hoặc bằng ${formatDurationMetric(challengeRules.baselineDurationMs)}.`,
+          statusLabel: progressProbe?.meetsPerformanceTarget
+            ? 'Đạt mốc runtime'
+            : latestAttempt
+              ? 'Cần tối ưu thêm'
+              : 'Chưa có benchmark',
+          tone: (progressProbe?.meetsPerformanceTarget ? 'success' : latestAttempt ? 'warning' : 'default') as SignalTone,
+          icon: progressProbe?.meetsPerformanceTarget ? 'bolt' : latestAttempt ? 'timer' : 'schedule',
+          satisfied: Boolean(progressProbe?.meetsPerformanceTarget),
+        }
+      : null,
+    challengeRules.requiresIndexOptimization
+      ? {
+          key: 'index',
+          title: 'Index evidence',
+          description: 'Session history và execution plan phải cùng xác nhận run thắng dùng đúng chiến lược index.',
+          statusLabel: progressProbe?.usedIndexing ? 'Đã xác nhận' : latestAttempt ? 'Chưa có bằng chứng' : 'Chưa kiểm chứng',
+          tone: (progressProbe?.usedIndexing ? 'success' : latestAttempt ? 'warning' : 'default') as SignalTone,
+          icon: progressProbe?.usedIndexing ? 'dataset_linked' : latestAttempt ? 'schema' : 'data_object',
+          satisfied: Boolean(progressProbe?.usedIndexing),
+        }
+      : null,
+    {
+      key: 'reward',
+      title: 'Unlock reward',
+      description: `Challenge chỉ mở toàn bộ ${challengeRules.rewardPoints} điểm khi tất cả điều kiện phía trên đều pass.`,
+      statusLabel: bestAttempt || progressProbe?.passesChallenge
+        ? `${challengeRules.rewardPoints} pts đã mở`
+        : 'Reward locked',
+      tone: (bestAttempt || progressProbe?.passesChallenge ? 'success' : latestAttempt ? 'warning' : 'default') as SignalTone,
+      icon: bestAttempt || progressProbe?.passesChallenge ? 'workspace_premium' : latestAttempt ? 'lock_open_right' : 'lock',
+      satisfied: Boolean(bestAttempt || progressProbe?.passesChallenge),
+    },
+  ].filter(
+    (
+      item,
+    ): item is {
+      key: string;
+      title: string;
+      description: string;
+      statusLabel: string;
+      tone: SignalTone;
+      icon: string;
+      satisfied: boolean;
+    } => item !== null,
+  );
+
+  const completedConditions = passConditions.filter((item) => item.satisfied).length;
+  const progressPercent = passConditions.length ? (completedConditions / passConditions.length) * 100 : 0;
+  const gapToLeader =
+    bestAttempt?.queryExecution.durationMs != null && arenaLeader?.bestDurationMs != null
+      ? bestAttempt.queryExecution.durationMs - arenaLeader.bestDurationMs
+      : null;
+
+  const gapLabel =
+    gapToLeader == null
+      ? 'Chưa có benchmark cá nhân để so pace.'
+      : gapToLeader <= 0
+        ? 'Bạn đang bằng hoặc nhanh hơn top pace hiện tại.'
+        : `Bạn còn chậm hơn top pace ${formatDurationMetric(gapToLeader)}.`;
+
+  const sessionNote = resumableSession
+    ? `Lab gần nhất hoạt động ${formatRelativeTime(
+        resumableSession.lastActivityAt ?? resumableSession.startedAt,
+      )}.`
+    : 'Khi mở Challenge Lab, editor sẽ nhận starter query từ lesson hiện tại.';
 
   return (
-    <div className="page-shell-narrow page-stack">
+    <div className="page-shell-wide page-stack">
       <Link
         href={`/tracks/${params.trackId}/lessons/${params.lessonId}`}
         className="inline-flex w-fit items-center gap-2 text-sm text-on-surface-variant transition-colors hover:text-on-surface"
       >
         <span className="material-symbols-outlined text-base">arrow_back</span>
-        Back to lesson
+        Quay lại lesson
       </Link>
 
-      <Card className="overflow-hidden rounded-[1.75rem] border border-outline-variant/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.03),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.015),rgba(255,255,255,0.01))]">
-        <CardContent className="px-6 py-7 sm:px-8 sm:py-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <Badge variant="published">Published challenge</Badge>
+      <Card className="relative overflow-hidden rounded-[2rem] border border-outline-variant/10 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01))]">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-secondary/45 to-transparent" />
+        <div className="pointer-events-none absolute right-0 top-0 h-48 w-48 rounded-full bg-secondary/10 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 left-0 h-40 w-40 rounded-full bg-surface-container-highest/60 blur-3xl" />
+
+        <CardContent className="relative px-6 py-6 sm:px-8 sm:py-8">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_22rem]">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="published">Challenge mission</Badge>
                 <DifficultyBadge difficulty={challengeSummary.difficulty} />
-                <Badge variant="default">{challengeVersion.validatorType.replace('_', ' ')} validator</Badge>
+                <Badge variant="default">{challengeVersion.validatorType.replace('_', ' ')}</Badge>
                 <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-medium text-on-surface-variant">
                   Based on {formatMinutes(lessonVersion.lesson?.estimatedMinutes ?? lesson.estimatedMinutes)}
                 </span>
+                {bestAttempt ? <Badge variant="success">Reward unlocked</Badge> : null}
+                {resumableSession ? <StatusBadge status={resumableSession.status} /> : null}
               </div>
 
-              <h1 className="font-headline text-3xl font-bold tracking-tight text-on-surface sm:text-4xl">
-                {challengeSummary.title}
-              </h1>
-              <p className="mt-3 max-w-2xl text-[15px] leading-7 text-on-surface-variant">
-                {challengeSummary.description}
-              </p>
-
-              <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
-                    Reward
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-secondary">
-                    {challengeRules.rewardPoints} pts
-                  </p>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    Unlocks once a run satisfies every challenge requirement.
-                  </p>
+              <div className="mt-4 max-w-4xl">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                  Tactical challenge board
+                </p>
+                <h1 className="mt-2 font-headline text-4xl font-bold tracking-tight text-on-surface sm:text-5xl">
+                  {challengeSummary.title}
+                </h1>
+                <p className="mt-4 max-w-3xl text-[15px] leading-7 text-on-surface-variant">
+                  {challengeSummary.description}
+                </p>
+                <div className="mt-5 flex flex-wrap items-center gap-3 text-sm text-on-surface-variant">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-container-high px-3 py-1.5">
+                    <span className="material-symbols-outlined text-base">menu_book</span>
+                    Lesson: {lessonVersion.lesson?.title ?? lesson.title}
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-surface-container-high px-3 py-1.5">
+                    <span className="material-symbols-outlined text-base">emoji_events</span>
+                    Rank theo runtime trước, rồi tới plan cost
+                  </span>
                 </div>
+              </div>
 
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
-                    Best validated run
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-on-surface">
-                    {bestAttempt?.queryExecution.durationMs != null
-                      ? `${bestAttempt.queryExecution.durationMs} ms`
-                      : '—'}
-                  </p>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    {bestAttempt
-                      ? `cost ${bestAttempt.queryExecution.totalCost != null ? Math.round(bestAttempt.queryExecution.totalCost) : '—'} • attempt #${bestAttempt.attemptNo}`
-                      : 'Pass the challenge to establish your benchmark run.'}
-                  </p>
-                </div>
+              <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <MissionStatCard
+                  label="Điểm thưởng"
+                  value={`${challengeRules.rewardPoints} pts`}
+                  supporting="Mở toàn bộ khi run pass đầy đủ điều kiện."
+                  accent={bestAttempt ? 'success' : 'default'}
+                />
+                <MissionStatCard
+                  label="Best pass"
+                  value={formatDurationMetric(bestAttempt?.queryExecution.durationMs)}
+                  supporting={
+                    bestAttempt
+                      ? `cost ${formatCostMetric(bestAttempt.queryExecution.totalCost)} • attempt #${bestAttempt.attemptNo}`
+                      : 'Pass challenge để tạo benchmark cá nhân đầu tiên.'
+                  }
+                  accent={bestAttempt ? 'success' : 'default'}
+                />
+                <MissionStatCard
+                  label="Top pace"
+                  value={formatDurationMetric(arenaLeader?.bestDurationMs)}
+                  supporting={
+                    arenaLeader
+                      ? `#${arenaLeader.rank} ${arenaLeader.displayName} • cost ${formatCostMetric(arenaLeader.bestTotalCost)}`
+                      : 'Chưa có run ranked. Người pass đầu tiên sẽ mở pace board.'
+                  }
+                  accent={arenaLeader ? 'warning' : 'default'}
+                />
+                <MissionStatCard
+                  label="Submissions"
+                  value={`${sortedAttempts.length}`}
+                  supporting={
+                    latestAttempt
+                      ? `Run gần nhất ${formatRelativeTime(latestAttempt.submittedAt)}`
+                      : 'Challenge này đang chờ submission đầu tiên của bạn.'
+                  }
+                />
+              </div>
 
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
-                    Attempts
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-on-surface">
-                    {attempts.length}
-                  </p>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    {latestAttempt
-                      ? `Last run ${formatRelativeTime(latestAttempt.submittedAt)}`
-                      : 'Start a lab to submit the first solution.'}
-                  </p>
-                </div>
+              <div className="mt-6 grid gap-3 xl:grid-cols-4">
+                <MissionLoopItem
+                  step="01"
+                  title="Mở lab"
+                  description="Khởi tạo sandbox riêng cho challenge để bắt đầu từ starter query của lesson."
+                />
+                <MissionLoopItem
+                  step="02"
+                  title="Lấy output đúng"
+                  description="Khóa đúng result-set trước khi dành thời gian tune performance."
+                />
+                <MissionLoopItem
+                  step="03"
+                  title="Tối ưu runtime"
+                  description="So sánh query plan, điều chỉnh chiến lược index và quan sát cost thực tế."
+                />
+                <MissionLoopItem
+                  step="04"
+                  title="Submit run tốt nhất"
+                  description="Khi đã ổn định, submit run nhanh nhất để leo lên board xếp hạng."
+                />
               </div>
             </div>
 
-            <div className="flex w-full flex-col gap-2 sm:w-auto">
-              {resumableSession ? (
-                <>
+            <div className="rounded-[1.75rem] border border-outline-variant/10 bg-surface/80 p-5 backdrop-blur-glass">
+              <div className="flex items-start gap-3">
+                <div
+                  className={cn(
+                    'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl',
+                    challengeState.tone === 'success'
+                      ? 'bg-secondary/15 text-secondary'
+                      : challengeState.tone === 'warning'
+                        ? 'bg-tertiary/15 text-tertiary'
+                        : 'bg-surface-container-high text-on-surface-variant',
+                  )}
+                >
+                  <span className="material-symbols-outlined text-[22px]">{challengeState.icon}</span>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                    Trạng thái hiện tại
+                  </p>
+                  <h2 className="mt-2 font-headline text-2xl font-semibold tracking-tight text-on-surface">
+                    {challengeState.label}
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-on-surface-variant">{challengeState.description}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <AttemptStatusBadge status={latestAttempt?.status ?? 'pending'} />
+                  <span className="text-xs text-on-surface-variant">
+                    {latestAttempt
+                      ? `Attempt #${latestAttempt.attemptNo} • ${formatRelativeTime(latestAttempt.submittedAt)}`
+                      : 'Chưa có run nào được submit'}
+                  </span>
+                </div>
+                {latestFeedback ? (
+                  <p className="mt-3 text-sm leading-6 text-on-surface-variant">{latestFeedback}</p>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-on-surface-variant">
+                    Khi bạn submit từ lab, feedback của validator sẽ hiện ở đây ngay.
+                  </p>
+                )}
+                <AttemptEvaluationSummary evaluation={latestAttempt?.evaluation} />
+              </div>
+
+              <div className="mt-5 flex flex-col gap-2">
+                {resumableSession ? (
+                  <>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      onClick={handleContinueChallengeLab}
+                      leftIcon={<span className="material-symbols-outlined text-lg">play_circle</span>}
+                    >
+                      Tiếp tục Challenge Lab
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      loading={starting}
+                      onClick={handleStartChallengeLab}
+                      leftIcon={<span className="material-symbols-outlined text-lg">add_circle</span>}
+                    >
+                      Mở lab mới
+                    </Button>
+                  </>
+                ) : (
                   <Button
                     variant="primary"
                     size="lg"
-                    onClick={handleContinueChallengeLab}
-                    leftIcon={<span className="material-symbols-outlined text-lg">play_circle</span>}
-                  >
-                    Continue Challenge Lab
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="lg"
                     loading={starting}
                     onClick={handleStartChallengeLab}
-                    leftIcon={<span className="material-symbols-outlined text-lg">add_circle</span>}
+                    leftIcon={<span className="material-symbols-outlined text-lg">flag</span>}
                   >
-                    Start Fresh Lab
+                    Bắt đầu Challenge Lab
                   </Button>
-                </>
-              ) : (
+                )}
                 <Button
-                  variant="primary"
+                  variant="secondary"
                   size="lg"
-                  loading={starting}
-                  onClick={handleStartChallengeLab}
-                  leftIcon={<span className="material-symbols-outlined text-lg">flag</span>}
+                  fullWidth
+                  onClick={() => router.push(`/tracks/${params.trackId}/lessons/${params.lessonId}`)}
                 >
-                  Start Challenge Lab
+                  Quay lại lesson
                 </Button>
-              )}
-              <Button
-                variant="secondary"
-                size="lg"
-                fullWidth
-                onClick={() => router.push(`/tracks/${params.trackId}/lessons/${params.lessonId}`)}
-              >
-                Return to lesson
-              </Button>
-              <p className="max-w-72 text-xs leading-5 text-on-surface-variant">
-                Run SQL inside the lab, then submit your latest successful execution for challenge evaluation.
-                Challenge sessions keep lesson starter SQL and challenge context together.
-              </p>
+              </div>
+
+              <div className="mt-5 rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                  Session note
+                </p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">{sessionNote}</p>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
-        <div className="space-y-4">
-          <Card className="rounded-2xl border border-outline-variant/10">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(20rem,0.95fr)]">
+        <div className="space-y-6">
+          <Card className="rounded-[1.75rem] border border-outline-variant/10">
             <CardHeader>
-              <CardTitle>Problem Statement</CardTitle>
-              <CardDescription>
-                Solve this in the SQL lab and submit the execution that best satisfies the validator.
-              </CardDescription>
+              <div>
+                <CardTitle>Brief đề bài</CardTitle>
+                <CardDescription className="mt-1">
+                  Đây là phần brief để bạn giữ đúng output trước khi đi vào tối ưu tốc độ và cost.
+                </CardDescription>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-2xl bg-surface-container-low px-4 py-4 text-sm leading-7 text-on-surface whitespace-pre-wrap">
+              <div className="rounded-[1.35rem] border border-outline-variant/10 bg-surface-container-low/70 px-4 py-4 text-sm leading-7 text-on-surface whitespace-pre-wrap">
                 {challengeVersion.problemStatement}
               </div>
 
-              {challengeVersion.hintText ? (
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
                     Hint
                   </p>
                   <p className="mt-2 text-sm leading-6 text-on-surface-variant whitespace-pre-wrap">
-                    {challengeVersion.hintText}
+                    {challengeVersion.hintText ?? 'Challenge này không bật hint. Bạn cần tự suy luận từ brief và schema.'}
                   </p>
                 </div>
-              ) : null}
 
-              {challengeVersion.expectedResultColumns.length ? (
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
+                <div className="rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
-                    Expected result columns
+                    Validator
                   </p>
+                  <p className="mt-2 text-sm font-semibold text-on-surface">
+                    {challengeVersion.validatorType.replace('_', ' ')}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                    Output của bạn sẽ được chấm tự động ngay sau khi submit execution thành công từ lab.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                  Expected result columns
+                </p>
+                {challengeVersion.expectedResultColumns.length ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {challengeVersion.expectedResultColumns.map((column) => (
-                      <code
-                        key={column}
-                        className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs text-on-surface"
-                      >
+                      <code key={column} className="rounded-full bg-surface px-3 py-1.5 text-xs text-on-surface">
                         {column}
                       </code>
                     ))}
                   </div>
-                </div>
-              ) : null}
+                ) : (
+                  <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                    Challenge này không khóa trước danh sách cột ở UI.
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl border border-outline-variant/10">
+          <Card className="rounded-[1.75rem] border border-outline-variant/10">
             <CardHeader>
-              <CardTitle>Pass Conditions</CardTitle>
-              <CardDescription>
-                Pass unlocks fixed challenge points. Passed runs are ranked by lower runtime first, then
-                lower plan cost.
-              </CardDescription>
+              <div>
+                <CardTitle>Checklist pass</CardTitle>
+                <CardDescription className="mt-1">
+                  Theo dõi xem run hiện tại của bạn đã đáp ứng tới đâu trước khi leo bảng.
+                </CardDescription>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm text-on-surface-variant">
-              <ChallengeRuleCard
-                label="Reward"
-                value={`${challengeRules.rewardPoints} pts`}
-                description="A submitted run either unlocks the full reward or no reward at all. There is no partial scoring inside a challenge."
-              />
+            <CardContent className="space-y-4">
+              <div className="rounded-[1.35rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                      Challenge progress
+                    </p>
+                    <p className="mt-2 text-lg font-semibold text-on-surface">
+                      {completedConditions}/{passConditions.length} điều kiện đã đạt
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-on-surface-variant">
+                    {Math.round(progressPercent)}%
+                  </span>
+                </div>
+                <div className="mt-4 h-2 rounded-full bg-surface">
+                  <div
+                    className="h-full rounded-full bg-secondary transition-all duration-300"
+                    style={{ width: `${Math.max(8, progressPercent)}%` }}
+                  />
+                </div>
+              </div>
 
-              {challengeRules.baselineDurationMs != null ? (
-                <ChallengeRuleCard
-                  label="Runtime target"
-                  value={`<= ${challengeRules.baselineDurationMs} ms`}
-                  description="A correct result set still fails the challenge when the submitted execution is slower than the configured runtime ceiling."
-                />
-              ) : null}
+              <div className="space-y-3">
+                {passConditions.map((condition) => (
+                  <ConditionRow
+                    key={condition.key}
+                    title={condition.title}
+                    description={condition.description}
+                    statusLabel={condition.statusLabel}
+                    tone={condition.tone}
+                    icon={condition.icon}
+                  />
+                ))}
+              </div>
 
-              {challengeRules.requiresIndexOptimization ? (
-                <ChallengeRuleCard
-                  label="Index evidence"
-                  value="Required"
-                  description="The challenge only passes when session history and EXPLAIN ANALYZE together confirm that the winning run used the expected index strategy."
-                />
-              ) : null}
-
-              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-4">
+              <div className="rounded-[1.25rem] border border-outline-variant/10 bg-surface-container-low/70 p-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
                   Ranking rule
                 </p>
-                <p className="mt-2 text-lg font-semibold text-on-surface">
-                  Lower time, then lower cost
-                </p>
-                <p className="mt-1 text-sm leading-6 text-on-surface-variant">
-                  Safe optimization workflows in the lab include keeping query history, comparing query variants, creating or dropping indexes, inspecting schema drift, and resetting the sandbox back to base before the final run.
+                <p className="mt-2 text-lg font-semibold text-on-surface">Lower time, then lower cost</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  Sau khi pass, challenge sẽ xếp hạng theo runtime thấp hơn trước. Nếu runtime bằng nhau,
+                  plan cost thấp hơn sẽ thắng. Vì vậy hãy khóa đúng output trước, rồi mới tối ưu.
                 </p>
               </div>
-
             </CardContent>
           </Card>
         </div>
 
-        <div className="space-y-4">
-          <Card className="rounded-2xl border border-outline-variant/10">
+        <div className="space-y-6">
+          <Card className="rounded-[1.75rem] border border-outline-variant/10">
             <CardHeader>
-              <CardTitle>Challenge Arena</CardTitle>
-              <CardDescription>
-                Submission result and ranking now live in one arena. Submit in the lab, then use this
-                board to compare your latest validated run against the live field.
-              </CardDescription>
+              <div>
+                <CardTitle>Bảng điều khiển cá nhân</CardTitle>
+                <CardDescription className="mt-1">
+                  So run gần nhất, benchmark tốt nhất và khoảng cách tới top pace ngay trên một panel.
+                </CardDescription>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-3 lg:grid-cols-3">
-                <ArenaMetricCard
-                  label="Latest submission"
-                  value={
-                    latestAttempt
-                      ? latestAttempt.status === 'passed'
-                        ? 'Passed'
-                        : latestAttempt.status === 'failed'
-                          ? 'Not passed'
-                          : latestAttempt.status
-                      : 'No run yet'
-                  }
-                  supporting={
-                    latestAttempt
-                      ? `Attempt #${latestAttempt.attemptNo} • ${formatRelativeTime(latestAttempt.submittedAt)}`
-                      : 'Start a challenge lab and submit the first execution.'
-                  }
-                  tone={latestAttempt?.status === 'passed' ? 'success' : latestAttempt ? 'warning' : 'default'}
-                >
-                  {latestFeedback ? (
-                    <>
-                      <p className="mt-3 text-sm leading-6 text-on-surface-variant">{latestFeedback}</p>
-                      <AttemptEvaluationSummary evaluation={latestAttempt?.evaluation} />
-                    </>
-                  ) : null}
-                </ArenaMetricCard>
+              <PersonalSignalRow
+                label="Latest submission"
+                value={
+                  latestAttempt
+                    ? latestAttempt.status === 'passed'
+                      ? 'Passed'
+                      : latestAttempt.status === 'failed'
+                        ? 'Not passed'
+                        : latestAttempt.status
+                    : 'No run yet'
+                }
+                supporting={
+                  latestAttempt
+                    ? `Attempt #${latestAttempt.attemptNo} • ${formatRelativeTime(latestAttempt.submittedAt)}`
+                    : 'Mở Challenge Lab rồi submit một execution thành công để bắt đầu tracking.'
+                }
+              />
+              <PersonalSignalRow
+                label="Best validated run"
+                value={formatDurationMetric(bestAttempt?.queryExecution.durationMs)}
+                supporting={
+                  bestAttempt
+                    ? `cost ${formatCostMetric(bestAttempt.queryExecution.totalCost)} • reward unlocked`
+                    : 'Chưa có run pass nào để làm benchmark cá nhân.'
+                }
+              />
+              <PersonalSignalRow
+                label="Khoảng cách tới top pace"
+                value={gapToLeader == null ? '—' : gapToLeader <= 0 ? 'On pace' : formatDurationMetric(gapToLeader)}
+                supporting={gapLabel}
+              />
+              <PersonalSignalRow
+                label="Xếp hạng của bạn"
+                value={viewerEntry ? `#${viewerEntry.rank}` : 'Chưa vào board'}
+                supporting={
+                  viewerEntry
+                    ? `${viewerEntry.passedAttempts} run pass • ${viewerEntry.attemptsCount} attempts`
+                    : 'Khi bạn có run pass đủ nhanh, entry của bạn sẽ xuất hiện trong pace board.'
+                }
+              />
+            </CardContent>
+          </Card>
 
-                <ArenaMetricCard
-                  label="Your benchmark"
-                  value={
-                    bestAttempt?.queryExecution.durationMs != null
-                      ? `${bestAttempt.queryExecution.durationMs} ms`
-                      : 'Awaiting pass'
-                  }
-                  supporting={
-                    bestAttempt
-                      ? `cost ${bestAttempt.queryExecution.totalCost != null ? Math.round(bestAttempt.queryExecution.totalCost) : '—'} • reward unlocked`
-                      : 'Your best passed run becomes the benchmark used to compare later submissions.'
-                  }
-                />
-
-                <ArenaMetricCard
-                  label="Arena leader"
-                  value={
-                    arenaLeader?.bestDurationMs != null
-                      ? `${arenaLeader.bestDurationMs} ms`
-                      : 'Open board'
-                  }
-                  supporting={
-                    arenaLeader
-                      ? `#${arenaLeader.rank} ${arenaLeader.displayName} • cost ${arenaLeader.bestTotalCost != null ? Math.round(arenaLeader.bestTotalCost) : '—'}`
-                      : 'No ranked entry yet. The first validated pass becomes the pace setter.'
-                  }
-                />
+          <Card className="rounded-[1.75rem] border border-outline-variant/10">
+            <CardHeader>
+              <div>
+                <CardTitle>Top users</CardTitle>
+                <CardDescription className="mt-1">
+                  Pace board chỉ hiển thị các run đã pass đầy đủ điều kiện và được rank theo runtime trước.
+                </CardDescription>
               </div>
-
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-headline text-base font-semibold tracking-tight text-on-surface">
-                        Your submission timeline
-                      </h3>
-                      <p className="mt-1 text-sm text-on-surface-variant">
-                        Newest attempts first across all your sessions on this challenge version.
-                      </p>
-                    </div>
-                    <div className="rounded-full bg-surface px-3 py-1 text-xs font-medium text-on-surface-variant">
-                      {attempts.length} runs
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {attempts.length ? (
-                      attempts.map((attempt) => (
-                        <div
-                          key={attempt.id}
-                          className="rounded-2xl border border-outline-variant/10 bg-surface px-4 py-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <AttemptStatusBadge status={attempt.status} />
-                            <span className="text-sm font-semibold text-on-surface">
-                              {attempt.status === 'passed'
-                                ? `+${challengeRules.rewardPoints} pts`
-                                : 'Reward locked'}
-                            </span>
-                            <span className="text-xs text-outline">Attempt #{attempt.attemptNo}</span>
-                            <span className="ml-auto text-xs text-outline">
-                              {formatRelativeTime(attempt.submittedAt)}
-                            </span>
-                          </div>
-
-                          <p className="mt-3 text-xs font-mono text-on-surface-variant">
-                            {truncateSql(attempt.queryExecution.sqlText, 140)}
-                          </p>
-
-                          <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
-                            <span className="rounded-full bg-surface-container-high px-2 py-1">
-                              Query {attempt.queryExecution.status}
-                            </span>
-                            {attempt.queryExecution.rowsReturned != null ? (
-                              <span className="rounded-full bg-surface-container-high px-2 py-1">
-                                {attempt.queryExecution.rowsReturned} rows
-                              </span>
-                            ) : null}
-                            {attempt.queryExecution.durationMs != null ? (
-                              <span className="rounded-full bg-surface-container-high px-2 py-1">
-                                {attempt.queryExecution.durationMs} ms
-                              </span>
-                            ) : null}
-                            {attempt.queryExecution.totalCost != null ? (
-                              <span className="rounded-full bg-surface-container-high px-2 py-1">
-                                cost {Math.round(attempt.queryExecution.totalCost)}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          {attempt.evaluation?.feedbackText ? (
-                            <>
-                              <p className="mt-3 text-sm leading-6 text-on-surface-variant">
-                                {attempt.evaluation.feedbackText}
-                              </p>
-                              <AttemptEvaluationSummary evaluation={attempt.evaluation} />
-                            </>
-                          ) : null}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface px-4 py-6 text-sm text-on-surface-variant">
-                        No submitted attempts yet. Start the challenge lab, run a query, then submit the
-                        latest successful execution.
-                      </div>
-                    )}
-                  </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {rankedEntries.length ? (
+                rankedEntries.map((entry) => (
+                  <LeaderboardCard
+                    key={entry.userId}
+                    entry={entry}
+                    highlight={Boolean(viewerId && entry.userId === viewerId)}
+                  />
+                ))
+              ) : (
+                <div className="rounded-[1.25rem] border border-dashed border-outline-variant/20 bg-surface-container-low/70 px-4 py-6 text-sm text-on-surface-variant">
+                  Chưa có leaderboard entry nào. Người pass đầu tiên sẽ mở pace board của challenge này.
                 </div>
-
-                <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="font-headline text-base font-semibold tracking-tight text-on-surface">
-                        Top users
-                      </h3>
-                      <p className="mt-1 text-sm text-on-surface-variant">
-                        Fastest validated run wins this challenge. Runtime breaks ties before plan
-                        cost.
-                      </p>
-                    </div>
-                    <div className="rounded-full bg-surface px-3 py-1 text-xs font-medium text-on-surface-variant">
-                      {leaderboard.length} ranked
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {leaderboard.length ? (
-                      leaderboard.map((entry) => (
-                        <div
-                          key={entry.userId}
-                          className="flex items-center gap-3 rounded-2xl border border-outline-variant/10 bg-surface px-4 py-3"
-                        >
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-container-high text-sm font-semibold text-on-surface">
-                            #{entry.rank}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-on-surface">
-                              {entry.displayName}
-                            </p>
-                            <p className="text-xs text-on-surface-variant">
-                              {entry.attemptsCount} attempts • {entry.passedAttempts} passed
-                            </p>
-                            <p className="mt-2 truncate font-mono text-[11px] text-on-surface-variant">
-                              {entry.sqlText}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-semibold text-secondary">
-                              {entry.bestDurationMs != null ? `${entry.bestDurationMs} ms` : '—'}
-                            </p>
-                            <p className="text-[11px] text-outline">
-                              cost {entry.bestTotalCost != null ? Math.round(entry.bestTotalCost) : '—'} •{' '}
-                              {formatRelativeTime(entry.lastSubmittedAt)}
-                            </p>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface px-4 py-6 text-sm text-on-surface-variant">
-                        No leaderboard entries yet. The board fills in automatically once attempts are
-                        submitted.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
+
+      <Card className="rounded-[1.75rem] border border-outline-variant/10">
+        <CardHeader>
+          <div>
+            <CardTitle>Timeline submissions</CardTitle>
+            <CardDescription className="mt-1">
+              Newest runs first, gom toàn bộ attempts của bạn trên challenge version hiện tại.
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {sortedAttempts.length ? (
+            sortedAttempts.map((attempt) => (
+              <AttemptTimelineItem
+                key={attempt.id}
+                attempt={attempt}
+                rewardPoints={challengeRules.rewardPoints}
+              />
+            ))
+          ) : (
+            <div className="rounded-[1.25rem] border border-dashed border-outline-variant/20 bg-surface-container-low/70 px-4 py-6 text-sm text-on-surface-variant">
+              Chưa có submission nào. Mở Challenge Lab, chạy query rồi submit execution mới nhất để tạo history.
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

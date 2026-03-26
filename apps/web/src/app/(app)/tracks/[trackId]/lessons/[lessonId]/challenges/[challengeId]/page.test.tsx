@@ -177,7 +177,7 @@ describe('ChallengePage', () => {
     vi.clearAllMocks();
   });
 
-  it('renders a merged challenge arena and starts a challenge lab', async () => {
+  it('renders the redesigned challenge mission board and starts a challenge lab', async () => {
     const user = userEvent.setup();
 
     renderChallengePage();
@@ -185,14 +185,15 @@ describe('ChallengePage', () => {
     expect(await screen.findByRole('heading', { name: 'Filter active users' })).toBeInTheDocument();
     expect(screen.getByText('Return the id and email of active users only.')).toBeInTheDocument();
     expect(screen.getByText('Use the active flag.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /challenge arena/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Brief đề bài' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Checklist pass' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bảng điều khiển cá nhân' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /top users/i })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Your Attempts' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Leaderboard' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Timeline submissions' })).toBeInTheDocument();
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getAllByText('Correct!').length).toBeGreaterThan(0);
 
-    await user.click(await screen.findByRole('button', { name: /start challenge lab/i }));
+    await user.click(await screen.findByRole('button', { name: /bắt đầu challenge lab/i }));
 
     await waitFor(() => {
       expect(mocks.sessionsApi.create).toHaveBeenCalledWith({
