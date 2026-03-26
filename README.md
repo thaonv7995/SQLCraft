@@ -4,15 +4,20 @@
 
 SQLCraft is an open-source SQL platform for sandboxed query execution, realistic datasets, execution-plan analysis, and admin-reviewed content workflows.
 
+### System Architecture
+
+![System Architecture](docs/system-architecture.png)
+
+### SQL Lab Interface
+
+![SQL Lab Interface](docs/sql-lab-interface.png)
+
 ## Features
 
-- **Interactive SQL Lab** — Write and run SQL directly in the browser. View tabular results, query duration, scanned rows, and visual `EXPLAIN ANALYZE` execution plans to spot bottlenecks.
-- **Progressive Dataset Scaling** — Practice with the same schema across multiple data scales (Tiny: 100 rows ➔ Small: 100K ➔ Medium: 5M ➔ Large: 10M-100M+ rows) to see real performance implications.
-- **Session Query History** — Every execution is stored within the active session so users can reopen prior SQL, compare before/after runs, and reuse the strongest execution for validation or review flows.
-- **Query Optimization Labs** — Run side-by-side query comparisons, create and drop indexes safely, inspect schema drift against the published base schema, and reset the sandbox back to base after experiments.
-- **User Sandbox Isolation** — Every SQL session provisions a dedicated, ephemeral PostgreSQL container attached to the internal Docker network. Cleanup is automatic on session end and TTL expiry.
-- **Versioned Content & Validation Engine** — Structured content and optional challenge-style validations are versioned and evaluated with weighted **correctness**, **performance**, and **index optimization** scoring where configured, using full result-set comparison plus EXPLAIN-backed index checks.
-- **Admin Tools & User Submission Workflow** — Built-in tools for async dataset generation plus a full content workflow: user-submitted drafts with Markdown preview and SQL preflight validation, admin approve/request-changes/reject moderation, and lesson version management for safe content updates.
+- **SQL Lab** — Browser-based SQL editor with execution plans, query history, and result comparison.
+- **Isolated Sandboxes** — Each session gets a dedicated PostgreSQL container, auto-cleaned on expiry.
+- **Dataset Scaling** — Same schema across 4 scales (100 → 10M+ rows) to reveal real performance differences.
+- **Optimization Labs** — Side-by-side query benchmarking with index management and schema diff.
 
 ## Access Model
 
@@ -49,7 +54,7 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 
 ```bash
 # Clone the repo
-git clone https://github.com/sqlcraft/sqlcraft.git
+git clone https://github.com/thaonv7995/SQLCraft.git
 cd sqlcraft
 
 # Install dependencies and copy env
@@ -106,10 +111,6 @@ sqlcraft/
 ├── Makefile
 └── turbo.json
 ```
-
-## Screenshots
-
-> Coming soon — the lab is still being built.
 
 ## Documentation
 
