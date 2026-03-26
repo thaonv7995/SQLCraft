@@ -8,13 +8,10 @@ import { DifficultyBadge } from '@/components/ui/badge';
 import {
   challengesApi,
   leaderboardApi,
-  sessionsApi,
   type ChallengeCatalogItem,
-  type DatasetScale,
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
-import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 
 type LeaderboardPeriod = 'weekly' | 'monthly' | 'alltime';
 
@@ -27,13 +24,6 @@ const PERIOD_OPTIONS: Array<{ id: LeaderboardPeriod; label: string }> = [
 function formatPoints(points: number) {
   return `${points.toLocaleString()} pts`;
 }
-
-const DATASET_SCALE_META: Record<DatasetScale, { label: string; desc: string }> = {
-  tiny: { label: 'Tiny', desc: '100 rows' },
-  small: { label: 'Small', desc: '10K rows' },
-  medium: { label: 'Medium', desc: '1M-5M rows' },
-  large: { label: 'Large', desc: '10M+ rows' },
-};
 
 type ChallengeCompletionFilter = 'not_done' | 'done';
 
@@ -48,12 +38,6 @@ export default function LeaderboardPage() {
   const completionPageSize = 6;
 
   const router = useRouter();
-  const [submissionModalOpen, setSubmissionModalOpen] = useState(false);
-  const [submissionChallenge, setSubmissionChallenge] = useState<ChallengeCatalogItem | null>(null);
-  const [submissionSelectedScale, setSubmissionSelectedScale] = useState<DatasetScale>('small');
-  const [isStartingSubmission, setIsStartingSubmission] = useState(false);
-  const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [detailChallenge, setDetailChallenge] = useState<ChallengeCatalogItem | null>(null);
 
   useEffect(() => {
     setCompletionPage(0);
@@ -168,56 +152,8 @@ export default function LeaderboardPage() {
     return completionChallengesForList.slice(start, end);
   }, [completionChallengesForList, completionSafePage, completionPageSize]);
 
-  const openSubmissionModal = (challenge: ChallengeCatalogItem) => {
-    setSubmissionChallenge(challenge);
-    setSubmissionSelectedScale('small');
-    setSubmissionModalOpen(true);
-  };
-
-  const openDetailModal = (challenge: ChallengeCatalogItem) => {
-    setDetailChallenge(challenge);
-    setDetailModalOpen(true);
-  };
-
-  const closeDetailModal = () => {
-    setDetailModalOpen(false);
-    setDetailChallenge(null);
-  };
-
-  const closeSubmissionModal = () => {
-    setSubmissionModalOpen(false);
-    setSubmissionChallenge(null);
-  };
-
-  const startSubmissionForChallenge = async () => {
-    if (!submissionChallenge?.publishedVersionId) {
-      toast.error('Challenge chưa sẵn sàng để tạo submission.');
-      return;
-    }
-
-    setIsStartingSubmission(true);
-    try {
-      const session = await sessionsApi.create({
-        challengeVersionId: submissionChallenge.publishedVersionId,
-        selectedScale: submissionSelectedScale,
-      });
-
-      saveLabBootstrap(session.id, {
-        mode: 'challenge',
-        lessonTitle: submissionChallenge.databaseName ?? undefined,
-        challengePath: `/challenges/${submissionChallenge.id}`,
-        challengeTitle: submissionChallenge.title,
-        starterQuery: null,
-        starterQueryConsumed: false,
-      });
-
-      closeSubmissionModal();
-      router.push(`/lab/${session.id}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Không thể tạo submission.');
-    } finally {
-      setIsStartingSubmission(false);
-    }
+  const openChallengeDetailPage = (challengeId: string) => {
+    router.push(`/challenges/${challengeId}`);
   };
 
   return (
@@ -332,11 +268,11 @@ export default function LeaderboardPage() {
                     key={challenge.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => openDetailModal(challenge)}
+                    onClick={() => openChallengeDetailPage(challenge.id)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        openDetailModal(challenge);
+                        openChallengeDetailPage(challenge.id);
                       }
                     }}
                     aria-label={`Xem chi tiết ${challenge.title}`}
@@ -430,161 +366,6 @@ export default function LeaderboardPage() {
         )}
       </section>
 
-      {detailModalOpen && detailChallenge && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="challenge-detail-modal-title"
-        >
-          <div className="w-full max-w-lg rounded-[28px] border border-outline-variant/20 bg-surface-container-low p-6 shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2
-                  id="challenge-detail-modal-title"
-                  className="font-headline text-xl font-semibold text-on-surface"
-                >
-                  {detailChallenge.title}
-                </h2>
-                <p className="mt-1 text-sm text-on-surface-variant">
-                  {detailChallenge.description}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeDetailModal}
-                className="rounded-full border border-outline-variant/20 bg-surface-container-low px-3 py-1.5 text-sm text-on-surface-variant hover:bg-surface-container-lowest"
-                aria-label="Đóng popup"
-              >
-                <span className="material-symbols-outlined text-base">close</span>
-              </button>
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/50 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Points</p>
-                <p className="mt-1 text-sm font-mono font-bold text-on-surface">
-                  {detailChallenge.points} pts
-                </p>
-              </div>
-              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/50 px-4 py-3">
-                <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Database</p>
-                <p className="mt-1 text-sm font-mono font-bold text-tertiary line-clamp-1">
-                  {detailChallenge.databaseName ?? 'N/A'}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={closeDetailModal}
-                className="rounded-full border border-outline-variant/20 bg-surface-container-low px-4 py-2 text-sm font-medium text-on-surface-variant transition hover:bg-surface-container-lowest"
-              >
-                Đóng
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  closeDetailModal();
-                  openSubmissionModal(detailChallenge);
-                }}
-                aria-label={`Tạo submission cho ${detailChallenge.title}`}
-                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-on-primary transition hover:brightness-105"
-              >
-                <span className="material-symbols-outlined text-base">add_circle</span>
-                Tạo submission
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {submissionModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="submission-modal-title"
-        >
-          <div className="w-full max-w-md rounded-[28px] border border-outline-variant/20 bg-surface-container-low p-6 shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h2 id="submission-modal-title" className="font-headline text-xl font-semibold text-on-surface">
-                  Chọn database (dataset scale)
-                </h2>
-                <p className="mt-1 text-sm text-on-surface-variant">
-                  Bạn sẽ tạo submission bằng sandbox theo quy mô này.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeSubmissionModal}
-                className="rounded-full border border-outline-variant/20 bg-surface-container-low px-3 py-1.5 text-sm text-on-surface-variant hover:bg-surface-container-lowest"
-                aria-label="Đóng popup"
-              >
-                <span className="material-symbols-outlined text-base">close</span>
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Dataset scale</p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(DATASET_SCALE_META) as DatasetScale[]).map((scale) => (
-                  <button
-                    key={scale}
-                    type="button"
-                    onClick={() => setSubmissionSelectedScale(scale)}
-                    className={cn(
-                      'rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-                      submissionSelectedScale === scale
-                        ? 'bg-surface-container-high text-on-surface'
-                        : 'bg-surface text-on-surface-variant hover:text-on-surface',
-                    )}
-                    title={DATASET_SCALE_META[scale].desc}
-                  >
-                    {DATASET_SCALE_META[scale].label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/50 px-4 py-3">
-                <p className="text-xs text-on-surface-variant">
-                  Challenge: <span className="text-on-surface">{submissionChallenge?.title ?? '—'}</span>
-                </p>
-                <p className="mt-1 text-xs text-on-surface-variant">
-                  Scale: <span className="font-mono text-on-surface">{submissionSelectedScale}</span>
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={closeSubmissionModal}
-                className="rounded-full border border-outline-variant/20 bg-surface-container-low px-4 py-2 text-sm font-medium text-on-surface-variant transition hover:bg-surface-container-lowest"
-                disabled={isStartingSubmission}
-              >
-                Hủy
-              </button>
-
-              <button
-                type="button"
-                onClick={() => void startSubmissionForChallenge()}
-                disabled={isStartingSubmission}
-                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-on-primary transition hover:brightness-105 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {isStartingSubmission ? (
-                  <span className="material-symbols-outlined text-base animate-spin">autorenew</span>
-                ) : (
-                  <span className="material-symbols-outlined text-base">add_circle</span>
-                )}
-                Tạo submission
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
