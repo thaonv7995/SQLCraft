@@ -398,7 +398,6 @@ export async function createDatabaseSession(
 
   const session = await sessionsRepository.createSession({
     userId,
-    lessonVersionId: null,
     challengeVersionId: null,
     status: 'provisioning',
   });
@@ -421,7 +420,6 @@ export async function createDatabaseSession(
     session: {
       id: session.id,
       userId: session.userId,
-      lessonVersionId: session.lessonVersionId,
       challengeVersionId: session.challengeVersionId,
       status: session.status,
       startedAt: session.startedAt,

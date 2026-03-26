@@ -28,7 +28,6 @@ import {
 import { cn, formatDuration, formatRows, formatRelativeTime, getExplainPlanMode, truncateSql } from '@/lib/utils';
 import {
   challengesApi,
-  lessonsApi,
   queryApi,
   sandboxesApi,
   sessionsApi,
@@ -1332,49 +1331,18 @@ export default function LabPage() {
   } = useSessionStatus(sessionId);
   const { data: sessionSchema } = useSessionSchema(sessionId);
   const lessonContext = useMemo(() => readLabBootstrap(sessionId), [sessionId]);
-  const { data: sessionLessonVersion } = useQuery({
-    queryKey: ['lab-session-lesson-version', session?.lessonVersionId],
-    queryFn: () => {
-      if (!session?.lessonVersionId) {
-        throw new Error('This lab session is not linked to a lesson version');
-      }
-      return lessonsApi.getVersion(session.lessonVersionId);
-    },
-    enabled: Boolean(session?.lessonVersionId),
-    staleTime: 60_000,
-  });
   const { data: challengeAttempts = [] } = useQuery({
     queryKey: ['challenge-attempts', session?.challengeVersionId],
     queryFn: () => challengesApi.listAttempts(session!.challengeVersionId!),
     enabled: Boolean(session?.challengeVersionId),
     staleTime: 15_000,
   });
-  const fallbackLessonPath = sessionLessonVersion?.lesson?.trackId
-    ? `/tracks/${sessionLessonVersion.lesson.trackId}/lessons/${sessionLessonVersion.lessonId}`
-    : null;
-  const fallbackChallenge = session?.challengeVersionId
-    ? sessionLessonVersion?.challenges.find(
-        (challenge) => challenge.publishedVersionId === session.challengeVersionId,
-      ) ?? null
-    : null;
-  const fallbackChallengePath =
-    fallbackLessonPath && fallbackChallenge
-      ? `${fallbackLessonPath}/challenges/${fallbackChallenge.id}`
-      : null;
-  const entryPath =
-    lessonContext?.challengePath ??
-    lessonContext?.lessonPath ??
-    fallbackChallengePath ??
-    fallbackLessonPath;
-  const entryLabel = lessonContext?.challengePath || fallbackChallengePath
-    ? 'Back to challenge'
-    : entryPath
-      ? 'Back to lesson'
-      : null;
+  const entryPath = lessonContext?.challengePath ?? lessonContext?.lessonPath ?? '/leaderboard';
+  const entryLabel = 'Back to challenge';
   const modeLabel =
     lessonContext?.mode === 'challenge' || session?.challengeVersionId ? 'Challenge' : 'Lesson';
-  const lessonTitle = session?.lessonTitle ?? lessonContext?.lessonTitle ?? sessionLessonVersion?.lesson?.title;
-  const challengeTitle = lessonContext?.challengeTitle ?? fallbackChallenge?.title;
+  const lessonTitle = session?.lessonTitle ?? lessonContext?.lessonTitle;
+  const challengeTitle = lessonContext?.challengeTitle;
   const latestSuccessfulExecution =
     queryHistory.find((execution) => execution.status === 'success') ?? null;
   const bestChallengeAttempt = challengeAttempts

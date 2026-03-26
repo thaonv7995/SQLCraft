@@ -121,85 +121,14 @@ export const refreshTokens = pgTable(
 );
 
 // Learning Content
-export const tracks = pgTable(
-  'tracks',
-  {
-    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    slug: varchar('slug', { length: 100 }).notNull(),
-    title: varchar('title', { length: 255 }).notNull(),
-    description: text('description'),
-    coverUrl: text('cover_url'),
-    difficulty: difficultyEnum('difficulty').notNull().default('beginner'),
-    status: contentStatusEnum('status').notNull().default('draft'),
-    sortOrder: integer('sort_order').notNull().default(0),
-    createdBy: uuid('created_by').references(() => users.id),
-    createdAt: timestamp('created_at').notNull().default(sql`now()`),
-    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
-  },
-  (table) => ({
-    slugIdx: uniqueIndex('tracks_slug_idx').on(table.slug),
-    statusSortIdx: index('tracks_status_sort_idx').on(table.status, table.sortOrder),
-  }),
-);
-
-export const lessons = pgTable(
-  'lessons',
-  {
-    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    trackId: uuid('track_id')
-      .notNull()
-      .references(() => tracks.id, { onDelete: 'cascade' }),
-    slug: varchar('slug', { length: 100 }).notNull(),
-    title: varchar('title', { length: 255 }).notNull(),
-    description: text('description'),
-    difficulty: difficultyEnum('difficulty').notNull().default('beginner'),
-    status: contentStatusEnum('status').notNull().default('draft'),
-    sortOrder: integer('sort_order').notNull().default(0),
-    estimatedMinutes: integer('estimated_minutes'),
-    publishedVersionId: uuid('published_version_id'),
-    createdBy: uuid('created_by').references(() => users.id),
-    createdAt: timestamp('created_at').notNull().default(sql`now()`),
-    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
-  },
-  (table) => ({
-    trackSlugIdx: uniqueIndex('lessons_track_slug_idx').on(table.trackId, table.slug),
-    trackSortIdx: index('lessons_track_sort_idx').on(table.trackId, table.sortOrder),
-  }),
-);
-
-export const lessonVersions = pgTable(
-  'lesson_versions',
-  {
-    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    lessonId: uuid('lesson_id')
-      .notNull()
-      .references(() => lessons.id, { onDelete: 'cascade' }),
-    versionNo: integer('version_no').notNull().default(1),
-    title: varchar('title', { length: 255 }).notNull(),
-    content: text('content').notNull(),
-    starterQuery: text('starter_query'),
-    isPublished: boolean('is_published').notNull().default(false),
-    schemaTemplateId: uuid('schema_template_id').references(() => schemaTemplates.id),
-    datasetTemplateId: uuid('dataset_template_id').references(() => datasetTemplates.id),
-    publishedAt: timestamp('published_at'),
-    createdBy: uuid('created_by').references(() => users.id),
-    createdAt: timestamp('created_at').notNull().default(sql`now()`),
-  },
-  (table) => ({
-    lessonVersionIdx: uniqueIndex('lesson_versions_lesson_version_idx').on(
-      table.lessonId,
-      table.versionNo,
-    ),
-  }),
-);
 
 export const challenges = pgTable(
   'challenges',
   {
     id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    lessonId: uuid('lesson_id')
+    databaseId: uuid('database_id')
       .notNull()
-      .references(() => lessons.id, { onDelete: 'cascade' }),
+      .references(() => schemaTemplates.id, { onDelete: 'restrict' }),
     slug: varchar('slug', { length: 100 }).notNull(),
     title: varchar('title', { length: 255 }).notNull(),
     description: text('description'),
@@ -213,7 +142,8 @@ export const challenges = pgTable(
     updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
   },
   (table) => ({
-    lessonSlugIdx: uniqueIndex('challenges_lesson_slug_idx').on(table.lessonId, table.slug),
+    databaseSlugIdx: uniqueIndex('challenges_database_slug_idx').on(table.databaseId, table.slug),
+    databaseIdx: index('challenges_database_idx').on(table.databaseId),
   }),
 );
 
@@ -282,7 +212,6 @@ export const learningSessions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id),
-    lessonVersionId: uuid('lesson_version_id').references(() => lessonVersions.id),
     challengeVersionId: uuid('challenge_version_id').references(() => challengeVersions.id),
     status: sessionStatusEnum('status').notNull().default('provisioning'),
     startedAt: timestamp('started_at').notNull().default(sql`now()`),

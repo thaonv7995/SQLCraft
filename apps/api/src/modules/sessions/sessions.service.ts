@@ -1,7 +1,7 @@
 import { sessionsRepository } from '../../db/repositories';
-import type { SessionRow, SandboxRow, LessonVersionRow } from '../../db/repositories';
+import type { SessionRow, SandboxRow } from '../../db/repositories';
 import type {
-  ChallengeVersionWithLessonRow,
+  ChallengeVersionWithDatabaseRow,
   DatasetTemplateRow,
   SchemaTemplateRow,
 } from '../../db/repositories/sessions.repository';
@@ -95,7 +95,7 @@ function normalizeColumn(col: RawColumn): SessionSchemaColumn {
 export interface CreateSessionResult {
   session: Pick<
     SessionRow,
-    'id' | 'userId' | 'lessonVersionId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
+    'id' | 'userId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
   > & {
     sourceScale: DatasetSize | null;
     selectedScale: DatasetSize | null;
@@ -125,9 +125,7 @@ export interface EndSessionResult {
 export interface SessionListItem {
   id: string;
   status: string;
-  lessonVersionId: string | null;
   challengeVersionId: string | null;
-  lessonTitle: string | null;
   displayTitle: string;
   sandboxStatus: string | null;
   startedAt: Date;
@@ -237,24 +235,17 @@ async function loadSchemaDatasetTemplates(
 }
 
 async function resolveRequestedDatasetTemplate(
-  lessonVersion: LessonVersionRow,
+  schemaTemplateId: string | null,
   requestedScale?: DatasetSize,
 ): Promise<{ selectedTemplate: DatasetTemplateRow | null; summary: SessionDatasetSummary }> {
-  const schemaTemplateId = lessonVersion.schemaTemplateId ?? null;
   const schemaTemplates = await loadSchemaDatasetTemplates(schemaTemplateId);
   const sourceScale = getLargestDatasetScale(
     schemaTemplates.map((datasetTemplate) => datasetTemplate.size as DatasetSize),
   );
 
-  let defaultTemplate =
-    schemaTemplates.find((datasetTemplate) => datasetTemplate.id === lessonVersion.datasetTemplateId) ??
-    null;
-
-  if (!defaultTemplate && lessonVersion.datasetTemplateId) {
-    defaultTemplate = await sessionsRepository.findDatasetTemplateById(lessonVersion.datasetTemplateId);
-  }
-
-  let selectedTemplate = defaultTemplate;
+  let selectedTemplate = sourceScale
+    ? schemaTemplates.find((datasetTemplate) => datasetTemplate.size === sourceScale) ?? null
+    : null;
 
   if (requestedScale) {
     if (!isDatasetScaleAllowed(requestedScale, sourceScale)) {
@@ -265,7 +256,7 @@ async function resolveRequestedDatasetTemplate(
       schemaTemplates.find((datasetTemplate) => datasetTemplate.size === requestedScale) ?? null;
 
     if (!selectedTemplate) {
-      throw new ValidationError('Requested dataset scale is not available for this lesson');
+      throw new ValidationError('Requested dataset scale is not available for this challenge');
     }
   }
 
@@ -291,23 +282,13 @@ async function resolveSandboxDatasetSummary(
 }
 
 async function resolveSchemaTemplateForSession(
-  session: SessionRow,
+  _session: SessionRow,
   sandbox: SandboxRow | null,
 ): Promise<SchemaTemplateRow | null> {
   if (sandbox?.schemaTemplateId) {
     return sessionsRepository.findSchemaTemplateById(sandbox.schemaTemplateId);
   }
-
-  if (!session.lessonVersionId) {
-    return null;
-  }
-
-  const lessonVersion = await sessionsRepository.findPublishedLessonVersion(session.lessonVersionId);
-  if (!lessonVersion?.schemaTemplateId) {
-    return null;
-  }
-
-  return sessionsRepository.findSchemaTemplateById(lessonVersion.schemaTemplateId);
+  return null;
 }
 
 function getSessionCode(sessionId: string): string {
@@ -317,17 +298,11 @@ function getSessionCode(sessionId: string): string {
 
 function buildSessionDisplayTitle(params: {
   sessionId: string;
-  lessonTitle: string | null;
   schemaTemplateName: string | null;
 }): string {
-  const { sessionId, lessonTitle, schemaTemplateName } = params;
+  const { sessionId, schemaTemplateName } = params;
   const code = getSessionCode(sessionId);
-  const trimmedLessonTitle = lessonTitle?.trim() ?? '';
   const trimmedSchemaTemplateName = schemaTemplateName?.trim() ?? '';
-
-  if (trimmedLessonTitle) {
-    return trimmedLessonTitle;
-  }
 
   if (trimmedSchemaTemplateName) {
     return `${trimmedSchemaTemplateName} #${code}`;
@@ -343,12 +318,9 @@ export async function listUserSessions(userId: string, limit = 20): Promise<Sess
   return normalizedRows.map((row) => ({
     id: row.id,
     status: row.status,
-    lessonVersionId: row.lessonVersionId,
     challengeVersionId: row.challengeVersionId,
-    lessonTitle: row.lessonTitle,
     displayTitle: buildSessionDisplayTitle({
       sessionId: row.id,
-      lessonTitle: row.lessonTitle,
       schemaTemplateName: row.schemaTemplateName,
     }),
     sandboxStatus: row.sandboxStatus,
@@ -362,62 +334,54 @@ export async function createSession(
   userId: string,
   body: CreateSessionBody,
 ): Promise<CreateSessionResult> {
-  const lessonVersion: LessonVersionRow | null = await sessionsRepository.findPublishedLessonVersion(
-    body.lessonVersionId,
-  );
-
-  if (!lessonVersion) {
-    throw new NotFoundError('Lesson version not found or not published');
-  }
-
-  let challengeVersion: ChallengeVersionWithLessonRow | null = null;
-
+  let challengeVersion: ChallengeVersionWithDatabaseRow | null = null;
   if (body.challengeVersionId) {
-    challengeVersion = await sessionsRepository.findPublishedChallengeVersionWithLesson(
+    challengeVersion = await sessionsRepository.findPublishedChallengeVersionWithDatabase(
       body.challengeVersionId,
     );
-
-    const cv = challengeVersion;
-    if (!cv) {
+    if (!challengeVersion) {
       throw new NotFoundError('Challenge version not found or not published');
-    }
-
-    if (cv.lessonId !== lessonVersion.lessonId) {
-      throw new ValidationError('Challenge version does not belong to the selected lesson');
     }
   }
 
-  const { selectedTemplate, summary: dataset } = await resolveRequestedDatasetTemplate(
-    lessonVersion,
+  if (!challengeVersion) {
+    throw new ValidationError('challengeVersionId is required');
+  }
+
+  let selectedTemplate: DatasetTemplateRow | null = null;
+  let dataset: SessionDatasetSummary;
+
+  const resolved = await resolveRequestedDatasetTemplate(
+    challengeVersion.databaseId,
     body.datasetSize ?? body.scale,
   );
+  selectedTemplate = resolved.selectedTemplate;
+  dataset = resolved.summary;
 
   const session = await sessionsRepository.createSession({
     userId,
-    lessonVersionId: body.lessonVersionId,
     challengeVersionId: body.challengeVersionId,
     status: 'provisioning',
   });
 
   const sandbox = await sessionsRepository.createSandbox({
     learningSessionId: session.id,
-    schemaTemplateId: lessonVersion.schemaTemplateId ?? undefined,
-    datasetTemplateId: selectedTemplate?.id ?? lessonVersion.datasetTemplateId ?? undefined,
+    schemaTemplateId: challengeVersion.databaseId,
+    datasetTemplateId: selectedTemplate?.id ?? undefined,
     status: 'requested',
   });
 
   await enqueueProvisionSandbox({
     sandboxInstanceId: sandbox.id,
     learningSessionId: session.id,
-    schemaTemplateId: lessonVersion.schemaTemplateId ?? null,
-    datasetTemplateId: selectedTemplate?.id ?? lessonVersion.datasetTemplateId ?? null,
+    schemaTemplateId: challengeVersion.databaseId,
+    datasetTemplateId: selectedTemplate?.id ?? null,
   });
 
   return {
     session: {
       id: session.id,
       userId: session.userId,
-      lessonVersionId: session.lessonVersionId,
       challengeVersionId: session.challengeVersionId,
       status: session.status,
       startedAt: session.startedAt,

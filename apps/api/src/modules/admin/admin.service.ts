@@ -1,7 +1,5 @@
 import bcrypt from 'bcryptjs';
 import {
-  tracksRepository,
-  lessonsRepository,
   challengesRepository,
   usersRepository,
   sessionsRepository,
@@ -20,10 +18,6 @@ import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
   AdminConfigBody,
   CreateAdminUserBody,
-  CreateTrackBody,
-  UpdateTrackBody,
-  CreateLessonBody,
-  CreateLessonVersionBody,
   CreateChallengeBody,
   ListUsersQuery,
   UpdateAdminUserBody,
@@ -36,13 +30,6 @@ import type {
 } from './admin.schema';
 import type {
   AdminConfigResult,
-  CreateTrackResult,
-  UpdateTrackResult,
-  CreateLessonResult,
-  CreateLessonVersionResult,
-  LessonVersionAdminDetailResult,
-  LessonVersionSummaryResult,
-  PublishLessonVersionResult,
   CreateChallengeResult,
   PublishChallengeVersionResult,
   ListUsersResult,
@@ -101,89 +88,17 @@ async function buildAdminUserMutationResult(userId: string): Promise<CreateAdmin
   };
 }
 
-// ─── Tracks ───────────────────────────────────────────────────────────────────
-
-export async function createTrack(
-  userId: string,
-  body: CreateTrackBody,
-): Promise<CreateTrackResult> {
-  return tracksRepository.create({ ...body, createdBy: userId });
-}
-
-export async function updateTrack(
-  id: string,
-  body: UpdateTrackBody,
-): Promise<UpdateTrackResult> {
-  const track = await tracksRepository.update(id, body);
-  if (!track) throw new NotFoundError('Track not found');
-  return track;
-}
-
-// ─── Lessons ──────────────────────────────────────────────────────────────────
-
-export async function createLesson(
-  userId: string,
-  body: CreateLessonBody,
-): Promise<CreateLessonResult> {
-  const trackExists = await tracksRepository.findById(body.trackId);
-  if (!trackExists) throw new NotFoundError('Track not found');
-  return lessonsRepository.createLesson({ ...body, createdBy: userId });
-}
-
-export async function createLessonVersion(
-  userId: string,
-  body: CreateLessonVersionBody,
-): Promise<CreateLessonVersionResult> {
-  const lessonExists = await lessonsRepository.existsById(body.lessonId);
-  if (!lessonExists) throw new NotFoundError('Lesson not found');
-
-  const latestVersionNo = await lessonsRepository.getLatestVersionNo(body.lessonId);
-  const versionNo = latestVersionNo + 1;
-
-  return lessonsRepository.createVersion({ ...body, versionNo, createdBy: userId });
-}
-
-export async function publishLessonVersion(
-  versionId: string,
-): Promise<PublishLessonVersionResult> {
-  const version = await lessonsRepository.findVersionById(versionId);
-  if (!version) throw new NotFoundError('Lesson version not found');
-
-  const published = await lessonsRepository.publishVersion(versionId, version.lessonId);
-  if (!published) throw new NotFoundError('Lesson version not found');
-
-  return published;
-}
-
-export async function listLessonVersions(
-  lessonId: string,
-): Promise<LessonVersionSummaryResult[]> {
-  const lessonExists = await lessonsRepository.existsById(lessonId);
-  if (!lessonExists) throw new NotFoundError('Lesson not found');
-
-  return lessonsRepository.listVersionsForLesson(lessonId);
-}
-
-export async function getLessonVersionDetail(
-  versionId: string,
-): Promise<LessonVersionAdminDetailResult> {
-  const version = await lessonsRepository.findVersionById(versionId);
-  if (!version) throw new NotFoundError('Lesson version not found');
-
-  return version;
-}
-
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
 export async function createChallenge(
   userId: string,
   body: CreateChallengeBody,
 ): Promise<CreateChallengeResult> {
-  const lessonExists = await lessonsRepository.existsById(body.lessonId);
-  if (!lessonExists) throw new NotFoundError('Lesson not found');
+  const databaseExists = await sessionsRepository.findSchemaTemplateById(body.databaseId);
+  if (!databaseExists) throw new NotFoundError('Database not found');
 
   const challenge = await challengesRepository.createChallenge({
-    lessonId: body.lessonId,
+    databaseId: body.databaseId,
     slug: body.slug,
     title: body.title,
     description: body.description,
@@ -426,11 +341,11 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
   );
 
   if (
-    referenceSummary.lessonVersionCount > 0 ||
+    referenceSummary.challengeCount > 0 ||
     referenceSummary.sandboxInstanceCount > 0
   ) {
     throw new ConflictError(
-      `Delete blocked: ${referenceSummary.lessonVersionCount} lesson version(s) and ${referenceSummary.sandboxInstanceCount} sandbox instance(s) still reference this database.`,
+      `Delete blocked: ${referenceSummary.challengeCount} challenge(s) and ${referenceSummary.sandboxInstanceCount} sandbox instance(s) still reference this database.`,
     );
   }
 

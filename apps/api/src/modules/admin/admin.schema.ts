@@ -1,52 +1,10 @@
 import { z } from 'zod';
 
-// ─── Tracks ───────────────────────────────────────────────────────────────────
-
-export const CreateTrackSchema = z.object({
-  slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
-  title: z.string().min(1).max(255),
-  description: z.string().optional(),
-  coverUrl: z.string().url().optional(),
-  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
-  sortOrder: z.number().int().default(0),
-});
-
-export const UpdateTrackSchema = z.object({
-  slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/).optional(),
-  title: z.string().min(1).max(255).optional(),
-  description: z.string().optional(),
-  coverUrl: z.string().url().optional().nullable(),
-  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
-  status: z.enum(['draft', 'published', 'archived']).optional(),
-  sortOrder: z.number().int().optional(),
-});
-
-// ─── Lessons ──────────────────────────────────────────────────────────────────
-
-export const CreateLessonSchema = z.object({
-  trackId: z.string().uuid(),
-  slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
-  title: z.string().min(1).max(255),
-  description: z.string().optional(),
-  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
-  sortOrder: z.number().int().default(0),
-  estimatedMinutes: z.number().int().positive().optional(),
-});
-
-export const CreateLessonVersionSchema = z.object({
-  lessonId: z.string().uuid(),
-  title: z.string().min(1).max(255),
-  content: z.string().min(1),
-  starterQuery: z.string().optional(),
-  schemaTemplateId: z.string().uuid().optional(),
-  datasetTemplateId: z.string().uuid().optional(),
-});
-
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
 export const CreateChallengeSchema = z
   .object({
-    lessonId: z.string().uuid(),
+    databaseId: z.string().uuid(),
     slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
     title: z.string().min(1).max(255),
     description: z.string().optional(),
@@ -284,10 +242,6 @@ export const AdminIdParamsSchema = z.object({
 
 // ─── Inferred Types ───────────────────────────────────────────────────────────
 
-export type CreateTrackBody = z.infer<typeof CreateTrackSchema>;
-export type UpdateTrackBody = z.infer<typeof UpdateTrackSchema>;
-export type CreateLessonBody = z.infer<typeof CreateLessonSchema>;
-export type CreateLessonVersionBody = z.infer<typeof CreateLessonVersionSchema>;
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type ListUsersQuery = z.infer<typeof ListUsersQuerySchema>;
 export type UpdateUserStatusBody = z.infer<typeof UpdateUserStatusSchema>;

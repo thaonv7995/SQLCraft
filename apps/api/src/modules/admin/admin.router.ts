@@ -2,10 +2,6 @@ import { FastifyInstance } from 'fastify';
 import type {
   AdminConfigBody,
   CreateAdminUserBody,
-  CreateTrackBody,
-  UpdateTrackBody,
-  CreateLessonBody,
-  CreateLessonVersionBody,
   CreateChallengeBody,
   ListUsersQuery,
   UpdateAdminUserBody,
@@ -17,16 +13,9 @@ import type {
 } from './admin.schema';
 import {
   createAdminUserHandler,
-  createTrackHandler,
   clearStaleSessionsHandler,
   deleteAdminUserHandler,
   deleteDatabaseHandler,
-  updateTrackHandler,
-  createLessonHandler,
-  createLessonVersionHandler,
-  listLessonVersionsHandler,
-  getLessonVersionDetailHandler,
-  publishLessonVersionHandler,
   createChallengeHandler,
   publishChallengeVersionHandler,
   listUsersHandler,
@@ -45,158 +34,6 @@ import {
 export default async function adminRouter(fastify: FastifyInstance): Promise<void> {
   const adminGuard = [fastify.authenticate, fastify.authorize(['admin'])];
 
-  // ─── Tracks ──────────────────────────────────────────────────────────────────
-
-  fastify.post<{ Body: CreateTrackBody }>(
-    '/v1/admin/tracks',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Create a new track',
-        security: [{ bearerAuth: [] }],
-        body: {
-          type: 'object',
-          required: ['slug', 'title'],
-          properties: {
-            slug: { type: 'string' },
-            title: { type: 'string' },
-            description: { type: 'string' },
-            coverUrl: { type: 'string' },
-            difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
-            sortOrder: { type: 'integer', default: 0 },
-          },
-        },
-      },
-    },
-    createTrackHandler,
-  );
-
-  fastify.patch<{ Params: AdminIdParams; Body: UpdateTrackBody }>(
-    '/v1/admin/tracks/:id',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Update a track',
-        security: [{ bearerAuth: [] }],
-        params: {
-          type: 'object',
-          required: ['id'],
-          properties: { id: { type: 'string', format: 'uuid' } },
-        },
-      },
-    },
-    updateTrackHandler,
-  );
-
-  // ─── Lessons ─────────────────────────────────────────────────────────────────
-
-  fastify.post<{ Body: CreateLessonBody }>(
-    '/v1/admin/lessons',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Create a new lesson',
-        security: [{ bearerAuth: [] }],
-        body: {
-          type: 'object',
-          required: ['trackId', 'slug', 'title'],
-          properties: {
-            trackId: { type: 'string', format: 'uuid' },
-            slug: { type: 'string' },
-            title: { type: 'string' },
-            description: { type: 'string' },
-            difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
-            sortOrder: { type: 'integer', default: 0 },
-            estimatedMinutes: { type: 'integer', minimum: 1 },
-          },
-        },
-      },
-    },
-    createLessonHandler,
-  );
-
-  fastify.post<{ Body: CreateLessonVersionBody }>(
-    '/v1/admin/lesson-versions',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Create a new lesson version',
-        security: [{ bearerAuth: [] }],
-        body: {
-          type: 'object',
-          required: ['lessonId', 'title', 'content'],
-          properties: {
-            lessonId: { type: 'string', format: 'uuid' },
-            title: { type: 'string' },
-            content: { type: 'string' },
-            starterQuery: { type: 'string' },
-            schemaTemplateId: { type: 'string', format: 'uuid' },
-            datasetTemplateId: { type: 'string', format: 'uuid' },
-          },
-        },
-      },
-    },
-    createLessonVersionHandler,
-  );
-
-  fastify.get<{ Params: AdminIdParams }>(
-    '/v1/admin/lessons/:id/versions',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'List versions for a lesson',
-        security: [{ bearerAuth: [] }],
-        params: {
-          type: 'object',
-          required: ['id'],
-          properties: { id: { type: 'string', format: 'uuid' } },
-        },
-      },
-    },
-    listLessonVersionsHandler,
-  );
-
-  fastify.get<{ Params: AdminIdParams }>(
-    '/v1/admin/lesson-versions/:id',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Get lesson version detail, including draft versions',
-        security: [{ bearerAuth: [] }],
-        params: {
-          type: 'object',
-          required: ['id'],
-          properties: { id: { type: 'string', format: 'uuid' } },
-        },
-      },
-    },
-    getLessonVersionDetailHandler,
-  );
-
-  fastify.post<{ Params: AdminIdParams }>(
-    '/v1/admin/lesson-versions/:id/publish',
-    {
-      onRequest: adminGuard,
-      schema: {
-        tags: ['Admin'],
-        summary: 'Publish a lesson version',
-        security: [{ bearerAuth: [] }],
-        params: {
-          type: 'object',
-          required: ['id'],
-          properties: { id: { type: 'string', format: 'uuid' } },
-        },
-      },
-    },
-    publishLessonVersionHandler,
-  );
-
   // ─── Challenges ───────────────────────────────────────────────────────────────
 
   fastify.post<{ Body: CreateChallengeBody }>(
@@ -209,9 +46,9 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['lessonId', 'slug', 'title', 'problemStatement'],
+          required: ['databaseId', 'slug', 'title', 'problemStatement'],
           properties: {
-            lessonId: { type: 'string', format: 'uuid' },
+            databaseId: { type: 'string', format: 'uuid' },
             slug: { type: 'string' },
             title: { type: 'string' },
             description: { type: 'string' },

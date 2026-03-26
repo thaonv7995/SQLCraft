@@ -14,8 +14,6 @@ import authPlugin from './plugins/auth';
 
 import authRoutes from './modules/auth/auth.router';
 import databasesRoutes from './modules/databases/databases.router';
-import tracksRoutes from './modules/tracks/tracks.router';
-import lessonsRoutes from './modules/lessons/lessons.router';
 import sessionsRoutes from './modules/sessions/sessions.router';
 import queriesRoutes from './modules/queries/queries.router';
 import challengesRoutes from './modules/challenges/challenges.router';
@@ -188,8 +186,6 @@ All responses follow a standardized format:
       tags: [
         { name: 'Auth', description: 'Authentication and authorization' },
         { name: 'Databases', description: 'Database explorer and sandbox presets' },
-        { name: 'Tracks', description: 'Learning tracks' },
-        { name: 'Lessons', description: 'Lessons and lesson versions' },
         { name: 'Sessions', description: 'Learning sessions' },
         { name: 'Queries', description: 'SQL query execution' },
         { name: 'Challenges', description: 'Challenge attempts' },
@@ -245,8 +241,6 @@ All responses follow a standardized format:
   // Register all route plugins
   await app.register(authRoutes);
   await app.register(databasesRoutes);
-  await app.register(tracksRoutes);
-  await app.register(lessonsRoutes);
   await app.register(sessionsRoutes);
   await app.register(queriesRoutes);
   await app.register(challengesRoutes);

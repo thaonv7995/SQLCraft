@@ -277,261 +277,63 @@ async function seed() {
     console.log(`  Updated ${ds.size} dataset template`);
   }
 
-  // 6. Create tracks
-  console.log('Creating tracks...');
-
-  let fundamentalsTrack = (
+  // 6. Create sample challenge + published version
+  console.log('Creating sample challenge...');
+  let challenge = (
     await db
       .select()
-      .from(schema.tracks)
-      .where(eq(schema.tracks.slug, 'sql-fundamentals'))
+      .from(schema.challenges)
+      .where(eq(schema.challenges.slug, 'top-10-expensive-products'))
       .limit(1)
   )[0];
 
-  if (!fundamentalsTrack) {
-    const [t] = await db
-      .insert(schema.tracks)
+  if (!challenge) {
+    const [createdChallenge] = await db
+      .insert(schema.challenges)
       .values({
-        slug: 'sql-fundamentals',
-        title: 'SQL Fundamentals',
-        description:
-          'Master the basics of SQL from SELECT queries to JOINs and aggregations. Perfect for beginners.',
+        databaseId: ecommerceSchema.id,
+        slug: 'top-10-expensive-products',
+        title: 'Top 10 most expensive products',
+        description: 'Return top 10 products ordered by price descending.',
         difficulty: 'beginner',
-        status: 'published',
         sortOrder: 1,
-        createdBy: adminUser.id,
-      })
-      .returning();
-    fundamentalsTrack = t;
-    console.log('  Created SQL Fundamentals track');
-  }
-
-  let optimizationTrack = (
-    await db
-      .select()
-      .from(schema.tracks)
-      .where(eq(schema.tracks.slug, 'query-optimization'))
-      .limit(1)
-  )[0];
-
-  if (!optimizationTrack) {
-    const [t] = await db
-      .insert(schema.tracks)
-      .values({
-        slug: 'query-optimization',
-        title: 'Query Optimization',
-        description:
-          'Learn how to write efficient SQL queries, understand execution plans, and optimize database performance.',
-        difficulty: 'advanced',
-        status: 'published',
-        sortOrder: 2,
-        createdBy: adminUser.id,
-      })
-      .returning();
-    optimizationTrack = t;
-    console.log('  Created Query Optimization track');
-  }
-
-  // 6. Create lessons for SQL Fundamentals
-  console.log('Creating lessons...');
-
-  const lessonsData = [
-    {
-      slug: 'intro-to-select',
-      title: 'Introduction to SELECT',
-      description: 'Learn the most fundamental SQL command - SELECT - to retrieve data from tables.',
-      sortOrder: 1,
-      estimatedMinutes: 15,
-      content: `# Introduction to SELECT
-
-The \`SELECT\` statement is the foundation of SQL. It allows you to retrieve data from one or more tables.
-
-## Basic Syntax
-
-\`\`\`sql
-SELECT column1, column2
-FROM table_name;
-\`\`\`
-
-## Selecting All Columns
-
-Use \`*\` to select all columns:
-
-\`\`\`sql
-SELECT * FROM products;
-\`\`\`
-
-## Selecting Specific Columns
-
-\`\`\`sql
-SELECT name, price FROM products;
-\`\`\`
-
-## Try It
-
-Query the products table to see all available products.`,
-      starterQuery: 'SELECT * FROM products LIMIT 10;',
-    },
-    {
-      slug: 'filtering-with-where',
-      title: 'Filtering with WHERE',
-      description: 'Use the WHERE clause to filter rows based on conditions.',
-      sortOrder: 2,
-      estimatedMinutes: 20,
-      content: `# Filtering with WHERE
-
-The \`WHERE\` clause filters rows based on a condition.
-
-## Basic Syntax
-
-\`\`\`sql
-SELECT columns
-FROM table
-WHERE condition;
-\`\`\`
-
-## Comparison Operators
-
-- \`=\` equals
-- \`<>\` or \`!=\` not equals
-- \`>\`, \`<\`, \`>=\`, \`<=\` comparison
-- \`BETWEEN\` range
-- \`LIKE\` pattern matching
-- \`IN\` list of values
-
-## Examples
-
-\`\`\`sql
-SELECT * FROM products WHERE price > 50;
-SELECT * FROM orders WHERE status = 'completed';
-SELECT * FROM products WHERE price BETWEEN 10 AND 100;
-\`\`\``,
-      starterQuery: "SELECT * FROM products WHERE price > 50 ORDER BY price;",
-    },
-    {
-      slug: 'sorting-with-order-by',
-      title: 'Sorting with ORDER BY',
-      description: 'Sort query results using ORDER BY clause.',
-      sortOrder: 3,
-      estimatedMinutes: 15,
-      content: `# Sorting with ORDER BY
-
-Use \`ORDER BY\` to sort your results.
-
-## Syntax
-
-\`\`\`sql
-SELECT columns
-FROM table
-ORDER BY column1 [ASC|DESC], column2 [ASC|DESC];
-\`\`\`
-
-## Examples
-
-\`\`\`sql
--- Sort by price ascending (default)
-SELECT * FROM products ORDER BY price;
-
--- Sort by price descending
-SELECT * FROM products ORDER BY price DESC;
-
--- Sort by multiple columns
-SELECT * FROM orders ORDER BY status, created_at DESC;
-\`\`\``,
-      starterQuery: 'SELECT name, price FROM products ORDER BY price DESC;',
-    },
-    {
-      slug: 'aggregations-and-grouping',
-      title: 'Aggregations and GROUP BY',
-      description: 'Learn to summarize data with aggregate functions and GROUP BY.',
-      sortOrder: 4,
-      estimatedMinutes: 30,
-      content: `# Aggregations and GROUP BY
-
-Aggregate functions compute a single result from multiple rows.
-
-## Common Aggregate Functions
-
-- \`COUNT()\` - number of rows
-- \`SUM()\` - sum of values
-- \`AVG()\` - average value
-- \`MIN()\` - minimum value
-- \`MAX()\` - maximum value
-
-## GROUP BY
-
-Use \`GROUP BY\` to group rows sharing a property:
-
-\`\`\`sql
-SELECT category_id, COUNT(*) as product_count, AVG(price) as avg_price
-FROM products
-GROUP BY category_id;
-\`\`\`
-
-## HAVING
-
-Use \`HAVING\` to filter groups (like WHERE but for groups):
-
-\`\`\`sql
-SELECT category_id, COUNT(*) as product_count
-FROM products
-GROUP BY category_id
-HAVING COUNT(*) > 5;
-\`\`\``,
-      starterQuery: 'SELECT status, COUNT(*) as count FROM orders GROUP BY status;',
-    },
-  ];
-
-  for (const lessonData of lessonsData) {
-    const existingLesson = await db
-      .select()
-      .from(schema.lessons)
-      .where(eq(schema.lessons.slug, lessonData.slug))
-      .limit(1);
-
-    if (existingLesson.length > 0) {
-      console.log(`  Lesson '${lessonData.slug}' already exists, skipping`);
-      continue;
-    }
-
-    const [lesson] = await db
-      .insert(schema.lessons)
-      .values({
-        trackId: fundamentalsTrack.id,
-        slug: lessonData.slug,
-        title: lessonData.title,
-        description: lessonData.description,
-        difficulty: 'beginner',
+        points: 100,
         status: 'draft',
-        sortOrder: lessonData.sortOrder,
-        estimatedMinutes: lessonData.estimatedMinutes,
         createdBy: adminUser.id,
       })
       .returning();
+    challenge = createdChallenge;
+  }
 
-    // Create lesson version
+  const [existingPublishedVersion] = await db
+    .select()
+    .from(schema.challengeVersions)
+    .where(eq(schema.challengeVersions.challengeId, challenge.id))
+    .limit(1);
+
+  if (!existingPublishedVersion) {
     const [version] = await db
-      .insert(schema.lessonVersions)
+      .insert(schema.challengeVersions)
       .values({
-        lessonId: lesson.id,
+        challengeId: challenge.id,
         versionNo: 1,
-        title: lessonData.title,
-        content: lessonData.content,
-        starterQuery: lessonData.starterQuery,
-        schemaTemplateId: ecommerceSchema.id,
+        problemStatement: 'Write a query to return top 10 products by price.',
+        hintText: 'Use ORDER BY with DESC and LIMIT.',
+        expectedResultColumns: ['id', 'name', 'price'],
+        referenceSolution: 'SELECT id, name, price FROM products ORDER BY price DESC LIMIT 10;',
+        validatorType: 'result_set',
+        validatorConfig: {},
         isPublished: true,
+        reviewStatus: 'approved',
         publishedAt: new Date(),
         createdBy: adminUser.id,
       })
       .returning();
 
-    // Set published version on lesson and mark as published
     await db
-      .update(schema.lessons)
-      .set({ publishedVersionId: version.id, status: 'published' })
-      .where(eq(schema.lessons.id, lesson.id));
-
-    console.log(`  Created lesson: ${lessonData.title}`);
+      .update(schema.challenges)
+      .set({ publishedVersionId: version.id, status: 'published', updatedAt: new Date() })
+      .where(eq(schema.challenges.id, challenge.id));
   }
 
   console.log('\nSeed completed successfully!');

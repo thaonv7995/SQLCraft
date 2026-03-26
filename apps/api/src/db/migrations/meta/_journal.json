@@ -36,6 +36,27 @@
       "when": 1774504901835,
       "tag": "0004_talented_microbe",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1774508400000,
+      "tag": "0005_challenges_database_required",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1774508401000,
+      "tag": "0006_drop_track_lesson_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1774508402000,
+      "tag": "0007_cleanup_legacy_constraints_indexes",
+      "breakpoints": true
     }
   ]
 }

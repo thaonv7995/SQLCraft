@@ -1,9 +1,5 @@
 import type { DatasetSize } from '@sqlcraft/types';
 import type {
-  TrackRow,
-  LessonRow,
-  LessonVersionRow,
-  LessonVersionSummaryRow,
   ChallengeRow,
   ChallengeVersionRow,
   UserRow,
@@ -19,20 +15,6 @@ import type {
   SqlDumpScanResult as AdminSqlDumpScanResult,
 } from './sql-dump-scan';
 import type { AdminConfigBody } from './admin.schema';
-
-export interface CreateTrackResult extends TrackRow {}
-
-export interface UpdateTrackResult extends TrackRow {}
-
-export interface CreateLessonResult extends LessonRow {}
-
-export interface CreateLessonVersionResult extends LessonVersionRow {}
-
-export interface PublishLessonVersionResult extends LessonVersionRow {}
-
-export interface LessonVersionSummaryResult extends LessonVersionSummaryRow {}
-
-export interface LessonVersionAdminDetailResult extends LessonVersionRow {}
 
 export interface CreateChallengeResult {
   challenge: ChallengeRow;
@@ -103,8 +85,8 @@ export interface SystemHealthResult {
   timestamp: string;
   stats: {
     users: number;
-    tracks: number;
-    lessons: number;
+    databases: number;
+    challenges: number;
     activeSessions: number;
     pendingJobs: number;
   };

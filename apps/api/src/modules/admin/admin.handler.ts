@@ -5,10 +5,6 @@ import type { JwtPayload } from '../../plugins/auth';
 import type {
   AdminConfigBody,
   CreateAdminUserBody,
-  CreateTrackBody,
-  UpdateTrackBody,
-  CreateLessonBody,
-  CreateLessonVersionBody,
   CreateChallengeBody,
   ListUsersQuery,
   UpdateAdminUserBody,
@@ -29,14 +25,7 @@ import {
   clearStaleSessions,
   createAdminUser,
   deleteDatabase,
-  createTrack,
   deleteAdminUser,
-  updateTrack,
-  createLesson,
-  createLessonVersion,
-  publishLessonVersion,
-  listLessonVersions,
-  getLessonVersionDetail,
   createChallenge,
   publishChallengeVersion,
   listUsers,
@@ -51,69 +40,6 @@ import {
   scanSqlDump,
   updateAdminConfig,
 } from './admin.service';
-
-// ─── Tracks ───────────────────────────────────────────────────────────────────
-
-export async function createTrackHandler(
-  request: FastifyRequest<{ Body: CreateTrackBody }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const userId = (request.user as JwtPayload).sub;
-  const result = await createTrack(userId, request.body);
-  reply.status(201).send(created(result, MESSAGES.TRACK_CREATED));
-}
-
-export async function updateTrackHandler(
-  request: FastifyRequest<{ Params: AdminIdParams; Body: UpdateTrackBody }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const result = await updateTrack(request.params.id, request.body);
-  reply.send(success(result, 'Track updated successfully'));
-}
-
-// ─── Lessons ──────────────────────────────────────────────────────────────────
-
-export async function createLessonHandler(
-  request: FastifyRequest<{ Body: CreateLessonBody }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const userId = (request.user as JwtPayload).sub;
-  const result = await createLesson(userId, request.body);
-  reply.status(201).send(created(result, MESSAGES.LESSON_RETRIEVED));
-}
-
-export async function createLessonVersionHandler(
-  request: FastifyRequest<{ Body: CreateLessonVersionBody }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const userId = (request.user as JwtPayload).sub;
-  const result = await createLessonVersion(userId, request.body);
-  reply.status(201).send(created(result, MESSAGES.LESSON_VERSION_RETRIEVED));
-}
-
-export async function publishLessonVersionHandler(
-  request: FastifyRequest<{ Params: AdminIdParams }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const result = await publishLessonVersion(request.params.id);
-  reply.send(success(result, MESSAGES.CONTENT_PUBLISHED));
-}
-
-export async function listLessonVersionsHandler(
-  request: FastifyRequest<{ Params: AdminIdParams }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const result = await listLessonVersions(request.params.id);
-  reply.send(success(result, 'Lesson versions retrieved successfully'));
-}
-
-export async function getLessonVersionDetailHandler(
-  request: FastifyRequest<{ Params: AdminIdParams }>,
-  reply: FastifyReply,
-): Promise<void> {
-  const result = await getLessonVersionDetail(request.params.id);
-  reply.send(success(result, 'Lesson version detail retrieved successfully'));
-}
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 

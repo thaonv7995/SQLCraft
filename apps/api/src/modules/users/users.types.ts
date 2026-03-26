@@ -34,7 +34,7 @@ export interface UserProfileUpdateResponse {
 
 export interface SessionSummary {
   id: string;
-  lessonVersionId: string | null;
+  challengeVersionId: string | null;
   status: string;
   startedAt: Date;
   lastActivityAt: Date | null;

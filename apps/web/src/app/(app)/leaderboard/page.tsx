@@ -8,7 +8,6 @@ import { DifficultyBadge } from '@/components/ui/badge';
 import {
   challengesApi,
   leaderboardApi,
-  lessonsApi,
   sessionsApi,
   type ChallengeCatalogItem,
   type DatasetScale,
@@ -186,28 +185,17 @@ export default function LeaderboardPage() {
 
     setIsStartingSubmission(true);
     try {
-      const lesson = await lessonsApi.get(submissionChallenge.lessonId);
-      const lessonPublishedVersionId = lesson.publishedVersionId;
-
-      if (!lessonPublishedVersionId) {
-        throw new Error('Practice set chưa được publish.');
-      }
-
-      const lessonVersion = await lessonsApi.getVersion(lessonPublishedVersionId);
-
       const session = await sessionsApi.create({
-        lessonVersionId: lessonPublishedVersionId,
         challengeVersionId: submissionChallenge.publishedVersionId,
         selectedScale: submissionSelectedScale,
       });
 
       saveLabBootstrap(session.id, {
         mode: 'challenge',
-        lessonPath: `/tracks/${submissionChallenge.trackId}/lessons/${submissionChallenge.lessonId}`,
-        lessonTitle: submissionChallenge.lessonTitle,
-        challengePath: `/tracks/${submissionChallenge.trackId}/lessons/${submissionChallenge.lessonId}/challenges/${submissionChallenge.id}`,
+        lessonTitle: submissionChallenge.databaseName ?? undefined,
+        challengePath: `/challenges/${submissionChallenge.id}`,
         challengeTitle: submissionChallenge.title,
-        starterQuery: lessonVersion.starterQuery ?? null,
+        starterQuery: null,
         starterQueryConsumed: false,
       });
 
@@ -405,13 +393,10 @@ export default function LeaderboardPage() {
                       </div>
                       <div>
                         <p className="text-[9px] font-bold uppercase tracking-widest text-outline mb-1">
-                          Lesson
+                          Database
                         </p>
                         <p className="text-sm font-mono font-bold text-tertiary line-clamp-1">
-                          {challenge.lessonTitle}
-                        </p>
-                        <p className="text-[10px] text-on-surface-variant mt-1 line-clamp-1">
-                          {challenge.trackTitle}
+                          {challenge.databaseName ?? 'N/A'}
                         </p>
                       </div>
                     </div>

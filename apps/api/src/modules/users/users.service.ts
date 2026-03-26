@@ -124,7 +124,7 @@ export async function getUserSessions(
   const sessions = await db
     .select({
       id: schema.learningSessions.id,
-      lessonVersionId: schema.learningSessions.lessonVersionId,
+      challengeVersionId: schema.learningSessions.challengeVersionId,
       status: schema.learningSessions.status,
       startedAt: schema.learningSessions.startedAt,
       lastActivityAt: schema.learningSessions.lastActivityAt,

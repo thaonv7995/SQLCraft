@@ -3,7 +3,7 @@ import type { SessionRow, SandboxRow } from '../../db/repositories';
 export interface CreateSessionResult {
   session: Pick<
     SessionRow,
-    'id' | 'userId' | 'lessonVersionId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
+    'id' | 'userId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
   >;
   sandbox: Pick<SandboxRow, 'id' | 'status'>;
 }

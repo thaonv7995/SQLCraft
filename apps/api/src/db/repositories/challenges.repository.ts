@@ -30,7 +30,8 @@ export interface PublishedChallengeVersionRow {
 export interface PublishedChallengeVersionDetailRow {
   id: string;
   challengeId: string;
-  lessonId: string;
+  databaseId?: string | null;
+  databaseName?: string | null;
   slug: string;
   title: string;
   description: string | null;
@@ -98,17 +99,13 @@ export interface SessionExecutionSummaryRow {
 export interface SessionSubmissionContextRow {
   userId: string;
   challengeVersionId: string | null;
-  lessonVersionId: string | null;
 }
 
 export interface ChallengeCatalogRow {
   id: string;
-  lessonId: string;
-  lessonSlug: string;
-  lessonTitle: string;
-  trackId: string;
-  trackSlug: string;
-  trackTitle: string;
+  databaseId?: string | null;
+  databaseName?: string | null;
+  databaseSlug?: string | null;
   slug: string;
   title: string;
   description: string | null;
@@ -135,7 +132,8 @@ export interface ReviewChallengeRow extends ChallengeCatalogRow {
 
 export interface EditableChallengeDetailRow {
   id: string;
-  lessonId: string;
+  databaseId?: string | null;
+  databaseName?: string | null;
   slug: string;
   title: string;
   description: string | null;
@@ -318,11 +316,11 @@ export class ChallengesRepository {
     return row ?? null;
   }
 
-  async findByLessonAndSlug(lessonId: string, slug: string): Promise<ChallengeRow | null> {
+  async findByDatabaseAndSlug(databaseId: string, slug: string): Promise<ChallengeRow | null> {
     const [row] = await this.db
       .select()
       .from(schema.challenges)
-      .where(and(eq(schema.challenges.lessonId, lessonId), eq(schema.challenges.slug, slug)))
+      .where(and(eq(schema.challenges.databaseId, databaseId), eq(schema.challenges.slug, slug)))
       .limit(1);
     return row ?? null;
   }
@@ -343,7 +341,8 @@ export class ChallengesRepository {
       .select({
         id: schema.challengeVersions.id,
         challengeId: schema.challengeVersions.challengeId,
-        lessonId: schema.challenges.lessonId,
+        databaseId: schema.challenges.databaseId,
+        databaseName: schema.schemaTemplates.name,
         slug: schema.challenges.slug,
         title: schema.challenges.title,
         description: schema.challenges.description,
@@ -362,6 +361,10 @@ export class ChallengesRepository {
       .innerJoin(
         schema.challenges,
         eq(schema.challengeVersions.challengeId, schema.challenges.id),
+      )
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.challenges.databaseId, schema.schemaTemplates.id),
       )
       .where(
         and(
@@ -420,7 +423,6 @@ export class ChallengesRepository {
       .select({
         userId: schema.learningSessions.userId,
         challengeVersionId: schema.learningSessions.challengeVersionId,
-        lessonVersionId: schema.learningSessions.lessonVersionId,
       })
       .from(schema.learningSessions)
       .where(eq(schema.learningSessions.id, sessionId))
@@ -582,12 +584,9 @@ export class ChallengesRepository {
     const rows = await this.db
       .select({
         id: schema.challenges.id,
-        lessonId: schema.lessons.id,
-        lessonSlug: schema.lessons.slug,
-        lessonTitle: schema.lessons.title,
-        trackId: schema.tracks.id,
-        trackSlug: schema.tracks.slug,
-        trackTitle: schema.tracks.title,
+        databaseId: schema.challenges.databaseId,
+        databaseName: schema.schemaTemplates.name,
+        databaseSlug: schema.schemaTemplates.name,
         slug: schema.challenges.slug,
         title: schema.challenges.title,
         description: schema.challenges.description,
@@ -600,14 +599,12 @@ export class ChallengesRepository {
         createdAt: schema.challenges.createdAt,
       })
       .from(schema.challenges)
-      .innerJoin(schema.lessons, eq(schema.challenges.lessonId, schema.lessons.id))
-      .innerJoin(schema.tracks, eq(schema.lessons.trackId, schema.tracks.id))
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.challenges.databaseId, schema.schemaTemplates.id),
+      )
       .where(eq(schema.challenges.status, 'published'))
-      .orderBy(
-        asc(schema.tracks.sortOrder),
-        asc(schema.lessons.sortOrder),
-        asc(schema.challenges.sortOrder),
-      );
+      .orderBy(asc(schema.challenges.sortOrder));
 
     const publishedVersionMap = await this.getVersionMetadataMap(
       rows
@@ -635,12 +632,9 @@ export class ChallengesRepository {
     const rows = await this.db
       .select({
         id: schema.challenges.id,
-        lessonId: schema.lessons.id,
-        lessonSlug: schema.lessons.slug,
-        lessonTitle: schema.lessons.title,
-        trackId: schema.tracks.id,
-        trackSlug: schema.tracks.slug,
-        trackTitle: schema.tracks.title,
+        databaseId: schema.challenges.databaseId,
+        databaseName: schema.schemaTemplates.name,
+        databaseSlug: schema.schemaTemplates.name,
         slug: schema.challenges.slug,
         title: schema.challenges.title,
         description: schema.challenges.description,
@@ -653,8 +647,10 @@ export class ChallengesRepository {
         createdAt: schema.challenges.createdAt,
       })
       .from(schema.challenges)
-      .innerJoin(schema.lessons, eq(schema.challenges.lessonId, schema.lessons.id))
-      .innerJoin(schema.tracks, eq(schema.lessons.trackId, schema.tracks.id))
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.challenges.databaseId, schema.schemaTemplates.id),
+      )
       .where(eq(schema.challenges.createdBy, userId))
       .orderBy(desc(schema.challenges.updatedAt));
 
@@ -678,12 +674,9 @@ export class ChallengesRepository {
     const rows = await this.db
       .select({
         id: schema.challenges.id,
-        lessonId: schema.lessons.id,
-        lessonSlug: schema.lessons.slug,
-        lessonTitle: schema.lessons.title,
-        trackId: schema.tracks.id,
-        trackSlug: schema.tracks.slug,
-        trackTitle: schema.tracks.title,
+        databaseId: schema.challenges.databaseId,
+        databaseName: schema.schemaTemplates.name,
+        databaseSlug: schema.schemaTemplates.name,
         slug: schema.challenges.slug,
         title: schema.challenges.title,
         description: schema.challenges.description,
@@ -699,8 +692,10 @@ export class ChallengesRepository {
         createdAt: schema.challenges.createdAt,
       })
       .from(schema.challenges)
-      .innerJoin(schema.lessons, eq(schema.challenges.lessonId, schema.lessons.id))
-      .innerJoin(schema.tracks, eq(schema.lessons.trackId, schema.tracks.id))
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.challenges.databaseId, schema.schemaTemplates.id),
+      )
       .leftJoin(schema.users, eq(schema.challenges.createdBy, schema.users.id))
       .where(eq(schema.challenges.status, 'draft'))
       .orderBy(desc(schema.challenges.updatedAt));
@@ -809,7 +804,8 @@ export class ChallengesRepository {
     const [row] = await this.db
       .select({
         id: schema.challenges.id,
-        lessonId: schema.challenges.lessonId,
+        databaseId: schema.challenges.databaseId,
+        databaseName: schema.schemaTemplates.name,
         slug: schema.challenges.slug,
         title: schema.challenges.title,
         description: schema.challenges.description,
@@ -841,6 +837,10 @@ export class ChallengesRepository {
       .innerJoin(
         schema.challenges,
         eq(schema.challengeVersions.challengeId, schema.challenges.id),
+      )
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.challenges.databaseId, schema.schemaTemplates.id),
       )
       .where(eq(schema.challenges.id, id))
       .orderBy(desc(schema.challengeVersions.versionNo), desc(schema.challengeVersions.createdAt))

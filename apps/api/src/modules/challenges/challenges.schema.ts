@@ -38,7 +38,7 @@ export const SubmitAttemptSchema = z.object({
 });
 
 const CreateChallengeBaseSchema = z.object({
-  lessonId: z.string().uuid(),
+  databaseId: z.string().uuid(),
   slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
   title: z.string().min(1).max(255),
   description: z.string().optional(),

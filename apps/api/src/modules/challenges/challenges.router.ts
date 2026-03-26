@@ -86,9 +86,9 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['lessonId', 'slug', 'title', 'problemStatement'],
+          required: ['databaseId', 'slug', 'title', 'problemStatement'],
           properties: {
-            lessonId: { type: 'string', format: 'uuid' },
+            databaseId: { type: 'string', format: 'uuid' },
             slug: { type: 'string' },
             title: { type: 'string' },
             description: { type: 'string' },

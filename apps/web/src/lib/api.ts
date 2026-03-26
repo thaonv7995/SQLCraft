@@ -191,6 +191,8 @@ export interface LessonVersion {
 export interface ChallengeVersionDetail {
   id: string;
   challengeId: string;
+  databaseId?: string;
+  databaseName?: string;
   lessonId: string;
   slug: string;
   title: string;
@@ -260,6 +262,9 @@ export interface ChallengeLeaderboardEntry {
 
 export interface ChallengeCatalogItem {
   id: string;
+  databaseId?: string;
+  databaseName?: string;
+  databaseSlug?: string;
   lessonId: string;
   lessonSlug: string;
   lessonTitle: string;
@@ -294,6 +299,8 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
 
 export interface EditableChallengeDetail {
   id: string;
+  databaseId?: string;
+  databaseName?: string;
   lessonId: string;
   slug: string;
   title: string;
@@ -1393,6 +1400,7 @@ export const challengesApi = {
   validateDraft: (payload: {
     challengeId?: string;
     lessonId: string;
+    databaseId?: string;
     slug: string;
     title: string;
     description?: string;
@@ -1412,6 +1420,7 @@ export const challengesApi = {
 
   create: (payload: {
     lessonId: string;
+    databaseId?: string;
     slug: string;
     title: string;
     description?: string;
@@ -1430,6 +1439,7 @@ export const challengesApi = {
     challengeId: string,
     payload: {
       lessonId: string;
+      databaseId?: string;
       slug: string;
       title: string;
       description?: string;
@@ -1509,7 +1519,7 @@ export const sessionsApi = {
     api.get<SessionSchemaDiffResponse>(`/learning-sessions/${id}/schema-diff`).then((r) => r.data),
 
   create: (payload: {
-    lessonVersionId: string;
+    lessonVersionId?: string;
     challengeVersionId?: string;
     selectedScale?: DatasetScale;
   }) =>

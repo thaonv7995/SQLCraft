@@ -9,22 +9,14 @@ export type SessionRow = InferSelectModel<typeof schema.learningSessions>;
 export type SandboxRow = InferSelectModel<typeof schema.sandboxInstances>;
 export type InsertSession = InferInsertModel<typeof schema.learningSessions>;
 export type InsertSandbox = InferInsertModel<typeof schema.sandboxInstances>;
-export type LessonVersionRow = InferSelectModel<typeof schema.lessonVersions>;
 export type ChallengeVersionRow = InferSelectModel<typeof schema.challengeVersions>;
-export type ChallengeVersionWithLessonRow = ChallengeVersionRow & { lessonId: string };
+export type ChallengeVersionWithDatabaseRow = ChallengeVersionRow & {
+  databaseId: string;
+};
 
 export class SessionsRepository {
   private get db() {
     return getDb();
-  }
-
-  async findPublishedLessonVersion(id: string): Promise<LessonVersionRow | null> {
-    const [row] = await this.db
-      .select()
-      .from(schema.lessonVersions)
-      .where(and(eq(schema.lessonVersions.id, id), eq(schema.lessonVersions.isPublished, true)))
-      .limit(1);
-    return row ?? null;
   }
 
   async findPublishedChallengeVersion(id: string): Promise<ChallengeVersionRow | null> {
@@ -36,14 +28,14 @@ export class SessionsRepository {
     return row ?? null;
   }
 
-  async findPublishedChallengeVersionWithLesson(
+  async findPublishedChallengeVersionWithDatabase(
     id: string,
-  ): Promise<ChallengeVersionWithLessonRow | null> {
+  ): Promise<ChallengeVersionWithDatabaseRow | null> {
     const [row] = await this.db
       .select({
         id: schema.challengeVersions.id,
         challengeId: schema.challengeVersions.challengeId,
-        lessonId: schema.challenges.lessonId,
+        databaseId: schema.challenges.databaseId,
         versionNo: schema.challengeVersions.versionNo,
         problemStatement: schema.challengeVersions.problemStatement,
         hintText: schema.challengeVersions.hintText,
@@ -72,7 +64,7 @@ export class SessionsRepository {
       )
       .limit(1);
 
-    return row ?? null;
+    return row && row.databaseId ? { ...row, databaseId: row.databaseId } : null;
   }
 
   async createSession(data: Omit<InsertSession, 'id' | 'createdAt' | 'startedAt'>): Promise<SessionRow> {
@@ -157,7 +149,6 @@ export class SessionsRepository {
     Array<
       SessionRow & {
         sandboxStatus: string | null;
-        lessonTitle: string | null;
         schemaTemplateName: string | null;
       }
     >
@@ -166,7 +157,6 @@ export class SessionsRepository {
       .select({
         id: schema.learningSessions.id,
         userId: schema.learningSessions.userId,
-        lessonVersionId: schema.learningSessions.lessonVersionId,
         challengeVersionId: schema.learningSessions.challengeVersionId,
         status: schema.learningSessions.status,
         startedAt: schema.learningSessions.startedAt,
@@ -174,7 +164,6 @@ export class SessionsRepository {
         endedAt: schema.learningSessions.endedAt,
         createdAt: schema.learningSessions.createdAt,
         sandboxStatus: schema.sandboxInstances.status,
-        lessonTitle: schema.lessons.title,
         schemaTemplateName: schema.schemaTemplates.name,
       })
       .from(schema.learningSessions)
@@ -182,11 +171,6 @@ export class SessionsRepository {
         schema.sandboxInstances,
         eq(schema.sandboxInstances.learningSessionId, schema.learningSessions.id),
       )
-      .leftJoin(
-        schema.lessonVersions,
-        eq(schema.lessonVersions.id, schema.learningSessions.lessonVersionId),
-      )
-      .leftJoin(schema.lessons, eq(schema.lessons.id, schema.lessonVersions.lessonId))
       .leftJoin(
         schema.schemaTemplates,
         eq(schema.schemaTemplates.id, schema.sandboxInstances.schemaTemplateId),
@@ -198,7 +182,6 @@ export class SessionsRepository {
     return rows as Array<
       SessionRow & {
         sandboxStatus: string | null;
-        lessonTitle: string | null;
         schemaTemplateName: string | null;
       }
     >;
@@ -230,23 +213,6 @@ export class SessionsRepository {
       .update(schema.sandboxInstances)
       .set({ status: 'expiring', updatedAt: new Date() })
       .where(eq(schema.sandboxInstances.learningSessionId, sessionId));
-  }
-
-  async getSchemaTemplateBySessionId(sessionId: string): Promise<SchemaTemplateRow | null> {
-    const [row] = await this.db
-      .select({ schemaTemplate: schema.schemaTemplates })
-      .from(schema.learningSessions)
-      .innerJoin(
-        schema.lessonVersions,
-        eq(schema.lessonVersions.id, schema.learningSessions.lessonVersionId),
-      )
-      .innerJoin(
-        schema.schemaTemplates,
-        eq(schema.schemaTemplates.id, schema.lessonVersions.schemaTemplateId),
-      )
-      .where(eq(schema.learningSessions.id, sessionId))
-      .limit(1);
-    return row?.schemaTemplate ?? null;
   }
 
   async findDetailedSandboxBySessionId(sessionId: string): Promise<SandboxRow | null> {

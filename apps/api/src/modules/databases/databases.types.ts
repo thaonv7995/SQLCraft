@@ -66,7 +66,6 @@ export interface CreateDatabaseSessionResult {
   session: {
     id: string;
     userId: string;
-    lessonVersionId: string | null;
     challengeVersionId: string | null;
     status: string;
     startedAt: Date;

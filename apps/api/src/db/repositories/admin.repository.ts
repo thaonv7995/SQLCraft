@@ -4,14 +4,14 @@ import { getDb, schema } from '../index';
 
 export interface SystemHealthStats {
   users: number;
-  tracks: number;
-  lessons: number;
+  databases: number;
+  challenges: number;
   activeSessions: number;
   pendingJobs: number;
 }
 
 export interface DatabaseReferenceSummary {
-  lessonVersionCount: number;
+  challengeCount: number;
   sandboxInstanceCount: number;
 }
 
@@ -30,16 +30,11 @@ export class AdminRepository {
   }
 
   async getSystemHealthStats(): Promise<SystemHealthStats> {
-    const [
-      userCount,
-      trackCount,
-      lessonCount,
-      activeSessionCount,
-      pendingJobCount,
-    ] = await Promise.all([
+    const [userCount, databaseCount, challengeCount, activeSessionCount, pendingJobCount] =
+      await Promise.all([
       this.db.select({ count: count() }).from(schema.users),
-      this.db.select({ count: count() }).from(schema.tracks),
-      this.db.select({ count: count() }).from(schema.lessons),
+      this.db.select({ count: count() }).from(schema.schemaTemplates),
+      this.db.select({ count: count() }).from(schema.challenges),
       this.db
         .select({ count: count() })
         .from(schema.learningSessions)
@@ -52,8 +47,8 @@ export class AdminRepository {
 
     return {
       users: userCount[0]?.count ?? 0,
-      tracks: trackCount[0]?.count ?? 0,
-      lessons: lessonCount[0]?.count ?? 0,
+      databases: databaseCount[0]?.count ?? 0,
+      challenges: challengeCount[0]?.count ?? 0,
       activeSessions: activeSessionCount[0]?.count ?? 0,
       pendingJobs: pendingJobCount[0]?.count ?? 0,
     };
@@ -118,13 +113,13 @@ export class AdminRepository {
     schemaTemplateId: string,
     datasetTemplateIds: string[],
   ): Promise<DatabaseReferenceSummary> {
-    const lessonVersionFilter =
+    const challengeFilter =
       datasetTemplateIds.length > 0
         ? or(
-            eq(schema.lessonVersions.schemaTemplateId, schemaTemplateId),
-            inArray(schema.lessonVersions.datasetTemplateId, datasetTemplateIds),
+            eq(schema.challenges.databaseId, schemaTemplateId),
+            inArray(schema.sandboxInstances.datasetTemplateId, datasetTemplateIds),
           )
-        : eq(schema.lessonVersions.schemaTemplateId, schemaTemplateId);
+        : eq(schema.challenges.databaseId, schemaTemplateId);
 
     const sandboxInstanceFilter =
       datasetTemplateIds.length > 0
@@ -134,8 +129,8 @@ export class AdminRepository {
           )
         : eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId);
 
-    const [lessonVersionCount, sandboxInstanceCount] = await Promise.all([
-      this.db.select({ count: count() }).from(schema.lessonVersions).where(lessonVersionFilter),
+    const [challengeCount, sandboxInstanceCount] = await Promise.all([
+      this.db.select({ count: count() }).from(schema.challenges).where(challengeFilter),
       this.db
         .select({ count: count() })
         .from(schema.sandboxInstances)
@@ -143,7 +138,7 @@ export class AdminRepository {
     ]);
 
     return {
-      lessonVersionCount: lessonVersionCount[0]?.count ?? 0,
+      challengeCount: challengeCount[0]?.count ?? 0,
       sandboxInstanceCount: sandboxInstanceCount[0]?.count ?? 0,
     };
   }

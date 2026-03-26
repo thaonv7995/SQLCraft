@@ -1,4 +1,8 @@
-import { challengesRepository, lessonsRepository, sandboxesRepository } from '../../db/repositories';
+import {
+  challengesRepository,
+  sandboxesRepository,
+  sessionsRepository,
+} from '../../db/repositories';
 import type {
   ChallengeAttemptRow,
   ChallengeAttemptWithExecutionRow,
@@ -70,7 +74,8 @@ export interface ChallengeDraftValidationResult {
 export interface ChallengeVersionDetail {
   id: string;
   challengeId: string;
-  lessonId: string;
+  databaseId?: string | null;
+  databaseName?: string | null;
   slug: string;
   title: string;
   description: string;
@@ -134,12 +139,9 @@ export interface GlobalLeaderboardEntry {
 
 export interface ChallengeCatalogItem {
   id: string;
-  lessonId: string;
-  lessonSlug: string;
-  lessonTitle: string;
-  trackId: string;
-  trackSlug: string;
-  trackTitle: string;
+  databaseId?: string | null;
+  databaseName?: string | null;
+  databaseSlug?: string | null;
   slug: string;
   title: string;
   description: string;
@@ -168,7 +170,8 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
 
 export interface EditableChallengeDetail {
   id: string;
-  lessonId: string;
+  databaseId?: string | null;
+  databaseName?: string | null;
   slug: string;
   title: string;
   description: string;
@@ -342,7 +345,8 @@ function normalizeReviewRow(row: ReviewChallengeRow): ChallengeReviewItem {
 function normalizeEditableChallengeDetail(row: EditableChallengeDetailRow): EditableChallengeDetail {
   return {
     id: row.id,
-    lessonId: row.lessonId,
+    databaseId: row.databaseId ?? null,
+    databaseName: row.databaseName ?? null,
     slug: row.slug,
     title: row.title,
     description: normalizeDescription(row.description),
@@ -374,7 +378,7 @@ function normalizeEditableChallengeDetail(row: EditableChallengeDetailRow): Edit
 }
 
 interface NormalizedChallengeDraftPayload {
-  lessonId: string;
+  databaseId: string;
   slug: string;
   title: string;
   description?: string;
@@ -392,7 +396,7 @@ interface NormalizedChallengeDraftPayload {
 function normalizeChallengeDraftPayload(
   data: Pick<
     CreateChallengeBody,
-    | 'lessonId'
+    | 'databaseId'
     | 'slug'
     | 'title'
     | 'description'
@@ -408,7 +412,7 @@ function normalizeChallengeDraftPayload(
   >,
 ): NormalizedChallengeDraftPayload {
   return {
-    lessonId: data.lessonId,
+    databaseId: data.databaseId,
     slug: data.slug.trim(),
     title: data.title.trim(),
     description: normalizeNullableText(data.description) ?? undefined,
@@ -431,17 +435,17 @@ async function buildDraftValidation(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const lessonExists = await lessonsRepository.existsById(normalized.lessonId);
-  if (!lessonExists) {
-    errors.push('Lesson not found.');
+  const databaseExists = await sessionsRepository.findSchemaTemplateById(normalized.databaseId);
+  if (!databaseExists) {
+    errors.push('Database not found.');
   }
 
-  const existingChallenge = await challengesRepository.findByLessonAndSlug(
-    normalized.lessonId,
+  const existingChallenge = await challengesRepository.findByDatabaseAndSlug(
+    normalized.databaseId,
     normalized.slug,
   );
   if (existingChallenge && existingChallenge.id !== data.challengeId) {
-    errors.push('Slug already exists for this lesson.');
+    errors.push('Slug already exists for this database.');
   }
 
   if (normalized.validatorType === 'result_set') {
@@ -1472,7 +1476,7 @@ export async function createChallenge(
   const normalized = normalizeChallengeDraftPayload(data);
 
   const challenge = await challengesRepository.createChallenge({
-    lessonId: normalized.lessonId,
+    databaseId: normalized.databaseId,
     slug: normalized.slug,
     title: normalized.title,
     description: normalized.description,
@@ -1526,7 +1530,7 @@ export async function createChallengeVersion(
 
   const challenge =
     (await challengesRepository.updateChallenge(challengeId, {
-      lessonId: normalized.lessonId,
+      databaseId: normalized.databaseId ?? undefined,
       slug: normalized.slug,
       title: normalized.title,
       description: normalized.description,
