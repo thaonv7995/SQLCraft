@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -410,10 +410,14 @@ function DetailSkeleton() {
 export default function AdminDatabaseDetailPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const params = useParams<{ dbId: string | string[] }>();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const databaseId = Array.isArray(params.dbId) ? params.dbId[0] : params.dbId;
+  const databaseId = useMemo(() => {
+    const segments = pathname.split('/').filter(Boolean);
+    const lastSegment = segments[segments.length - 1];
+    return lastSegment ? decodeURIComponent(lastSegment) : '';
+  }, [pathname]);
   const [activeTab, setActiveTab] = useState<DatabaseDetailTab>(
     isDetailTab(requestedTab) ? requestedTab : 'schema-template',
   );

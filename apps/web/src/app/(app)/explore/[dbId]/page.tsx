@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useParams, useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -407,8 +407,12 @@ function ProvisioningModal({
 }
 
 export default function DatabaseDetailPage() {
-  const { dbId: dbIdParam } = useParams<{ dbId: string }>();
-  const dbId = decodeURIComponent(dbIdParam ?? '');
+  const pathname = usePathname();
+  const dbId = useMemo(() => {
+    const segments = pathname.split('/').filter(Boolean);
+    const lastSegment = segments[segments.length - 1];
+    return lastSegment ? decodeURIComponent(lastSegment) : '';
+  }, [pathname]);
   return <DatabaseDetail key={dbId} dbId={dbId} />;
 }
 

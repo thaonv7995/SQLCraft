@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
@@ -47,15 +47,13 @@ import {
   type LabEditorTab,
 } from '@/lib/lab-editor-tabs';
 
-function sessionIdFromParams(params: { sessionId?: string | string[] }): string {
-  const raw = params.sessionId;
-  if (typeof raw === 'string' && raw.length > 0) {
-    return decodeURIComponent(raw);
+function sessionIdFromPathname(pathname: string): string {
+  const segments = pathname.split('/').filter(Boolean);
+  const lastSegment = segments[segments.length - 1];
+  if (!lastSegment) {
+    return '';
   }
-  if (Array.isArray(raw) && raw[0]) {
-    return decodeURIComponent(raw[0]);
-  }
-  return '';
+  return decodeURIComponent(lastSegment);
 }
 
 function normalizeMetric(value: number | null | undefined) {
@@ -296,18 +294,18 @@ function EditorTabsBar() {
 }
 
 function SqlEditorPanel({
+  sessionId,
   schemaTables,
   onFormat,
   onCopy,
 }: {
+  sessionId: string;
   schemaTables?: SessionSchemaTable[];
   onFormat: () => void;
   onCopy: () => void;
 }) {
   const currentQuery = useLabStore((state) => state.currentQuery);
   const setQuery = useLabStore((state) => state.setQuery);
-  const params = useParams<{ sessionId?: string | string[] }>();
-  const sessionId = sessionIdFromParams(params);
   const { mutate: executeQuery } = useExecuteQuery();
 
   const handleExecute = useCallback(() => {
@@ -1293,9 +1291,9 @@ function LabSessionError({
 }
 
 export default function LabPage() {
-  const params = useParams<{ sessionId?: string | string[] }>();
+  const pathname = usePathname();
   const router = useRouter();
-  const sessionId = sessionIdFromParams(params);
+  const sessionId = sessionIdFromPathname(pathname);
   const {
     activeTab,
     setActiveTab,
@@ -1881,6 +1879,7 @@ export default function LabPage() {
             </div>
           </div>
           <SqlEditorPanel
+            sessionId={sessionId}
             schemaTables={sessionSchema?.tables}
             onFormat={handleFormatSql}
             onCopy={handleCopyQuery}

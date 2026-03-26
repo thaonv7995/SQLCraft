@@ -52,6 +52,8 @@ export default function LeaderboardPage() {
   const [submissionChallenge, setSubmissionChallenge] = useState<ChallengeCatalogItem | null>(null);
   const [submissionSelectedScale, setSubmissionSelectedScale] = useState<DatasetScale>('small');
   const [isStartingSubmission, setIsStartingSubmission] = useState(false);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [detailChallenge, setDetailChallenge] = useState<ChallengeCatalogItem | null>(null);
 
   useEffect(() => {
     setCompletionPage(0);
@@ -172,6 +174,16 @@ export default function LeaderboardPage() {
     setSubmissionModalOpen(true);
   };
 
+  const openDetailModal = (challenge: ChallengeCatalogItem) => {
+    setDetailChallenge(challenge);
+    setDetailModalOpen(true);
+  };
+
+  const closeDetailModal = () => {
+    setDetailModalOpen(false);
+    setDetailChallenge(null);
+  };
+
   const closeSubmissionModal = () => {
     setSubmissionModalOpen(false);
     setSubmissionChallenge(null);
@@ -210,38 +222,23 @@ export default function LeaderboardPage() {
 
   return (
     <div className="page-shell page-stack">
-      <section className="space-y-5 rounded-[28px] border border-outline-variant/10 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.12),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(245,158,11,0.15),transparent_36%),var(--surface-container-low)] px-6 py-6">
-        <div className="space-y-3">
+      <section className="space-y-2">
+        <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.24em] text-outline">Challenge hub</p>
-          <h1 className="font-headline text-4xl font-bold tracking-tight text-on-surface">Challenges</h1>
-          <p className="max-w-3xl text-base leading-7 text-on-surface-variant">
-            Điểm và tiến độ của bạn theo từng khoảng thời gian. Chọn challenge để xem problem statement và
-            nộp submission.
-          </p>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface/80 px-4 py-4 backdrop-blur">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Điểm của bạn</p>
-            <p className="mt-2 text-2xl font-semibold text-on-surface">
-              {meEntry ? formatPoints(meEntry.points) : '—'}
-            </p>
-            <p className="mt-1 text-sm text-on-surface-variant">Tính theo bảng xếp hạng {period}</p>
-          </div>
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface/80 px-4 py-4 backdrop-blur">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Đã pass</p>
-            <p className="mt-2 text-2xl font-semibold text-on-surface">
-              {meEntry ? meEntry.challengesCompleted : '—'}
-            </p>
-            <p className="mt-1 text-sm text-on-surface-variant">Số challenge bạn đã hoàn thành</p>
-          </div>
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface/80 px-4 py-4 backdrop-blur">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Streak</p>
-            <p className="mt-2 text-2xl font-semibold text-on-surface">
-              {meEntry ? `${meEntry.streak} ngày` : '—'}
-            </p>
-            <p className="mt-1 text-sm text-on-surface-variant">Chuỗi ngày bạn duy trì nhịp làm bài</p>
-          </div>
+        <div className="inline-flex max-w-full items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low px-3 py-2 text-xs">
+          <span className="text-on-surface-variant">
+            Điểm <span className="font-semibold text-on-surface">{meEntry ? formatPoints(meEntry.points) : '—'}</span>
+          </span>
+          <span className="text-outline">•</span>
+          <span className="text-on-surface-variant">
+            Pass <span className="font-semibold text-on-surface">{meEntry ? meEntry.challengesCompleted : '—'}</span>
+          </span>
+          <span className="text-outline">•</span>
+          <span className="text-on-surface-variant">
+            Streak <span className="font-semibold text-on-surface">{meEntry ? `${meEntry.streak}d` : '—'}</span>
+          </span>
         </div>
       </section>
 
@@ -333,19 +330,32 @@ export default function LeaderboardPage() {
                 return (
                   <div
                     key={challenge.id}
-                    className="group bg-surface-container-low rounded-xl p-6 relative overflow-hidden border border-transparent hover:border-outline-variant/20 transition-all duration-200 hover:bg-surface-container"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openDetailModal(challenge)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openDetailModal(challenge);
+                      }
+                    }}
+                    aria-label={`Xem chi tiết ${challenge.title}`}
+                    className="group bg-surface-container-low rounded-xl p-6 relative overflow-hidden border border-transparent hover:border-outline-variant/20 transition-all duration-200 hover:bg-surface-container cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
-                    <span className="material-symbols-outlined absolute top-4 right-4 text-outline text-base opacity-0 group-hover:opacity-100 transition-opacity">
-                      open_in_new
-                    </span>
-
                     <div className="flex items-start justify-between mb-4">
                       <div className="w-12 h-12 rounded-lg bg-surface-container-highest flex items-center justify-center">
                         <span
-                          className="material-symbols-outlined text-2xl text-tertiary"
+                          className={cn(
+                            'material-symbols-outlined text-2xl',
+                            passed
+                              ? 'text-success'
+                              : scanned
+                                ? 'text-outline'
+                                : 'text-tertiary',
+                          )}
                           style={{ fontVariationSettings: "'FILL' 1" }}
                         >
-                          quiz
+                          {passed ? 'check_circle' : scanned ? 'radio_button_unchecked' : 'quiz'}
                         </span>
                       </div>
                       <DifficultyBadge difficulty={challenge.difficulty} />
@@ -358,29 +368,6 @@ export default function LeaderboardPage() {
                     <p className="text-xs text-outline leading-relaxed line-clamp-2 mb-4">
                       {challenge.description}
                     </p>
-
-                    <div className="flex items-center gap-2 mb-4 flex-wrap">
-                      {passed ? (
-                        <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs text-success inline-flex items-center gap-1">
-                          <span className="material-symbols-outlined text-sm">check_circle</span>
-                          Đã pass
-                        </span>
-                      ) : scanned ? (
-                        <span className="rounded-full bg-outline-variant/10 px-2 py-0.5 text-xs text-on-surface-variant inline-flex items-center gap-1">
-                          <span className="material-symbols-outlined text-sm">radio_button_unchecked</span>
-                          Chưa pass
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-surface-container-lowest/50 px-2 py-0.5 text-xs text-on-surface-variant inline-flex items-center gap-1">
-                          <span className="material-symbols-outlined text-sm">help_outline</span>
-                          Chưa xác minh
-                        </span>
-                      )}
-
-                      <span className="rounded-full bg-secondary/10 px-2 py-0.5 text-xs text-secondary font-mono">
-                        {challenge.points} pts
-                      </span>
-                    </div>
 
                     <div className="border-t border-outline-variant/10 pt-4 grid grid-cols-2 gap-4">
                       <div>
@@ -401,17 +388,6 @@ export default function LeaderboardPage() {
                       </div>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-end">
-                      <button
-                        type="button"
-                        onClick={() => openSubmissionModal(challenge)}
-                        aria-label={`Tạo submission cho ${challenge.title}`}
-                        className="inline-flex shrink-0 items-center gap-2 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary transition hover:brightness-105"
-                      >
-                        Tạo submission
-                        <span className="material-symbols-outlined text-sm">add_circle</span>
-                      </button>
-                    </div>
                   </div>
                 );
               })}
@@ -453,6 +429,76 @@ export default function LeaderboardPage() {
           </>
         )}
       </section>
+
+      {detailModalOpen && detailChallenge && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="challenge-detail-modal-title"
+        >
+          <div className="w-full max-w-lg rounded-[28px] border border-outline-variant/20 bg-surface-container-low p-6 shadow-[0_24px_80px_rgba(0,0,0,0.6)]">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2
+                  id="challenge-detail-modal-title"
+                  className="font-headline text-xl font-semibold text-on-surface"
+                >
+                  {detailChallenge.title}
+                </h2>
+                <p className="mt-1 text-sm text-on-surface-variant">
+                  {detailChallenge.description}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDetailModal}
+                className="rounded-full border border-outline-variant/20 bg-surface-container-low px-3 py-1.5 text-sm text-on-surface-variant hover:bg-surface-container-lowest"
+                aria-label="Đóng popup"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/50 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Points</p>
+                <p className="mt-1 text-sm font-mono font-bold text-on-surface">
+                  {detailChallenge.points} pts
+                </p>
+              </div>
+              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/50 px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Database</p>
+                <p className="mt-1 text-sm font-mono font-bold text-tertiary line-clamp-1">
+                  {detailChallenge.databaseName ?? 'N/A'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={closeDetailModal}
+                className="rounded-full border border-outline-variant/20 bg-surface-container-low px-4 py-2 text-sm font-medium text-on-surface-variant transition hover:bg-surface-container-lowest"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeDetailModal();
+                  openSubmissionModal(detailChallenge);
+                }}
+                aria-label={`Tạo submission cho ${detailChallenge.title}`}
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-on-primary transition hover:brightness-105"
+              >
+                <span className="material-symbols-outlined text-base">add_circle</span>
+                Tạo submission
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {submissionModalOpen && (
         <div
