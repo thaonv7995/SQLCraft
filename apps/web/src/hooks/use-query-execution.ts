@@ -138,11 +138,11 @@ export function useQueryHistory(sessionId?: string, page = 1, limit = 50) {
 
 // ─── Session Schema ───────────────────────────────────────────────────────────
 
-export function useSessionSchema(sessionId: string) {
+export function useSessionSchema(sessionId: string, enabled = true) {
   return useQuery<SessionSchemaResponse>({
     queryKey: ['session-schema', sessionId],
     queryFn: () => sessionsApi.getSchema(sessionId),
-    enabled: !!sessionId,
+    enabled: enabled && !!sessionId,
     staleTime: 60_000,
   });
 }

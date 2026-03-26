@@ -21,12 +21,6 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bpg_sleep\b/i, reason: 'pg_sleep is not allowed' },
 ];
 
-// Patterns that require a WHERE clause
-const REQUIRE_WHERE_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
-  { pattern: /^\s*delete\s+from\s+\w+\s*$/i, type: 'DELETE without WHERE' },
-  { pattern: /^\s*update\s+\w+\s+set\s+[^;]+$/i, type: 'UPDATE without WHERE' },
-];
-
 export interface SqlValidationResult {
   valid: boolean;
   reason?: string;

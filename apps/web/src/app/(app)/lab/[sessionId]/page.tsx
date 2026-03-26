@@ -35,7 +35,6 @@ import {
   type DatasetScale,
   type QueryExecution,
   type QueryResultColumn,
-  type SessionSchemaDiffResponse,
   type SessionSchemaTable,
 } from '@/lib/api';
 import { SqlEditor } from '@/components/ui/sql-editor';
@@ -168,13 +167,6 @@ function EditorTabsBar() {
   const closeEditorTab = useLabStore((state) => state.closeEditorTab);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [draftTabName, setDraftTabName] = useState('');
-
-  useEffect(() => {
-    if (editingTabId && !editorTabs.some((tab) => tab.id === editingTabId)) {
-      setEditingTabId(null);
-      setDraftTabName('');
-    }
-  }, [editingTabId, editorTabs]);
 
   const beginRename = useCallback((tab: LabEditorTab) => {
     setEditingTabId(tab.id);
@@ -999,17 +991,16 @@ function SchemaDiffPanel({
 }) {
   const { data: diff, isLoading, isError, error } = useSessionSchemaDiff(sessionId);
 
-  const renderSection = (
+  const renderSection = <T,>(
     title: string,
     icon: string,
-    section:
-      | SessionSchemaDiffResponse['indexes']
-      | SessionSchemaDiffResponse['views']
-      | SessionSchemaDiffResponse['materializedViews']
-      | SessionSchemaDiffResponse['functions']
-      | SessionSchemaDiffResponse['partitions'],
-    describe: (item: any) => { title: string; subtitle?: string | null; definition?: string | null },
-    describeChanged?: (item: any) => { title: string; subtitle?: string | null; definition?: string | null },
+    section: {
+      added: T[];
+      removed: T[];
+      changed: Array<{ base: T; current: T }>;
+    },
+    describe: (item: T) => { title: string; subtitle?: string | null; definition?: string | null },
+    describeChanged?: (item: T) => { title: string; subtitle?: string | null; definition?: string | null },
   ) => {
     const changeCount = section.added.length + section.removed.length + section.changed.length;
 
@@ -1489,19 +1480,18 @@ export default function LabPage() {
     },
   });
 
-  const [hydratedEditorSessionId, setHydratedEditorSessionId] = useState<string | null>(null);
-  const [hasPersistedEditorTabs, setHasPersistedEditorTabs] = useState(false);
+  const hydratedEditorSessionIdRef = useRef<string | null>(null);
   const [isEndSessionModalOpen, setIsEndSessionModalOpen] = useState(false);
+  const persistedEditorState = useMemo(
+    () => (sessionId ? readLabEditorState(sessionId) : null),
+    [sessionId],
+  );
+  const hasPersistedEditorTabs = Boolean(persistedEditorState);
 
   useEffect(() => {
     if (!sessionId) {
-      setHydratedEditorSessionId(null);
-      setHasPersistedEditorTabs(false);
       return;
     }
-
-    const persistedEditorState = readLabEditorState(sessionId);
-    setHasPersistedEditorTabs(Boolean(persistedEditorState));
 
     if (persistedEditorState) {
       hydrateEditorTabs(persistedEditorState.tabs, persistedEditorState.activeTabId);
@@ -1510,11 +1500,11 @@ export default function LabPage() {
       hydrateEditorTabs(defaultEditorState.tabs, defaultEditorState.activeTabId);
     }
 
-    setHydratedEditorSessionId(sessionId);
-  }, [hydrateEditorTabs, sessionId]);
+    hydratedEditorSessionIdRef.current = sessionId;
+  }, [hydrateEditorTabs, persistedEditorState, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || hydratedEditorSessionId !== sessionId) {
+    if (!sessionId || hydratedEditorSessionIdRef.current !== sessionId) {
       return;
     }
 
@@ -1522,10 +1512,10 @@ export default function LabPage() {
       tabs: editorTabs,
       activeTabId: activeEditorTabId,
     });
-  }, [activeEditorTabId, editorTabs, hydratedEditorSessionId, sessionId]);
+  }, [activeEditorTabId, editorTabs, sessionId]);
 
   useEffect(() => {
-    if (!sessionId || hydratedEditorSessionId !== sessionId) {
+    if (!sessionId || hydratedEditorSessionIdRef.current !== sessionId) {
       return;
     }
 
@@ -1546,11 +1536,11 @@ export default function LabPage() {
 
     setQuery(bootstrap.starterQuery);
     markLabBootstrapConsumed(sessionId);
-  }, [hasPersistedEditorTabs, hydratedEditorSessionId, sessionId, setQuery]);
+  }, [hasPersistedEditorTabs, sessionId, setQuery]);
 
   // Global keyboard shortcut: Ctrl+Enter to execute (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || session?.status !== 'active') return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -1561,7 +1551,7 @@ export default function LabPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [sessionId, currentQuery, isExecuting, executeQuery]);
+  }, [session?.status, sessionId, currentQuery, isExecuting, executeQuery]);
 
   const [leftWidth, setLeftWidth] = useState(55); // percent
   const resizing = useRef(false);
@@ -1621,13 +1611,13 @@ export default function LabPage() {
   );
   const handleOpenEndSessionModal = useCallback(() => {
     setIsEndSessionModalOpen(true);
-  }, []);
+  }, [setIsEndSessionModalOpen]);
 
   const handleCloseEndSessionModal = useCallback(() => {
     if (!endSessionMutation.isPending) {
       setIsEndSessionModalOpen(false);
     }
-  }, [endSessionMutation.isPending]);
+  }, [endSessionMutation.isPending, setIsEndSessionModalOpen]);
 
   const handleConfirmEndSession = useCallback(() => {
     endSessionMutation.mutate();

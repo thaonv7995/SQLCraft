@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DifficultyBadge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,17 +16,17 @@ export default function LeaderboardPage() {
     staleTime: 60_000,
   });
 
-  const publishedChallenges = challengesQuery.data ?? [];
-
-  useEffect(() => {
-    if (!selectedChallengeId && publishedChallenges.length > 0) {
-      setSelectedChallengeId(publishedChallenges[0].id);
+  const publishedChallenges = useMemo(() => challengesQuery.data ?? [], [challengesQuery.data]);
+  const effectiveSelectedChallengeId = useMemo(() => {
+    if (selectedChallengeId && publishedChallenges.some((challenge) => challenge.id === selectedChallengeId)) {
+      return selectedChallengeId;
     }
+    return publishedChallenges[0]?.id ?? null;
   }, [publishedChallenges, selectedChallengeId]);
 
   const selectedChallenge = useMemo(
-    () => publishedChallenges.find((challenge) => challenge.id === selectedChallengeId) ?? null,
-    [publishedChallenges, selectedChallengeId],
+    () => publishedChallenges.find((challenge) => challenge.id === effectiveSelectedChallengeId) ?? null,
+    [effectiveSelectedChallengeId, publishedChallenges],
   );
 
   const leaderboardQuery = useQuery({
@@ -74,7 +74,7 @@ export default function LeaderboardPage() {
               </div>
             ) : (
               publishedChallenges.map((challenge) => {
-                const isSelected = challenge.id === selectedChallengeId;
+                const isSelected = challenge.id === effectiveSelectedChallengeId;
 
                 return (
                   <button

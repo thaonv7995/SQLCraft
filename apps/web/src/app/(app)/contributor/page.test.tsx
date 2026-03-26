@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ContributorPage from './page';
@@ -203,8 +203,6 @@ describe('ContributorPage', () => {
   });
 
   it('creates a new draft only after running server-side preflight validation', async () => {
-    const user = userEvent.setup();
-
     renderContributorPage();
 
     expect(
@@ -215,22 +213,18 @@ describe('ContributorPage', () => {
       await screen.findByRole('option', { name: 'SQL Fundamentals / Filtering' }),
     ).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Practice Set'), 'lesson-1');
-    await user.type(screen.getByLabelText('Title'), 'Index active users');
-    await user.clear(screen.getByLabelText('Slug'));
-    await user.type(screen.getByLabelText('Slug'), 'index-active-users');
-    await user.clear(screen.getByLabelText('Points'));
-    await user.type(screen.getByLabelText('Points'), '200');
-    await user.type(
-      screen.getByLabelText('Problem Statement'),
-      'Return active users quickly and reward indexed solutions.',
-    );
-    await user.type(
-      screen.getByLabelText('Reference Solution'),
-      'SELECT id, email FROM users WHERE active = true ORDER BY id;',
-    );
+    fireEvent.change(screen.getByLabelText('Practice Set'), { target: { value: 'lesson-1' } });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Index active users' } });
+    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'index-active-users' } });
+    fireEvent.change(screen.getByLabelText('Points'), { target: { value: '200' } });
+    fireEvent.change(screen.getByLabelText('Problem Statement'), {
+      target: { value: 'Return active users quickly and reward indexed solutions.' },
+    });
+    fireEvent.change(screen.getByLabelText('Reference Solution'), {
+      target: { value: 'SELECT id, email FROM users WHERE active = true ORDER BY id;' },
+    });
 
-    await user.click(screen.getByRole('button', { name: /create draft/i }));
+    fireEvent.click(screen.getByRole('button', { name: /create draft/i }));
 
     await waitFor(() => {
       expect(mocks.challengesApi.validateDraft).toHaveBeenCalledWith(

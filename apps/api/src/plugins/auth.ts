@@ -25,7 +25,7 @@ async function authPlugin(fastify: FastifyInstance) {
   // authenticate - requires valid JWT
   fastify.decorate(
     'authenticate',
-    async function (request: FastifyRequest, reply: FastifyReply) {
+    async function (request: FastifyRequest, _reply: FastifyReply) {
       try {
         await request.jwtVerify();
         const payload = request.user as unknown as JwtPayload;

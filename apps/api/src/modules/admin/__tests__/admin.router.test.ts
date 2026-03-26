@@ -7,9 +7,11 @@ import authPlugin from '../../../plugins/auth';
 import { errorHandler } from '../../../middleware/error-handler';
 
 const handlerMocks = vi.hoisted(() => ({
+  clearStaleSessionsHandler: vi.fn(),
   createAdminUserHandler: vi.fn(),
   createTrackHandler: vi.fn(),
   deleteAdminUserHandler: vi.fn(),
+  deleteDatabaseHandler: vi.fn(),
   updateTrackHandler: vi.fn(),
   createLessonHandler: vi.fn(),
   createLessonVersionHandler: vi.fn(),

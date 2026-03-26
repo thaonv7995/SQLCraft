@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const bcryptMocks = vi.hoisted(() => ({
+  hash: vi.fn(async (value: string) => `hashed:${value}`),
+}));
+
+vi.mock('bcryptjs', () => ({
+  default: bcryptMocks,
+}));
+
 vi.mock('../../../db/repositories', () => ({
   tracksRepository: {
     create: vi.fn(),

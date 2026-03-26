@@ -123,7 +123,7 @@ describe('LeaderboardPage', () => {
     renderLeaderboardPage();
 
     expect(await screen.findByRole('heading', { name: /challenge leaderboard/i })).toBeInTheDocument();
-    expect(await screen.findByText('Filter active users')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /filter active users/i })).toBeInTheDocument();
     expect(await screen.findByText('Alice')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /optimize user lookup/i }));
