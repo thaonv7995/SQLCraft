@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import {
   useExecuteQuery,
   useExplainQuery,
+  useQueryHistory,
   useSessionStatus,
   useSessionSchema,
   useSessionSchemaDiff,
@@ -522,10 +523,41 @@ function ExecutionPlanPanel() {
 
 // ─── Query History Panel ──────────────────────────────────────────────────────
 
-function QueryHistoryPanel() {
-  const { queryHistory, setQuery } = useLabStore();
+function QueryHistoryPanel({ sessionId }: { sessionId: string }) {
+  const setQuery = useLabStore((s) => s.setQuery);
+  const [page, setPage] = useState(1);
+  const limit = 20;
+  const historyQuery = useQueryHistory(sessionId, page, limit);
+  const historyItems = historyQuery.data?.items ?? [];
+  const totalPages = Math.max(1, historyQuery.data?.totalPages ?? 1);
 
-  if (queryHistory.length === 0) {
+  useEffect(() => {
+    setPage(1);
+  }, [sessionId]);
+
+  if (historyQuery.isLoading && historyItems.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center space-y-2">
+          <span className="material-symbols-outlined text-4xl text-outline block">hourglass_top</span>
+          <p className="text-sm text-on-surface-variant">Loading history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (historyQuery.isError) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center space-y-2">
+          <span className="material-symbols-outlined text-4xl text-outline block">error</span>
+          <p className="text-sm text-on-surface-variant">Không tải được history</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (historyItems.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
@@ -538,7 +570,7 @@ function QueryHistoryPanel() {
 
   return (
     <div className="flex-1 overflow-y-auto flex flex-col">
-      {queryHistory.map((q) => (
+      {historyItems.map((q) => (
         <div
           key={q.id}
           className="px-4 py-3 hover:bg-surface-container transition-colors cursor-pointer group"
@@ -565,6 +597,27 @@ function QueryHistoryPanel() {
           </code>
         </div>
       ))}
+      <div className="mt-auto flex items-center justify-between border-t border-outline-variant/10 px-4 py-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={page <= 1}
+          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+        >
+          Prev
+        </Button>
+        <span className="text-[11px] text-on-surface-variant">
+          Page {page}/{totalPages}
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={page >= totalPages}
+          onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+        >
+          Next
+        </Button>
+      </div>
     </div>
   );
 }
@@ -675,93 +728,125 @@ function formatCompareMetric(n: number | null | undefined): string {
   return String(n);
 }
 
-function deltaAB(a: number | null, b: number | null): string {
-  if (a == null || b == null) {
-    return '—';
+type ComparePreference = 'lower' | 'higher' | 'none';
+type CompareLabel = 'A' | 'B' | 'C' | 'D';
+type CompareSlot = { label: CompareLabel; execution: QueryExecution };
+
+function getPlanRootNode(plan: unknown): Record<string, unknown> | null {
+  if (!plan || typeof plan !== 'object') {
+    return null;
   }
-  const d = a - b;
-  if (d === 0) {
-    return '0';
+  const raw = plan as Record<string, unknown>;
+  if (raw.Plan && typeof raw.Plan === 'object') {
+    return raw.Plan as Record<string, unknown>;
   }
-  return d > 0 ? `+${d}` : String(d);
+  return raw;
 }
 
-/** `lower`: thấp hơn = tốt hơn (run, plan, cost). `neutral`: chỉ so cao/thấp (rows). */
-function compareRelationLabel(
-  a: number | null,
-  b: number | null,
-  mode: 'lower' | 'neutral',
-): string {
-  if (a == null || b == null) {
-    return '—';
+function readScanRows(execution: QueryExecution): number | null {
+  const root = getPlanRootNode(execution.executionPlan?.plan);
+  if (!root) {
+    return null;
   }
-  if (a === b) {
-    return 'Bằng nhau';
+
+  const actualRows =
+    typeof root['Actual Rows'] === 'number' && Number.isFinite(root['Actual Rows'])
+      ? root['Actual Rows']
+      : null;
+  const actualLoops =
+    typeof root['Actual Loops'] === 'number' && Number.isFinite(root['Actual Loops'])
+      ? root['Actual Loops']
+      : 1;
+  if (actualRows != null) {
+    return Math.round(actualRows * actualLoops);
   }
-  if (mode === 'neutral') {
-    return a > b ? 'A cao hơn' : 'B cao hơn';
-  }
-  return a > b ? 'B tốt hơn' : 'A tốt hơn';
+
+  const planRows =
+    typeof root['Plan Rows'] === 'number' && Number.isFinite(root['Plan Rows'])
+      ? root['Plan Rows']
+      : null;
+  return planRows != null ? Math.round(planRows) : null;
 }
 
-function ComparePlanMetricsTable({ execA, execB }: { execA: QueryExecution; execB: QueryExecution }) {
-  const runA = execA.durationMs ?? null;
-  const runB = execB.durationMs ?? null;
-  const rowsA = execA.rowCount ?? null;
-  const rowsB = execB.rowCount ?? null;
-  const planA =
-    execA.executionPlan?.actualTime != null ? Math.round(execA.executionPlan.actualTime) : null;
-  const planB =
-    execB.executionPlan?.actualTime != null ? Math.round(execB.executionPlan.actualTime) : null;
-  const costA =
-    execA.executionPlan?.totalCost != null ? Math.round(execA.executionPlan.totalCost) : null;
-  const costB =
-    execB.executionPlan?.totalCost != null ? Math.round(execB.executionPlan.totalCost) : null;
+function findBestIndices(values: Array<number | null>, preference: ComparePreference): Set<number> {
+  if (preference === 'none') {
+    return new Set();
+  }
+  const candidates = values
+    .map((value, index) => ({ value, index }))
+    .filter((entry): entry is { value: number; index: number } => entry.value != null);
+  if (candidates.length === 0) {
+    return new Set();
+  }
+  const bestValue =
+    preference === 'lower'
+      ? Math.min(...candidates.map((c) => c.value))
+      : Math.max(...candidates.map((c) => c.value));
+  return new Set(candidates.filter((c) => c.value === bestValue).map((c) => c.index));
+}
 
+function ComparePlanMetricsTable({ items }: { items: CompareSlot[] }) {
   const rows: Array<{
     key: string;
     label: string;
-    a: string;
-    b: string;
-    d: string;
-    note: string;
-    mode: 'lower' | 'neutral';
+    values: Array<number | null>;
+    display: string[];
+    preference: ComparePreference;
   }> = [
     {
       key: 'run',
       label: 'Run (ms)',
-      a: formatCompareMetric(runA),
-      b: formatCompareMetric(runB),
-      d: deltaAB(runA, runB),
-      note: compareRelationLabel(runA, runB, 'lower'),
-      mode: 'lower',
+      values: items.map((item) => item.execution.durationMs ?? null),
+      display: items.map((item) => formatCompareMetric(item.execution.durationMs ?? null)),
+      preference: 'lower',
     },
     {
       key: 'rows',
       label: 'Rows',
-      a: formatCompareMetric(rowsA),
-      b: formatCompareMetric(rowsB),
-      d: deltaAB(rowsA, rowsB),
-      note: compareRelationLabel(rowsA, rowsB, 'neutral'),
-      mode: 'neutral',
+      values: items.map((item) => item.execution.rowCount ?? null),
+      display: items.map((item) => formatCompareMetric(item.execution.rowCount ?? null)),
+      preference: 'none',
+    },
+    {
+      key: 'scan-rows',
+      label: 'Scan rows',
+      values: items.map((item) => readScanRows(item.execution)),
+      display: items.map((item) => formatCompareMetric(readScanRows(item.execution))),
+      preference: 'lower',
     },
     {
       key: 'plan',
       label: 'Plan (ms)',
-      a: formatCompareMetric(planA),
-      b: formatCompareMetric(planB),
-      d: deltaAB(planA, planB),
-      note: compareRelationLabel(planA, planB, 'lower'),
-      mode: 'lower',
+      values: items.map((item) =>
+        item.execution.executionPlan?.actualTime != null
+          ? Math.round(item.execution.executionPlan.actualTime)
+          : null,
+      ),
+      display: items.map((item) =>
+        formatCompareMetric(
+          item.execution.executionPlan?.actualTime != null
+            ? Math.round(item.execution.executionPlan.actualTime)
+            : null,
+        ),
+      ),
+      preference: 'lower',
     },
     {
       key: 'cost',
       label: 'Cost',
-      a: formatCompareMetric(costA),
-      b: formatCompareMetric(costB),
-      d: deltaAB(costA, costB),
-      note: compareRelationLabel(costA, costB, 'lower'),
-      mode: 'lower',
+      values: items.map((item) =>
+        item.execution.executionPlan?.totalCost != null
+          ? Math.round(item.execution.executionPlan.totalCost)
+          : null,
+      ),
+      display: items.map((item) =>
+        formatCompareMetric(
+          item.execution.executionPlan?.totalCost != null
+            ? Math.round(item.execution.executionPlan.totalCost)
+            : null,
+        ),
+      ),
+      preference: 'lower',
     },
   ];
 
@@ -771,44 +856,35 @@ function ComparePlanMetricsTable({ execA, execB }: { execA: QueryExecution; exec
         <TableHeader>
           <TableRow>
             <TableHead className="w-[28%]">Metric</TableHead>
-            <TableHead className="tabular-nums">A</TableHead>
-            <TableHead className="tabular-nums">B</TableHead>
-            <TableHead className="tabular-nums text-on-surface-variant">Δ A−B</TableHead>
-            <TableHead className="min-w-[7rem]">So sánh</TableHead>
+            {items.map((item) => (
+              <TableHead key={item.label} className="tabular-nums">
+                {item.label}
+              </TableHead>
+            ))}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.key}>
-              <TableCell className="text-xs font-medium text-on-surface">{row.label}</TableCell>
-              <TableCell className="font-mono text-xs tabular-nums text-on-surface">{row.a}</TableCell>
-              <TableCell className="font-mono text-xs tabular-nums text-on-surface">{row.b}</TableCell>
-              <TableCell className="font-mono text-xs tabular-nums text-on-surface-variant">{row.d}</TableCell>
-              <TableCell className="text-[11px] text-on-surface-variant">
-                {row.note === 'Bằng nhau' ? (
-                  row.note
-                ) : row.note === '—' ? (
-                  row.note
-                ) : row.mode === 'neutral' ? (
-                  <span>{row.note}</span>
-                ) : (
-                  <span
+          {rows.map((row) => {
+            const winners = findBestIndices(row.values, row.preference);
+            return (
+              <TableRow key={row.key}>
+                <TableCell className="text-xs font-medium text-on-surface">{row.label}</TableCell>
+                {row.display.map((value, index) => (
+                  <TableCell
+                    key={`${row.key}-${items[index]?.label ?? index}`}
                     className={cn(
-                      row.note === 'A tốt hơn' && 'font-medium text-green-400/90',
-                      row.note === 'B tốt hơn' && 'font-medium text-green-400/90',
+                      'font-mono text-xs tabular-nums text-on-surface',
+                      winners.has(index) && 'bg-green-500/15 font-semibold text-green-300',
                     )}
                   >
-                    {row.note}
-                  </span>
-                )}
-              </TableCell>
-            </TableRow>
-          ))}
+                    {value}
+                  </TableCell>
+                ))}
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
-      <div className="border-t border-outline-variant/10 bg-surface-container-low/80 px-3 py-1.5 text-[10px] text-outline">
-        Δ = A − B. Run / Plan / Cost: thấp hơn thường tốt hơn. Rows: chỉ so sánh độ lớn.
-      </div>
     </div>
   );
 }
@@ -948,8 +1024,9 @@ function SideBySideComparePanel({
   challengeVersionId?: string | null;
 }) {
   const viewerUserId = useAuthStore((s) => s.user?.id ?? null);
-  const [pickA, setPickA] = useState('');
-  const [pickB, setPickB] = useState('');
+  const compareLabels: CompareLabel[] = ['A', 'B', 'C', 'D'];
+  const [picks, setPicks] = useState<string[]>(['', '', '', '']);
+  const [activeSlotCount, setActiveSlotCount] = useState(2);
 
   const executions = useMemo(() => {
     return [...queryHistory]
@@ -958,39 +1035,77 @@ function SideBySideComparePanel({
   }, [queryHistory]);
 
   useEffect(() => {
-    if (executions.length === 0) {
-      setPickA('');
-      setPickB('');
-      return;
-    }
-
-    setPickA((prev) => (executions.some((e) => e.id === prev) ? prev : executions[0].id));
+    const available = executions.map((e) => e.id);
+    setPicks((prev) => {
+      const next = [...prev];
+      const used = new Set<string>();
+      for (let i = 0; i < compareLabels.length; i += 1) {
+        const current = next[i];
+        if (current && available.includes(current) && !used.has(current)) {
+          used.add(current);
+          continue;
+        }
+        const fallback = available.find((id) => !used.has(id)) ?? '';
+        next[i] = fallback;
+        if (fallback) used.add(fallback);
+      }
+      return next;
+    });
   }, [executions]);
 
   useEffect(() => {
-    if (executions.length < 2) {
-      setPickB('');
-      return;
-    }
+    setActiveSlotCount((prev) => Math.min(Math.max(2, prev), compareLabels.length));
+  }, []);
 
-    setPickB((prev) => {
-      if (!pickA) {
-        return executions[1]?.id ?? '';
-      }
-      if (prev && prev !== pickA && executions.some((e) => e.id === prev)) {
-        return prev;
-      }
-      return executions.find((e) => e.id !== pickA)?.id ?? executions[1]?.id ?? '';
-    });
-  }, [executions, pickA]);
-
-  const execA = executions.find((e) => e.id === pickA) ?? null;
-  const execB = executions.find((e) => e.id === pickB) ?? null;
+  const selectedItems = useMemo(() => {
+    return compareLabels.reduce<CompareSlot[]>((acc, label, index) => {
+        if (index >= activeSlotCount) {
+          return acc;
+        }
+        const id = picks[index];
+        const execution = executions.find((e) => e.id === id);
+        if (execution) {
+          acc.push({ label, execution });
+        }
+        return acc;
+      }, []);
+  }, [activeSlotCount, executions, picks]);
 
   const introHint = 'Plan / timing · History';
 
   const selectClass =
-    'mt-1 w-full rounded-lg border border-outline-variant/20 bg-surface-container-high px-2 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30';
+    'w-full appearance-none rounded-lg border border-outline-variant/20 bg-surface-container-high pl-2 pr-8 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30';
+
+  const addCompareSlot = () => {
+    setActiveSlotCount((prev) => {
+      if (prev >= compareLabels.length) {
+        return prev;
+      }
+      const nextCount = prev + 1;
+      const nextIndex = nextCount - 1;
+      setPicks((oldPicks) => {
+        const nextPicks = [...oldPicks];
+        const used = new Set(nextPicks.slice(0, prev).filter(Boolean));
+        const candidate = executions.find((e) => !used.has(e.id))?.id ?? '';
+        nextPicks[nextIndex] = candidate;
+        return nextPicks;
+      });
+      return nextCount;
+    });
+  };
+
+  const removeCompareSlot = (slotIndex: number) => {
+    if (slotIndex < 2) return;
+    setPicks((oldPicks) => {
+      const next = [...oldPicks];
+      for (let i = slotIndex; i < activeSlotCount - 1; i += 1) {
+        next[i] = next[i + 1] ?? '';
+      }
+      next[Math.max(0, activeSlotCount - 1)] = '';
+      return next;
+    });
+    setActiveSlotCount((prev) => Math.max(2, prev - 1));
+  };
 
   return (
     <div className="flex-1 overflow-auto p-4">
@@ -1002,7 +1117,23 @@ function SideBySideComparePanel({
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-sm font-medium text-on-surface">So sánh</p>
-            <p className="text-[11px] text-on-surface-variant">{introHint}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-[11px] text-on-surface-variant">{introHint}</p>
+              <button
+                type="button"
+                className={cn(
+                  'inline-flex h-5 w-5 items-center justify-center rounded border text-on-surface-variant transition-colors',
+                  activeSlotCount < compareLabels.length
+                    ? 'border-outline-variant/20 hover:bg-surface-container-high hover:text-on-surface'
+                    : 'cursor-not-allowed border-outline-variant/10 opacity-40',
+                )}
+                onClick={addCompareSlot}
+                disabled={activeSlotCount >= compareLabels.length}
+                title="Thêm 1 query compare"
+              >
+                <span className="material-symbols-outlined text-[14px] leading-none">add</span>
+              </button>
+            </div>
           </div>
 
           {executions.length < 2 ? (
@@ -1010,64 +1141,70 @@ function SideBySideComparePanel({
               Cần thêm ít nhất 1 lần chạy trong History.
             </div>
           ) : (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="block text-[11px] font-medium text-on-surface">
-                A
-                <select className={selectClass} value={pickA} onChange={(e) => setPickA(e.target.value)}>
-                  {executions.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {formatRelativeTime(e.createdAt)} · {e.durationMs ?? '—'}ms · {truncateSql(e.sql, 48)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-[11px] font-medium text-on-surface">
-                B
-                <select className={selectClass} value={pickB} onChange={(e) => setPickB(e.target.value)}>
-                  {executions
-                    .filter((e) => e.id !== pickA)
-                    .map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {formatRelativeTime(e.createdAt)} · {e.durationMs ?? '—'}ms · {truncateSql(e.sql, 48)}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </div>
+            <>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {compareLabels.slice(0, activeSlotCount).map((label, slotIndex) => {
+                const current = picks[slotIndex] ?? '';
+                const blocked = new Set(picks.filter((id, i) => i !== slotIndex && id));
+                return (
+                  <div key={label} className="relative">
+                  <label className="block">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-md bg-surface-container-high px-1.5 text-[11px] font-semibold text-on-surface-variant">
+                        {label}
+                      </span>
+                    <div className="relative flex-1">
+                      <select
+                        className={selectClass}
+                        value={current}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPicks((prev) => {
+                            const next = [...prev];
+                            for (let i = 0; i < next.length; i += 1) {
+                              if (i !== slotIndex && value && next[i] === value) {
+                                next[i] = '';
+                              }
+                            }
+                            next[slotIndex] = value;
+                            return next;
+                          });
+                        }}
+                      >
+                        <option value="">Không chọn</option>
+                        {executions
+                          .filter((e) => !blocked.has(e.id) || e.id === current)
+                          .map((e) => (
+                            <option key={e.id} value={e.id}>
+                              {formatRelativeTime(e.createdAt)} · {e.durationMs ?? '—'}ms · {truncateSql(e.sql, 48)}
+                            </option>
+                          ))}
+                      </select>
+                      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-on-surface-variant">
+                        <span className="material-symbols-outlined block text-[16px] leading-none">expand_more</span>
+                      </span>
+                    </div>
+                    </div>
+                  </label>
+                  {slotIndex >= 2 ? (
+                    <button
+                      type="button"
+                      className="absolute -right-1 -top-1 z-10 inline-flex h-4 w-4 items-center justify-center rounded-full border border-red-300/30 bg-red-400/8 text-red-100/85 hover:bg-red-400/14"
+                      onClick={() => removeCompareSlot(slotIndex)}
+                      title={`Xóa slot ${label}`}
+                    >
+                      <span className="material-symbols-outlined text-[11px] leading-none">remove</span>
+                    </button>
+                  ) : null}
+                  </div>
+                );
+              })}
+              </div>
+            </>
           )}
         </div>
 
-        {execA && execB ? (
-          <div className="space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-outline">A</span>
-                  <StatusBadge status={execA.status} />
-                </div>
-                <p className="mt-1 font-mono text-[10px] text-on-surface-variant" title={execA.sql}>
-                  {truncateSql(execA.sql.trim(), 96) || '—'}
-                </p>
-                {execA.errorMessage ? (
-                  <p className="mt-1 text-[10px] text-error">{execA.errorMessage}</p>
-                ) : null}
-              </div>
-              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-outline">B</span>
-                  <StatusBadge status={execB.status} />
-                </div>
-                <p className="mt-1 font-mono text-[10px] text-on-surface-variant" title={execB.sql}>
-                  {truncateSql(execB.sql.trim(), 96) || '—'}
-                </p>
-                {execB.errorMessage ? (
-                  <p className="mt-1 text-[10px] text-error">{execB.errorMessage}</p>
-                ) : null}
-              </div>
-            </div>
-            <ComparePlanMetricsTable execA={execA} execB={execB} />
-          </div>
-        ) : null}
+        {selectedItems.length >= 2 ? <ComparePlanMetricsTable items={selectedItems} /> : null}
       </div>
     </div>
   );
@@ -1531,6 +1668,7 @@ export default function LabPage() {
   const { mutate: executeQuery } = useExecuteQuery();
   const { mutate: explainQuery } = useExplainQuery();
   const queryClient = useQueryClient();
+  const { data: persistedHistoryPage } = useQueryHistory(sessionId, 1, 100);
 
   const {
     data: session,
@@ -1757,6 +1895,41 @@ export default function LabPage() {
 
     hydratedEditorSessionIdRef.current = sessionId;
   }, [hydrateEditorTabs, persistedEditorState, sessionId]);
+
+  useEffect(() => {
+    const persistedItems = persistedHistoryPage?.items ?? [];
+    if (!sessionId || persistedItems.length === 0) {
+      return;
+    }
+
+    useLabStore.setState((state) => {
+      const current = state.queryHistory ?? [];
+      const merged = [...current];
+      const seen = new Set(current.map((item) => item.id));
+
+      for (const item of persistedItems) {
+        if (!seen.has(item.id)) {
+          merged.push(item);
+          seen.add(item.id);
+        }
+      }
+
+      merged.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+      const sameLength = merged.length === current.length;
+      const unchanged =
+        sameLength && merged.every((item, index) => item.id === current[index]?.id);
+
+      if (unchanged) {
+        return state;
+      }
+
+      return {
+        ...state,
+        queryHistory: merged.slice(0, 100),
+      };
+    });
+  }, [persistedHistoryPage, sessionId]);
 
   useEffect(() => {
     if (!sessionId || hydratedEditorSessionIdRef.current !== sessionId) {
@@ -2176,7 +2349,7 @@ export default function LabPage() {
                 challengeVersionId={session?.challengeVersionId ?? null}
               />
             )}
-            {activeTab === 'history' && <QueryHistoryPanel />}
+            {activeTab === 'history' && <QueryHistoryPanel sessionId={sessionId} />}
             {activeTab === 'schema' && <SchemaPanel sessionId={sessionId} />}
             {activeTab === 'schemaDiff' && (
               <SchemaDiffPanel
