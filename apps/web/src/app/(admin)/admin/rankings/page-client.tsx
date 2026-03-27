@@ -40,6 +40,37 @@ const EMPTY_GLOBAL: Awaited<ReturnType<typeof adminApi.globalLeaderboard>> = {
 };
 const EMPTY_CHALLENGE_LEADERS: Awaited<ReturnType<typeof challengesApi.getLeaderboard>> = [];
 
+function LeaderboardUserCell({
+  displayName,
+  username,
+  avatarUrl,
+}: {
+  displayName: string;
+  username: string;
+  avatarUrl?: string | null;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element -- presigned / external avatar URL from API
+        <img
+          src={avatarUrl}
+          alt={displayName}
+          className="h-8 w-8 shrink-0 rounded-full border border-outline-variant object-cover"
+        />
+      ) : (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-outline-variant bg-surface-container-high text-xs font-semibold text-on-surface">
+          {generateInitials(displayName)}
+        </div>
+      )}
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-on-surface">{displayName}</p>
+        <p className="truncate text-xs text-on-surface-variant">@{username}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminRankingsPage(_props: ClientPageProps) {
   const [activeTab, setActiveTab] = useState<RankingsTab>('global');
   const [period, setPeriod] = useState<LeaderboardPeriod>('alltime');
@@ -198,17 +229,11 @@ export default function AdminRankingsPage(_props: ClientPageProps) {
                       #{entry.rank}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-container-high text-xs font-semibold text-on-surface">
-                          {generateInitials(entry.displayName)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-on-surface">
-                            {entry.displayName}
-                          </p>
-                          <p className="truncate text-xs text-on-surface-variant">@{entry.username}</p>
-                        </div>
-                      </div>
+                      <LeaderboardUserCell
+                        displayName={entry.displayName}
+                        username={entry.username}
+                        avatarUrl={entry.avatarUrl}
+                      />
                     </TableCell>
                     <TableCell className="font-mono text-sm text-secondary">
                       {entry.points.toLocaleString()}
@@ -298,17 +323,11 @@ export default function AdminRankingsPage(_props: ClientPageProps) {
                       #{entry.rank}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-container-high text-xs font-semibold text-on-surface">
-                          {generateInitials(entry.displayName)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-on-surface">
-                            {entry.displayName}
-                          </p>
-                          <p className="truncate text-xs text-on-surface-variant">@{entry.username}</p>
-                        </div>
-                      </div>
+                      <LeaderboardUserCell
+                        displayName={entry.displayName}
+                        username={entry.username}
+                        avatarUrl={entry.avatarUrl}
+                      />
                     </TableCell>
                     <TableCell className="font-mono text-sm text-secondary">
                       <div>{entry.bestDurationMs != null ? `${entry.bestDurationMs} ms` : '—'}</div>

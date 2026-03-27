@@ -24,7 +24,10 @@ export interface CreateChallengeResult {
 export interface PublishChallengeVersionResult extends ChallengeVersionRow {}
 
 export interface ListUsersResult {
-  items: (Pick<UserRow, 'id' | 'email' | 'username' | 'displayName' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'> & { roles: string[] })[];
+  items: (Pick<
+    UserRow,
+    'id' | 'email' | 'username' | 'displayName' | 'avatarUrl' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'
+  > & { roles: string[] })[];
   total: number;
   page: number;
   limit: number;

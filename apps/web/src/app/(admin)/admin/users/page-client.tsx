@@ -460,9 +460,18 @@ export default function AdminUsersPage(_props: ClientPageProps) {
                   <TableRow key={user.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-outline-variant bg-surface-container-highest text-xs font-bold font-headline text-on-surface">
-                          {generateInitials(user.displayName ?? user.username)}
-                        </div>
+                        {user.avatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- presigned / external avatar URL from API
+                          <img
+                            src={user.avatarUrl}
+                            alt={user.displayName ?? user.username}
+                            className="h-8 w-8 shrink-0 rounded-full border border-outline-variant object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-outline-variant bg-surface-container-highest text-xs font-bold font-headline text-on-surface">
+                            {generateInitials(user.displayName ?? user.username)}
+                          </div>
+                        )}
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium text-on-surface">
                             {user.displayName ?? user.username}

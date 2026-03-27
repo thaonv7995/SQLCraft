@@ -153,11 +153,17 @@ export async function deleteAdminChallenge(challengeId: string): Promise<void> {
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export async function listUsers(query: ListUsersQuery): Promise<ListUsersResult> {
-  const { items, total } = await usersRepository.listUsers(query.page, query.limit, {
+  const { items: rawItems, total } = await usersRepository.listUsers(query.page, query.limit, {
     status: query.status,
     search: query.search,
     role: query.role,
   });
+  const items = await Promise.all(
+    rawItems.map(async (u) => ({
+      ...u,
+      avatarUrl: await resolvePublicAvatarUrl(u.avatarUrl),
+    })),
+  );
   return {
     items,
     total,

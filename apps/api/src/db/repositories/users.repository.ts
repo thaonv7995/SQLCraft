@@ -143,7 +143,10 @@ export class UsersRepository {
       role?: string;
     },
   ): Promise<{
-    items: (Pick<UserRow, 'id' | 'email' | 'username' | 'displayName' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'> & { roles: string[] })[];
+    items: (Pick<
+      UserRow,
+      'id' | 'email' | 'username' | 'displayName' | 'avatarUrl' | 'status' | 'provider' | 'lastLoginAt' | 'createdAt'
+    > & { roles: string[] })[];
     total: number;
   }> {
     const offset = (page - 1) * limit;
@@ -201,6 +204,7 @@ export class UsersRepository {
           email: schema.users.email,
           username: schema.users.username,
           displayName: schema.users.displayName,
+          avatarUrl: schema.users.avatarUrl,
           status: schema.users.status,
           provider: schema.users.provider,
           lastLoginAt: schema.users.lastLoginAt,
