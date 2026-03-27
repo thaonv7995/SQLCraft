@@ -17,6 +17,7 @@ import type {
 import {
   AdminConfigSchema,
   CreateAdminUserSchema,
+  CreateChallengeSchema,
   ImportCanonicalDatabaseSchema,
   ListSystemJobsQuerySchema,
   UpdateAdminUserSchema,
@@ -27,7 +28,9 @@ import {
   deleteDatabase,
   deleteAdminUser,
   createChallenge,
+  deleteAdminChallenge,
   publishChallengeVersion,
+  updateAdminChallenge,
   listUsers,
   updateAdminUser,
   updateUserStatus,
@@ -58,6 +61,23 @@ export async function publishChallengeVersionHandler(
 ): Promise<void> {
   const result = await publishChallengeVersion(request.params.id);
   reply.send(success(result, MESSAGES.CONTENT_PUBLISHED));
+}
+
+export async function updateAdminChallengeHandler(
+  request: FastifyRequest<{ Params: AdminIdParams; Body: CreateChallengeBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = CreateChallengeSchema.parse(request.body);
+  const result = await updateAdminChallenge(request.params.id, body);
+  reply.send(success(result, 'Challenge updated successfully'));
+}
+
+export async function deleteAdminChallengeHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  await deleteAdminChallenge(request.params.id);
+  reply.status(204).send();
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────

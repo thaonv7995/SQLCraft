@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DifficultyBadge, StatusBadge } from '@/components/ui/badge';
 import {
   Table,
@@ -17,13 +17,40 @@ import {
 } from '@/components/ui/table';
 import { ChallengePassMetricsPanel } from '@/components/challenge/challenge-pass-metrics';
 import { getChallengePassCriteriaLines } from '@/lib/challenge-pass-criteria';
-import { challengesApi } from '@/lib/api';
+import { adminApi, challengesApi } from '@/lib/api';
+import { Button } from '@/components/ui/button';
 import { cn, formatDate, generateInitials } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
 export default function AdminChallengeDetailPage() {
   const params = useParams();
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const challengeId = typeof params.challengeId === 'string' ? params.challengeId : '';
   const [rankingOpen, setRankingOpen] = useState(false);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => adminApi.deleteChallenge(challengeId),
+    onSuccess: () => {
+      toast.success('Challenge deleted');
+      queryClient.invalidateQueries({ queryKey: ['admin-challenge-review'] });
+      queryClient.invalidateQueries({ queryKey: ['challenges-published'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-challenges-catalog'] });
+      router.push('/admin/content');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const handleDelete = () => {
+    if (
+      !window.confirm(
+        'Delete this challenge permanently? This only works if nobody has submitted attempts. This cannot be undone.',
+      )
+    ) {
+      return;
+    }
+    deleteMutation.mutate();
+  };
 
   const draftQuery = useQuery({
     queryKey: ['admin-challenge-draft', challengeId],
@@ -99,19 +126,40 @@ export default function AdminChallengeDetailPage() {
             </span>
           </div>
         </div>
-        {d.status === 'published' && d.publishedVersionId ? (
-          <button
-            type="button"
-            onClick={() => setRankingOpen(true)}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Link
+            href={`/admin/content/${challengeId}/edit`}
             className={cn(
-              'inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-high px-4 text-sm font-medium text-on-surface transition-all duration-150',
+              'inline-flex h-9 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-high px-4 text-sm font-medium text-on-surface transition-all duration-150',
               'hover:bg-surface-container-highest active:bg-surface-bright',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
             )}
           >
-            View ranking
-          </button>
-        ) : null}
+            Edit
+          </Link>
+          <Button
+            type="button"
+            variant="destructive"
+            className="h-9"
+            disabled={deleteMutation.isPending}
+            onClick={handleDelete}
+          >
+            {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+          </Button>
+          {d.status === 'published' && d.publishedVersionId ? (
+            <button
+              type="button"
+              onClick={() => setRankingOpen(true)}
+              className={cn(
+                'inline-flex h-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-high px-4 text-sm font-medium text-on-surface transition-all duration-150',
+                'hover:bg-surface-container-highest active:bg-surface-bright',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+              )}
+            >
+              View ranking
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">

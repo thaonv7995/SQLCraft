@@ -1850,3 +1850,70 @@ export async function reviewChallengeVersion(
 
   return reviewed;
 }
+
+/** Admin: update challenge row + latest version content in place (same version id; attempts stay valid). */
+export async function adminUpdateChallenge(
+  challengeId: string,
+  body: CreateChallengeBody,
+): Promise<{ challenge: ChallengeRow; version: ChallengeVersionRow }> {
+  const existing = await challengesRepository.findById(challengeId);
+  if (!existing) {
+    throw new NotFoundError('Challenge not found');
+  }
+
+  const validation = await buildDraftValidation({ ...body, challengeId });
+  if (!validation.valid) {
+    throw new ValidationError(validation.errors.join(' '));
+  }
+  const normalized = normalizeChallengeDraftPayload(body);
+
+  const editable = await challengesRepository.findEditableChallengeById(challengeId);
+  if (!editable) {
+    throw new NotFoundError('Challenge not found');
+  }
+
+  const challenge =
+    (await challengesRepository.updateChallenge(challengeId, {
+      databaseId: normalized.databaseId,
+      slug: normalized.slug,
+      title: normalized.title,
+      description: normalized.description,
+      difficulty: normalized.difficulty,
+      sortOrder: normalized.sortOrder,
+      points: normalized.points,
+    })) ?? existing;
+
+  const version = await challengesRepository.updateVersion(editable.versionId, {
+    problemStatement: normalized.problemStatement,
+    hintText: normalized.hintText ?? null,
+    expectedResultColumns: normalized.expectedResultColumns as unknown,
+    referenceSolution: normalized.referenceSolution,
+    validatorType: normalized.validatorType,
+    validatorConfig: normalized.validatorConfig as unknown,
+  });
+  if (!version) {
+    throw new NotFoundError('Challenge version not found');
+  }
+
+  return { challenge, version };
+}
+
+/** Admin: hard-delete challenge (cascade versions). Blocked if any attempts reference a version. */
+export async function adminDeleteChallenge(challengeId: string): Promise<void> {
+  const existing = await challengesRepository.findById(challengeId);
+  if (!existing) {
+    throw new NotFoundError('Challenge not found');
+  }
+
+  const attemptCount = await challengesRepository.countAttemptsForChallenge(challengeId);
+  if (attemptCount > 0) {
+    throw new ValidationError(
+      `Cannot delete this challenge: ${attemptCount} submission(s) exist. Remove attempts in a dev database or keep the challenge.`,
+    );
+  }
+
+  const deleted = await challengesRepository.deleteChallenge(challengeId);
+  if (!deleted) {
+    throw new NotFoundError('Challenge not found');
+  }
+}

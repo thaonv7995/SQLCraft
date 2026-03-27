@@ -1888,6 +1888,13 @@ export const adminApi = {
   createChallenge: (payload: AdminCreateChallengePayload) =>
     api.post<AdminCreateChallengeResult>('/admin/challenges', payload).then((r) => r.data),
 
+  updateChallenge: (challengeId: string, payload: AdminCreateChallengePayload) =>
+    api
+      .patch<AdminCreateChallengeResult>(`/admin/challenges/${challengeId}`, payload)
+      .then((r) => r.data),
+
+  deleteChallenge: (challengeId: string) => api.delete(`/admin/challenges/${challengeId}`),
+
   listLessonVersions: (lessonId: string) =>
     api
       .get<LessonVersionSummary[]>(`/admin/lessons/${lessonId}/versions`)

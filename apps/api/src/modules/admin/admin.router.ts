@@ -17,7 +17,9 @@ import {
   deleteAdminUserHandler,
   deleteDatabaseHandler,
   createChallengeHandler,
+  deleteAdminChallengeHandler,
   publishChallengeVersionHandler,
+  updateAdminChallengeHandler,
   listUsersHandler,
   updateAdminUserHandler,
   updateUserStatusHandler,
@@ -64,6 +66,69 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     createChallengeHandler,
+  );
+
+  fastify.patch<{ Params: AdminIdParams; Body: CreateChallengeBody }>(
+    '/v1/admin/challenges/:id',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Update challenge and latest version (admin)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          required: ['databaseId', 'slug', 'title', 'problemStatement', 'validatorConfig'],
+          properties: {
+            databaseId: { type: 'string', format: 'uuid' },
+            slug: { type: 'string' },
+            title: { type: 'string' },
+            description: { type: 'string' },
+            difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
+            sortOrder: { type: 'integer', default: 0 },
+            points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
+            problemStatement: { type: 'string' },
+            hintText: { type: 'string' },
+            referenceSolution: { type: 'string' },
+            expectedResultColumns: { type: 'array', items: { type: 'string' } },
+            validatorType: { type: 'string', default: 'result_set' },
+            validatorConfig: {
+              type: 'object',
+              required: ['baselineDurationMs', 'maxTotalCost'],
+              properties: {
+                baselineDurationMs: { type: 'number' },
+                maxTotalCost: { type: 'number' },
+                requiresIndexOptimization: { type: 'boolean' },
+              },
+            },
+          },
+        },
+      },
+    },
+    updateAdminChallengeHandler,
+  );
+
+  fastify.delete<{ Params: AdminIdParams }>(
+    '/v1/admin/challenges/:id',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Delete challenge (no attempts only)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    deleteAdminChallengeHandler,
   );
 
   fastify.post<{ Params: AdminIdParams }>(

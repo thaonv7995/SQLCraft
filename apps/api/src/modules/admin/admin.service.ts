@@ -1,5 +1,9 @@
 import bcrypt from 'bcryptjs';
 import {
+  adminDeleteChallenge,
+  adminUpdateChallenge,
+} from '../challenges/challenges.service';
+import {
   challengesRepository,
   usersRepository,
   sessionsRepository,
@@ -135,6 +139,17 @@ export async function publishChallengeVersion(
   if (!published) throw new NotFoundError('Challenge version not found');
 
   return published;
+}
+
+export async function updateAdminChallenge(
+  challengeId: string,
+  body: CreateChallengeBody,
+): Promise<CreateChallengeResult> {
+  return adminUpdateChallenge(challengeId, body);
+}
+
+export async function deleteAdminChallenge(challengeId: string): Promise<void> {
+  await adminDeleteChallenge(challengeId);
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────

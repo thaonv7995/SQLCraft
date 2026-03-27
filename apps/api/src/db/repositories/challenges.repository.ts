@@ -932,4 +932,43 @@ export class ChallengesRepository {
 
     return row ?? null;
   }
+
+  async countAttemptsForChallenge(challengeId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ n: count() })
+      .from(schema.challengeAttempts)
+      .innerJoin(
+        schema.challengeVersions,
+        eq(schema.challengeAttempts.challengeVersionId, schema.challengeVersions.id),
+      )
+      .where(eq(schema.challengeVersions.challengeId, challengeId));
+    return Number(row?.n ?? 0);
+  }
+
+  async deleteChallenge(id: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(schema.challenges)
+      .where(eq(schema.challenges.id, id))
+      .returning({ id: schema.challenges.id });
+    return deleted.length > 0;
+  }
+
+  async updateVersion(
+    versionId: string,
+    data: Partial<{
+      problemStatement: string;
+      hintText: string | null;
+      expectedResultColumns: unknown;
+      referenceSolution: string | null;
+      validatorType: string;
+      validatorConfig: unknown;
+    }>,
+  ): Promise<ChallengeVersionRow | null> {
+    const [row] = await this.db
+      .update(schema.challengeVersions)
+      .set(data)
+      .where(eq(schema.challengeVersions.id, versionId))
+      .returning();
+    return row ?? null;
+  }
 }
