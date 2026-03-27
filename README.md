@@ -44,7 +44,6 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/install.sh)
 ```
-
 What `./install.sh` does:
 
 - Generates/updates `.env.production` from `.env.production.example`
