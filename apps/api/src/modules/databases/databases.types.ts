@@ -1,11 +1,4 @@
-export type DatabaseDomain =
-  | 'ecommerce'
-  | 'fintech'
-  | 'health'
-  | 'iot'
-  | 'social'
-  | 'analytics'
-  | 'other';
+export type { DatabaseDomain } from '../../lib/infer-database-domain';
 
 export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';

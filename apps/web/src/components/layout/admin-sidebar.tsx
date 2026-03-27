@@ -13,7 +13,7 @@ interface NavItem {
 
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin', label: 'Overview', icon: 'dashboard', exact: true },
-  { href: '/admin/content', label: 'Content', icon: 'verified_user' },
+  { href: '/admin/content', label: 'Content', icon: 'quiz' },
   { href: '/admin/databases', label: 'Databases', icon: 'database' },
   { href: '/admin/users', label: 'Users', icon: 'group' },
   { href: '/admin/rankings', label: 'Rankings', icon: 'leaderboard' },

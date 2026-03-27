@@ -30,6 +30,16 @@ export const GlobalLeaderboardQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(50),
 });
 
+export const ListAdminChallengesCatalogQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  databaseId: z.string().uuid().optional(),
+  domain: z
+    .enum(['ecommerce', 'fintech', 'health', 'iot', 'social', 'analytics', 'other'])
+    .optional(),
+  status: z.enum(['draft', 'published', 'archived', 'all']).default('all'),
+});
+
 // Body schemas
 export const SubmitAttemptSchema = z.object({
   learningSessionId: z.string().uuid(),
@@ -91,6 +101,7 @@ export type AdminChallengeVersionParams = z.infer<typeof AdminChallengeVersionPa
 export type ChallengeAttemptsQuery = z.infer<typeof ChallengeAttemptsQuerySchema>;
 export type ChallengeLeaderboardQuery = z.infer<typeof ChallengeLeaderboardQuerySchema>;
 export type GlobalLeaderboardQuery = z.infer<typeof GlobalLeaderboardQuerySchema>;
+export type ListAdminChallengesCatalogQuery = z.infer<typeof ListAdminChallengesCatalogQuerySchema>;
 export type SubmitAttemptBody = z.infer<typeof SubmitAttemptSchema>;
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type CreateChallengeVersionBody = z.infer<typeof CreateChallengeVersionSchema>;

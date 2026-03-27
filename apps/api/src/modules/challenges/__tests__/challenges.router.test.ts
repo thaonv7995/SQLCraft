@@ -13,6 +13,7 @@ const challengeServiceMocks = vi.hoisted(() => ({
   getEditableChallenge: vi.fn(),
   listPublishedChallenges: vi.fn(),
   listReviewChallenges: vi.fn(),
+  listAdminChallengesCatalog: vi.fn(),
   listUserChallenges: vi.fn(),
   listUserAttempts: vi.fn(),
   getChallengeLeaderboard: vi.fn(),
@@ -49,6 +50,13 @@ describe('challenges router HTTP contracts', () => {
     });
     challengeServiceMocks.listPublishedChallenges.mockResolvedValue([]);
     challengeServiceMocks.listReviewChallenges.mockResolvedValue([]);
+    challengeServiceMocks.listAdminChallengesCatalog.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      totalPages: 1,
+    });
     challengeServiceMocks.listUserChallenges.mockResolvedValue([]);
     challengeServiceMocks.listUserAttempts.mockResolvedValue([]);
     challengeServiceMocks.getChallengeLeaderboard.mockResolvedValue([]);
@@ -212,6 +220,38 @@ describe('challenges router HTTP contracts', () => {
       message: 'Global leaderboard retrieved successfully',
       data: [],
     });
+  });
+
+  it('returns the admin challenges catalog for admins', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/challenges/catalog?page=2&limit=10&domain=ecommerce',
+      headers: {
+        authorization: `Bearer ${signToken(['admin'], 'admin-1')}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(challengeServiceMocks.listAdminChallengesCatalog).toHaveBeenCalledWith({
+      page: 2,
+      limit: 10,
+      databaseId: undefined,
+      domain: 'ecommerce',
+      status: 'all',
+    });
+  });
+
+  it('rejects admin challenges catalog for non-admins', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/admin/challenges/catalog',
+      headers: {
+        authorization: `Bearer ${signToken(['user'])}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(challengeServiceMocks.listAdminChallengesCatalog).not.toHaveBeenCalled();
   });
 
   it('enforces the admin role on review endpoints', async () => {

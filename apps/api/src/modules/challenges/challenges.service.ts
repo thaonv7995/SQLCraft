@@ -1,3 +1,5 @@
+import { eq } from 'drizzle-orm';
+import { getDb, schema as dbSchema } from '../../db';
 import {
   challengesRepository,
   sandboxesRepository,
@@ -18,6 +20,10 @@ import type {
   SessionExecutionSummaryRow,
 } from '../../db/repositories';
 import { ForbiddenError, NotFoundError, QueryExecutionFailedError, ValidationError } from '../../lib/errors';
+import {
+  inferDatabaseDomain,
+  type DatabaseDomain,
+} from '../../lib/infer-database-domain';
 import { resolvePublicAvatarUrl } from '../../lib/storage';
 import type { ExplainResult } from '../../services/query-executor';
 import { executeSql, getExplainPlan, validateSql } from '../../services/query-executor';
@@ -25,6 +31,7 @@ import { getSessionSchemaDiff, type SessionSchemaDiffResult } from '../sessions/
 import type {
   CreateChallengeBody,
   CreateChallengeVersionBody,
+  ListAdminChallengesCatalogQuery,
   ReviewChallengeVersionBody,
   SubmitAttemptBody,
   ValidateChallengeDraftBody,
@@ -178,6 +185,10 @@ export interface ChallengeReviewItem extends ChallengeCatalogItem {
     username: string | null;
     displayName: string | null;
   };
+}
+
+export interface AdminChallengeCatalogItem extends ChallengeReviewItem {
+  catalogDomain: DatabaseDomain;
 }
 
 export interface EditableChallengeDetail {
@@ -1502,6 +1513,83 @@ export async function listUserChallenges(userId: string): Promise<ChallengeCatal
 export async function listReviewChallenges(): Promise<ChallengeReviewItem[]> {
   const challenges = await challengesRepository.listChallengesForReview();
   return challenges.map(normalizeReviewRow);
+}
+
+export async function listAdminChallengesCatalog(query: ListAdminChallengesCatalogQuery): Promise<{
+  items: AdminChallengeCatalogItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}> {
+  const db = getDb();
+  let databaseIdsIn: string[] | undefined;
+
+  if (query.domain) {
+    const templates = await db
+      .select({
+        id: dbSchema.schemaTemplates.id,
+        name: dbSchema.schemaTemplates.name,
+        description: dbSchema.schemaTemplates.description,
+      })
+      .from(dbSchema.schemaTemplates)
+      .where(eq(dbSchema.schemaTemplates.status, 'published'));
+
+    const inDomain = templates
+      .filter((t) => inferDatabaseDomain(t.name, t.description) === query.domain)
+      .map((t) => t.id);
+
+    if (query.databaseId) {
+      if (!inDomain.includes(query.databaseId)) {
+        return {
+          items: [],
+          total: 0,
+          page: query.page,
+          limit: query.limit,
+          totalPages: 1,
+        };
+      }
+      databaseIdsIn = [query.databaseId];
+    } else {
+      databaseIdsIn = inDomain;
+      if (databaseIdsIn.length === 0) {
+        return {
+          items: [],
+          total: 0,
+          page: query.page,
+          limit: query.limit,
+          totalPages: 1,
+        };
+      }
+    }
+  } else if (query.databaseId) {
+    databaseIdsIn = [query.databaseId];
+  }
+
+  const statusFilter =
+    query.status === 'all' ? undefined : (query.status as 'draft' | 'published' | 'archived');
+
+  const offset = (query.page - 1) * query.limit;
+  const { items: rows, total } = await challengesRepository.listChallengesAdmin({
+    limit: query.limit,
+    offset,
+    databaseIdsIn,
+    status: statusFilter,
+  });
+
+  const items = rows.map((row) => ({
+    ...normalizeReviewRow(row),
+    catalogDomain: inferDatabaseDomain(row.databaseName ?? '', ''),
+  }));
+  const totalPages = Math.max(1, Math.ceil(total / query.limit));
+
+  return {
+    items,
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages,
+  };
 }
 
 export async function getEditableChallenge(

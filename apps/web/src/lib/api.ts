@@ -911,6 +911,19 @@ export interface Database {
   relationships?: DatabaseRelationship[];
 }
 
+/** Admin paginated catalog (`GET /admin/challenges/catalog`). */
+export interface AdminChallengeCatalogItem extends ChallengeReviewItem {
+  catalogDomain: DatabaseDomain;
+}
+
+export interface AdminChallengesCatalogPage {
+  items: AdminChallengeCatalogItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export interface DatabaseTable {
   name: string;
   role?: 'primary' | 'secondary' | 'junction';
@@ -1149,6 +1162,13 @@ function normalizeChallengeReviewItem(item: ChallengeReviewItem): ChallengeRevie
       username: item.createdBy?.username ?? null,
       displayName: item.createdBy?.displayName ?? item.createdBy?.username ?? null,
     },
+  };
+}
+
+function normalizeAdminChallengeCatalogItem(item: AdminChallengeCatalogItem): AdminChallengeCatalogItem {
+  return {
+    ...normalizeChallengeReviewItem(item),
+    catalogDomain: item.catalogDomain,
   };
 }
 
@@ -1532,6 +1552,18 @@ export const challengesApi = {
       .get<ChallengeReviewItem[]>('/admin/challenges')
       .then((r) => r.data.map(normalizeChallengeReviewItem)),
 
+  listAdminCatalog: (params?: {
+    page?: number;
+    limit?: number;
+    databaseId?: string;
+    domain?: DatabaseDomain;
+    status?: 'draft' | 'published' | 'archived' | 'all';
+  }) =>
+    api.get<AdminChallengesCatalogPage>('/admin/challenges/catalog', { params }).then((r) => ({
+      ...r.data,
+      items: r.data.items.map(normalizeAdminChallengeCatalogItem),
+    })),
+
   publishVersion: (versionId: string) =>
     api.post(`/admin/challenge-versions/${versionId}/publish`).then((r) => r.data),
 
@@ -1748,6 +1780,52 @@ export const usersApi = {
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
+/** POST /admin/challenges — creates a draft challenge and version 1 (admin-only). */
+export interface AdminCreateChallengePayload {
+  databaseId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  sortOrder?: number;
+  points?: number;
+  problemStatement: string;
+  hintText?: string;
+  expectedResultColumns?: string[];
+  referenceSolution?: string;
+  validatorType?: string;
+  validatorConfig?: Record<string, unknown>;
+}
+
+export interface AdminCreateChallengeResult {
+  challenge: {
+    id: string;
+    databaseId: string;
+    slug: string;
+    title: string;
+    description: string | null;
+    difficulty: string;
+    sortOrder: number;
+    points: number;
+    status: string;
+    publishedVersionId: string | null;
+    createdBy: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  version: {
+    id: string;
+    challengeId: string;
+    versionNo: number;
+    problemStatement: string;
+    hintText: string | null;
+    validatorType: string;
+    isPublished: boolean;
+    reviewStatus: string;
+    createdAt: string;
+  };
+}
+
 export const adminApi = {
   getConfig: () => api.get<AdminConfigRecord>('/admin/config').then((r) => r.data),
 
@@ -1797,6 +1875,9 @@ export const adminApi = {
     api
       .delete<DeleteDatabaseResult>(`/admin/databases/${databaseId}`)
       .then((r) => r.data),
+
+  createChallenge: (payload: AdminCreateChallengePayload) =>
+    api.post<AdminCreateChallengeResult>('/admin/challenges', payload).then((r) => r.data),
 
   listLessonVersions: (lessonId: string) =>
     api

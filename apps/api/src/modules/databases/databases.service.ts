@@ -2,6 +2,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
 import { NotFoundError, ValidationError } from '../../lib/errors';
+import { inferDatabaseDomain } from '../../lib/infer-database-domain';
 import { enqueueProvisionSandbox } from '../../lib/queue';
 import type {
   CreateDatabaseSessionBody,
@@ -60,17 +61,6 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-
-function inferDomain(name: string, description: string): DatabaseDomain {
-  const haystack = `${name} ${description}`.toLowerCase();
-  if (/(ecommerce|commerce|retail|order|product|inventory)/.test(haystack)) return 'ecommerce';
-  if (/(fintech|ledger|payment|merchant|bank|fraud|compliance)/.test(haystack)) return 'fintech';
-  if (/(health|patient|ehr|clinical|fhir|prescription)/.test(haystack)) return 'health';
-  if (/(iot|sensor|telemetry|device)/.test(haystack)) return 'iot';
-  if (/(social|community|post|comment|feed)/.test(haystack)) return 'social';
-  if (/(analytics|event|warehouse|report|insight)/.test(haystack)) return 'analytics';
-  return 'other';
 }
 
 function inferDifficulty(tableCount: number): DatabaseDifficulty {
@@ -231,7 +221,7 @@ function buildDatabaseItem(
   const sourceDataset = datasetTemplates.find((dataset) => dataset.size === sourceScale);
   const sourceRowCount = sourceDataset ? sumRowCounts(sourceDataset.rowCounts) : 0;
   const description = schemaTemplate.description ?? `${schemaTemplate.name} training database`;
-  const domain = inferDomain(schemaTemplate.name, description);
+  const domain = inferDatabaseDomain(schemaTemplate.name, description);
 
   return {
     id: schemaTemplate.id,

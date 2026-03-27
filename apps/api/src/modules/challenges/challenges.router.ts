@@ -21,6 +21,7 @@ import {
   getChallengeVersionHandler,
   listPublishedChallengesHandler,
   listReviewChallengesHandler,
+  listAdminChallengesCatalogHandler,
   listUserChallengesHandler,
   listUserAttemptsHandler,
   getChallengeLeaderboardHandler,
@@ -297,6 +298,38 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
       },
     },
     getChallengeLeaderboardContextHandler,
+  );
+
+  fastify.get(
+    '/v1/admin/challenges/catalog',
+    {
+      onRequest: [fastify.authenticate, fastify.authorize(['admin'])],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'List all challenges with pagination (admin)',
+        description:
+          'Filter by database (schema template UUID) and/or inferred catalog domain. Status all|draft|published|archived.',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+            databaseId: { type: 'string', format: 'uuid' },
+            domain: {
+              type: 'string',
+              enum: ['ecommerce', 'fintech', 'health', 'iot', 'social', 'analytics', 'other'],
+            },
+            status: {
+              type: 'string',
+              enum: ['draft', 'published', 'archived', 'all'],
+              default: 'all',
+            },
+          },
+        },
+      },
+    },
+    listAdminChallengesCatalogHandler,
   );
 
   fastify.get(

@@ -8,6 +8,7 @@ import {
   getEditableChallenge,
   listPublishedChallenges,
   listReviewChallenges,
+  listAdminChallengesCatalog,
   listUserChallenges,
   listUserAttempts,
   getChallengeLeaderboard,
@@ -25,6 +26,7 @@ import {
   ChallengeParamsSchema,
   ChallengeVersionParamsSchema,
   GlobalLeaderboardQuerySchema,
+  ListAdminChallengesCatalogQuerySchema,
   SubmitAttemptSchema,
   CreateChallengeSchema,
   CreateChallengeVersionSchema,
@@ -39,6 +41,7 @@ import type {
   ChallengeAttemptsQuery,
   ChallengeLeaderboardQuery,
   GlobalLeaderboardQuery,
+  ListAdminChallengesCatalogQuery,
   SubmitAttemptBody,
   CreateChallengeBody,
   CreateChallengeVersionBody,
@@ -208,4 +211,13 @@ export async function listReviewChallengesHandler(
 ): Promise<void> {
   const challenges = await listReviewChallenges();
   return reply.send(success(challenges, 'Challenge review queue retrieved successfully'));
+}
+
+export async function listAdminChallengesCatalogHandler(
+  request: FastifyRequest<{ Querystring: ListAdminChallengesCatalogQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = ListAdminChallengesCatalogQuerySchema.parse(request.query);
+  const result = await listAdminChallengesCatalog(query);
+  return reply.send(success(result, 'Challenges retrieved successfully'));
 }

@@ -721,6 +721,90 @@ export class ChallengesRepository {
     );
   }
 
+  /**
+   * Paginated admin list of all challenges (any status), optional filter by schema template ids.
+   */
+  async listChallengesAdmin(options: {
+    limit: number;
+    offset: number;
+    databaseIdsIn?: string[];
+    status?: ChallengeRow['status'];
+  }): Promise<{ items: ReviewChallengeRow[]; total: number }> {
+    if (options.databaseIdsIn !== undefined && options.databaseIdsIn.length === 0) {
+      return { items: [], total: 0 };
+    }
+
+    const conditions: ReturnType<typeof eq>[] = [];
+    if (options.databaseIdsIn !== undefined && options.databaseIdsIn.length > 0) {
+      conditions.push(inArray(schema.challenges.databaseId, options.databaseIdsIn));
+    }
+    if (options.status) {
+      conditions.push(eq(schema.challenges.status, options.status));
+    }
+
+    const whereExpr =
+      conditions.length === 0 ? undefined : conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const countBase = this.db.select({ count: count() }).from(schema.challenges);
+    const [countRow] = whereExpr ? await countBase.where(whereExpr) : await countBase;
+    const total = Number(countRow?.count ?? 0);
+
+    if (total === 0) {
+      return { items: [], total: 0 };
+    }
+
+    const listBase = this.db
+      .select({
+        id: schema.challenges.id,
+        databaseId: schema.challenges.databaseId,
+        databaseName: schema.schemaTemplates.name,
+        databaseSlug: schema.schemaTemplates.name,
+        slug: schema.challenges.slug,
+        title: schema.challenges.title,
+        description: schema.challenges.description,
+        difficulty: schema.challenges.difficulty,
+        sortOrder: schema.challenges.sortOrder,
+        status: schema.challenges.status,
+        points: schema.challenges.points,
+        publishedVersionId: schema.challenges.publishedVersionId,
+        createdById: schema.users.id,
+        createdByUsername: schema.users.username,
+        createdByDisplayName: schema.users.displayName,
+        updatedAt: schema.challenges.updatedAt,
+        createdAt: schema.challenges.createdAt,
+      })
+      .from(schema.challenges)
+      .leftJoin(
+        schema.schemaTemplates,
+        eq(schema.challenges.databaseId, schema.schemaTemplates.id),
+      )
+      .leftJoin(schema.users, eq(schema.challenges.createdBy, schema.users.id));
+
+    const filteredList = whereExpr ? listBase.where(whereExpr) : listBase;
+
+    const rows = await filteredList
+      .orderBy(desc(schema.challenges.updatedAt))
+      .limit(options.limit)
+      .offset(options.offset);
+
+    const latestVersionMap = await this.getLatestVersionMap(rows.map((row) => row.id));
+
+    const items: ReviewChallengeRow[] = rows.map((row) => {
+      const latestVersion = latestVersionMap.get(row.id);
+      return {
+        ...row,
+        latestVersionId: latestVersion?.id ?? null,
+        latestVersionNo: latestVersion?.versionNo ?? null,
+        validatorType: latestVersion?.validatorType ?? null,
+        latestVersionReviewStatus: latestVersion?.reviewStatus ?? null,
+        latestVersionReviewNotes: latestVersion?.reviewNotes ?? null,
+        latestVersionReviewedAt: latestVersion?.reviewedAt ?? null,
+      };
+    });
+
+    return { items, total };
+  }
+
   async createChallenge(data: Omit<InsertChallenge, 'id' | 'createdAt' | 'updatedAt'>): Promise<ChallengeRow> {
     const [row] = await this.db.insert(schema.challenges).values(data).returning();
     return row;
