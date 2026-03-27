@@ -89,6 +89,62 @@ function sandboxConnStr(host: string, dbName: string, port = 5432): string {
   return `postgresql://${sandboxUser}:${sandboxPassword}@${host}:${port}/${dbName}`;
 }
 
+type RetryablePgError = {
+  code?: string;
+  message?: string;
+};
+
+function isRetryablePgStartupError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const { code, message } = error as RetryablePgError;
+  if (code && ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', '57P03'].includes(code)) {
+    return true;
+  }
+
+  return typeof message === 'string' && /starting up|connection refused/i.test(message);
+}
+
+async function waitForSandboxTcpReady(params: {
+  containerRef: string;
+  dbName: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  const { containerRef, dbName, timeoutMs = 20_000 } = params;
+  const startedAt = Date.now();
+  let lastError: unknown;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const probePool = new Pool({
+      connectionString: sandboxConnStr(containerRef, dbName),
+      max: 1,
+      connectionTimeoutMillis: 1_500,
+      idleTimeoutMillis: 1_000,
+    });
+
+    try {
+      await probePool.query('SELECT 1');
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isRetryablePgStartupError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } finally {
+      await probePool.end().catch(() => undefined);
+    }
+  }
+
+  const reason =
+    lastError && typeof lastError === 'object' && 'message' in lastError
+      ? String((lastError as { message?: unknown }).message ?? '')
+      : 'timeout';
+  throw new Error(`Sandbox ${containerRef} TCP readiness check timed out: ${reason}`);
+}
+
 function stripInlinePrimaryKey(type: string): string {
   return type.replace(/\bPRIMARY\s+KEY\b/gi, '').replace(/\s{2,}/g, ' ').trim();
 }
@@ -237,6 +293,7 @@ const sandboxProvisioningWorker = new Worker(
         sandboxId: sandboxInstanceId,
       });
       await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
+      await waitForSandboxTcpReady({ containerRef, dbName });
       logger.info({ containerRef, dbName }, 'Sandbox container ready');
 
       await applySchemaAndDataset({
@@ -353,6 +410,7 @@ const sandboxResetWorker = new Worker(
         sandboxId: sandboxInstanceId,
       });
       await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
+      await waitForSandboxTcpReady({ containerRef, dbName });
 
       await applySchemaAndDataset({
         sandboxInstanceId,
