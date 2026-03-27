@@ -503,7 +503,9 @@ export function ExecutionPlanTree({
 
       {bottlenecks.length > 0 && (
         <div className={cn('border border-tertiary/20 bg-tertiary/5', compact ? 'rounded-xl p-3' : 'rounded-2xl p-4')}>
-          <p className={cn('uppercase tracking-wide text-tertiary', compact ? 'text-[10px]' : 'text-xs')}>Potential bottlenecks</p>
+          <p className={cn('uppercase tracking-wide text-tertiary', compact ? 'text-[10px]' : 'text-xs')}>
+            Diem nghen tiem nang
+          </p>
           <div className={cn('space-y-2', compact ? 'mt-2' : 'mt-3')}>
             {bottlenecks.slice(0, compact ? 2 : 3).map(({ node, highlight }, index) => (
               <div
