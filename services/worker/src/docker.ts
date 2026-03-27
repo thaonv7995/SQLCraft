@@ -208,6 +208,8 @@ export async function createSandboxContainer(params: {
     sandboxPostgresImage,
     'postgres',
     '-c',
+    'listen_addresses=*',
+    '-c',
     `max_wal_size=${sandboxPostgresMaxWalSize}`,
     '-c',
     `min_wal_size=${sandboxPostgresMinWalSize}`,
