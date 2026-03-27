@@ -200,7 +200,10 @@ async function createPublishedChallenge(
         expectedResultColumns: STARTER_QUERY_COLUMNS,
         referenceSolution: lesson.starterQuery,
         validatorType: 'result_set',
-        validatorConfig: {},
+        validatorConfig: {
+          baselineDurationMs: 60_000,
+          maxTotalCost: 1_000_000,
+        },
       },
     }),
   );

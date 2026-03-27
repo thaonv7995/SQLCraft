@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ChallengeValidatorConfigSchema } from './challenge-validator-config.schema';
 
 // Param schemas
 export const ChallengeAttemptParamsSchema = z.object({
@@ -60,7 +61,7 @@ const CreateChallengeBaseSchema = z.object({
   expectedResultColumns: z.array(z.string()).optional(),
   referenceSolution: z.string().optional(),
   validatorType: z.string().default('result_set'),
-  validatorConfig: z.record(z.unknown()).optional(),
+  validatorConfig: ChallengeValidatorConfigSchema,
 });
 
 export const CreateChallengeSchema = CreateChallengeBaseSchema

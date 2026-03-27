@@ -322,7 +322,10 @@ async function seed() {
         expectedResultColumns: ['id', 'name', 'price'],
         referenceSolution: 'SELECT id, name, price FROM products ORDER BY price DESC LIMIT 10;',
         validatorType: 'result_set',
-        validatorConfig: {},
+        validatorConfig: {
+          baselineDurationMs: 10_000,
+          maxTotalCost: 100_000,
+        },
         isPublished: true,
         reviewStatus: 'approved',
         publishedAt: new Date(),

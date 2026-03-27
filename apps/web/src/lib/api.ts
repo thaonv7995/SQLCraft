@@ -219,6 +219,8 @@ export interface ChallengeEvaluation {
   baselineDurationMs?: number | null;
   latestDurationMs?: number | null;
   meetsPerformanceTarget?: boolean | null;
+  maxTotalCost?: number | null;
+  meetsCostTarget?: boolean | null;
   requiresIndexOptimization?: boolean;
   usedIndexing?: boolean;
   queryTotalCost?: number | null;
@@ -1463,7 +1465,7 @@ export const challengesApi = {
     expectedResultColumns?: string[];
     referenceSolution?: string;
     validatorType?: string;
-    validatorConfig?: Record<string, unknown>;
+    validatorConfig: ChallengeValidatorConfigPayload;
   }) =>
     api
       .post<ChallengeDraftValidationResult>('/challenges/validate', payload)
@@ -1483,7 +1485,7 @@ export const challengesApi = {
     expectedResultColumns?: string[];
     referenceSolution?: string;
     validatorType?: string;
-    validatorConfig?: Record<string, unknown>;
+    validatorConfig: ChallengeValidatorConfigPayload;
   }) => api.post<{ challenge: { id: string }; version: { id: string } }>('/challenges', payload).then((r) => r.data),
 
   createVersion: (
@@ -1502,7 +1504,7 @@ export const challengesApi = {
       expectedResultColumns?: string[];
       referenceSolution?: string;
       validatorType?: string;
-      validatorConfig?: Record<string, unknown>;
+      validatorConfig: ChallengeValidatorConfigPayload;
     },
   ) =>
     api
@@ -1780,6 +1782,13 @@ export const usersApi = {
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
+/** Matches server `ChallengeValidatorConfigSchema` (pass thresholds). */
+export type ChallengeValidatorConfigPayload = {
+  baselineDurationMs: number;
+  maxTotalCost: number;
+  requiresIndexOptimization?: boolean;
+};
+
 /** POST /admin/challenges — creates a draft challenge and version 1 (admin-only). */
 export interface AdminCreateChallengePayload {
   databaseId: string;
@@ -1794,7 +1803,7 @@ export interface AdminCreateChallengePayload {
   expectedResultColumns?: string[];
   referenceSolution?: string;
   validatorType?: string;
-  validatorConfig?: Record<string, unknown>;
+  validatorConfig: ChallengeValidatorConfigPayload;
 }
 
 export interface AdminCreateChallengeResult {

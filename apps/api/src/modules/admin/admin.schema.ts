@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ChallengeValidatorConfigSchema } from '../challenges/challenge-validator-config.schema';
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
@@ -16,7 +17,7 @@ export const CreateChallengeSchema = z
     expectedResultColumns: z.array(z.string()).optional(),
     referenceSolution: z.string().optional(),
     validatorType: z.string().default('result_set'),
-    validatorConfig: z.record(z.unknown()).optional(),
+    validatorConfig: ChallengeValidatorConfigSchema,
   })
   .superRefine((value, ctx) => {
     if (value.validatorType === 'result_set' && !value.referenceSolution?.trim()) {

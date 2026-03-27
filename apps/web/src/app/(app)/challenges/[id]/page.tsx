@@ -13,6 +13,8 @@ import {
   type ChallengeCatalogItem,
   type DatasetScale,
 } from '@/lib/api';
+import { ChallengePassMetricsPanel } from '@/components/challenge/challenge-pass-metrics';
+import { getChallengePassCriteriaLines } from '@/lib/challenge-pass-criteria';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import { useAuthStore } from '@/stores/auth';
 import { formatRelativeTime } from '@/lib/utils';
@@ -45,7 +47,10 @@ export default function ChallengeDetailPage() {
   });
 
   const challenge = useMemo<ChallengeCatalogItem | null>(
-    () => catalogQuery.data?.find((item) => item.id === challengeId) ?? null,
+    () =>
+      catalogQuery.data?.find(
+        (item) => item.id === challengeId || item.slug === challengeId,
+      ) ?? null,
     [catalogQuery.data, challengeId],
   );
 
@@ -168,16 +173,38 @@ export default function ChallengeDetailPage() {
             </div>
           ) : null}
 
-          {versionQuery.data?.expectedResultColumns?.length ? (
+          {versionQuery.data ? (
             <div className="rounded-lg border border-outline-variant/10 bg-surface-container p-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-outline mb-2">Expected Columns</p>
-              <div className="flex flex-wrap gap-2">
-                {versionQuery.data.expectedResultColumns.map((column) => (
-                  <code key={column} className="rounded-md bg-surface-container-high px-2 py-1 text-xs">
-                    {column}
-                  </code>
+              <p className="mb-3 text-xs uppercase tracking-[0.18em] text-outline">
+                Tiêu chí đạt (pass)
+              </p>
+              <ChallengePassMetricsPanel validatorConfig={versionQuery.data.validatorConfig} />
+              <ul className="mt-4 list-disc space-y-2 pl-4 text-sm leading-relaxed text-on-surface-variant">
+                {getChallengePassCriteriaLines({
+                  validatorType: versionQuery.data.validatorType,
+                  validatorConfig: versionQuery.data.validatorConfig,
+                  points: versionQuery.data.points,
+                }).map((line, index) => (
+                  <li key={index}>{line}</li>
                 ))}
-              </div>
+              </ul>
+              {versionQuery.data.expectedResultColumns.length > 0 ? (
+                <div className="mt-4 border-t border-outline-variant/10 pt-4">
+                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-outline">
+                    Cột kết quả kỳ vọng
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {versionQuery.data.expectedResultColumns.map((column) => (
+                      <code
+                        key={column}
+                        className="rounded-md bg-surface-container-high px-2 py-1 text-xs"
+                      >
+                        {column}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -217,14 +244,31 @@ export default function ChallengeDetailPage() {
           </section>
 
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6">
-            <h2 className="font-headline text-lg font-semibold text-on-surface mb-3">Top Leaderboard</h2>
-            <div className="space-y-2">
+            <h2 className="font-headline text-lg font-semibold text-on-surface">Top Leaderboard</h2>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              Chỉ các submission đã pass; xếp theo thời gian chạy (ngắn hơn trên), tie-break theo cost
+              thấp hơn.
+            </p>
+            <div className="mt-3 space-y-2">
               {leaderboardQuery.data?.length ? (
                 leaderboardQuery.data.map((entry) => (
-                  <div key={entry.attemptId} className="flex items-center justify-between rounded-lg bg-surface-container px-3 py-2">
-                    <div>
-                      <p className="text-sm font-medium text-on-surface">#{entry.rank} {entry.displayName || entry.username}</p>
+                  <div
+                    key={entry.attemptId}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-surface-container px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-on-surface">
+                        #{entry.rank} {entry.displayName || entry.username}
+                      </p>
                       <p className="text-xs text-outline">{formatRelativeTime(entry.lastSubmittedAt)}</p>
+                      <p className="mt-1 font-mono text-[11px] text-on-surface-variant">
+                        {entry.bestDurationMs != null ? `${entry.bestDurationMs.toLocaleString()} ms` : '—'}
+                        <span className="mx-1.5 text-outline">·</span>
+                        cost{' '}
+                        {entry.bestTotalCost != null
+                          ? Math.round(entry.bestTotalCost).toLocaleString()
+                          : '—'}
+                      </p>
                     </div>
                     <StatusBadge status="success" />
                   </div>

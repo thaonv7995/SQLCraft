@@ -54,6 +54,9 @@ export default function AdminNewChallengePage() {
   const [hintText, setHintText] = useState('');
   const [referenceSolution, setReferenceSolution] = useState('');
   const [expectedColumnsRaw, setExpectedColumnsRaw] = useState('');
+  const [baselineDurationMs, setBaselineDurationMs] = useState(5000);
+  const [maxTotalCost, setMaxTotalCost] = useState(10_000);
+  const [requiresIndexOptimization, setRequiresIndexOptimization] = useState(false);
 
   const createMutation = useMutation({
     mutationFn: (payload: AdminCreateChallengePayload) => adminApi.createChallenge(payload),
@@ -81,6 +84,14 @@ export default function AdminNewChallengePage() {
       toast.error('Reference SQL is required for result_set validation');
       return;
     }
+    if (!Number.isFinite(baselineDurationMs) || baselineDurationMs <= 0) {
+      toast.error('Max query duration must be a positive number (ms)');
+      return;
+    }
+    if (!Number.isFinite(maxTotalCost) || maxTotalCost <= 0) {
+      toast.error('Max planner cost (EXPLAIN total cost) must be a positive number');
+      return;
+    }
 
     const expectedResultColumns = parseExpectedColumns(expectedColumnsRaw);
 
@@ -97,6 +108,11 @@ export default function AdminNewChallengePage() {
       referenceSolution: referenceSolution.trim(),
       expectedResultColumns,
       validatorType: 'result_set',
+      validatorConfig: {
+        baselineDurationMs,
+        maxTotalCost,
+        ...(requiresIndexOptimization ? { requiresIndexOptimization: true } : {}),
+      },
     });
   };
 
@@ -232,6 +248,41 @@ export default function AdminNewChallengePage() {
               rows={4}
               hint="Required for result_set checking. This query defines the expected result shape."
             />
+
+            <div className="rounded-lg border border-outline-variant/20 bg-surface-container-low/40 p-4 space-y-3">
+              <p className="text-sm font-medium text-on-surface">Pass thresholds</p>
+              <p className="text-xs text-on-surface-variant">
+                Learners must return the correct result set and stay within these limits (when set) to pass.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  label="Max query duration (ms)"
+                  type="number"
+                  min={1}
+                  value={baselineDurationMs}
+                  onChange={(e) => setBaselineDurationMs(Number(e.target.value) || 0)}
+                  hint="Wall-clock execution time on the sandbox must be ≤ this value."
+                />
+                <Input
+                  label="Max EXPLAIN total cost"
+                  type="number"
+                  min={1}
+                  step="any"
+                  value={maxTotalCost}
+                  onChange={(e) => setMaxTotalCost(Number(e.target.value) || 0)}
+                  hint="Planner total cost from EXPLAIN must be ≤ this value."
+                />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-on-surface">
+                <input
+                  type="checkbox"
+                  checked={requiresIndexOptimization}
+                  onChange={(e) => setRequiresIndexOptimization(e.target.checked)}
+                  className="size-4 rounded border-outline"
+                />
+                Require index usage (EXPLAIN must show index scan when enabled)
+              </label>
+            </div>
 
             <Input
               label="Expected columns (optional)"

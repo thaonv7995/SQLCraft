@@ -184,7 +184,7 @@ function ChallengeCatalogCard({
   if (row.status === 'published') {
     return (
       <Link
-        href={`/challenges/${row.slug}`}
+        href={`/admin/content/${row.id}`}
         className="group block rounded-xl border border-outline-variant/10 bg-surface-container-low p-5 transition-colors hover:border-outline-variant/30 hover:bg-surface-container"
       >
         {inner}
@@ -193,10 +193,15 @@ function ChallengeCatalogCard({
   }
 
   return (
-    <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
-      {inner}
+    <div className="overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-low">
+      <Link
+        href={`/admin/content/${row.id}`}
+        className="group block p-5 transition-colors hover:bg-surface-container"
+      >
+        {inner}
+      </Link>
       {showPublish ? (
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-outline-variant/10 pt-4">
+        <div className="flex flex-wrap gap-2 border-t border-outline-variant/10 px-5 py-4">
           <Button
             size="sm"
             variant="primary"
@@ -436,7 +441,7 @@ export default function AdminContentChallengesPage() {
         <div>
           <h2 className="page-section-title">Challenge catalog</h2>
           <p className="mt-1 text-sm text-on-surface-variant">
-            Select a challenge to open its public page, or publish drafts when they are ready.
+            Select a challenge to open its admin detail (use “View ranking” for published challenges), or publish drafts when they are ready.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

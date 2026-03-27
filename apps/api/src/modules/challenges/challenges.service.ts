@@ -57,6 +57,9 @@ export interface AttemptEvaluation {
   baselineDurationMs: number | null;
   latestDurationMs: number | null;
   meetsPerformanceTarget?: boolean | null;
+  /** EXPLAIN total cost ceiling; null = no cost gate (legacy). */
+  maxTotalCost?: number | null;
+  meetsCostTarget?: boolean | null;
   requiresIndexOptimization?: boolean;
   usedIndexing: boolean;
   queryTotalCost?: number | null;
@@ -285,8 +288,23 @@ function normalizeValidatorConfig(value: unknown): Record<string, unknown> | nul
         ? Number(baselineCandidate)
         : null;
 
-  if (typeof baselineDurationMs === 'number' && Number.isFinite(baselineDurationMs)) {
+  if (
+    typeof baselineDurationMs === 'number' &&
+    Number.isFinite(baselineDurationMs) &&
+    baselineDurationMs > 0
+  ) {
     normalized.baselineDurationMs = baselineDurationMs;
+  }
+
+  const maxCostCandidate = config.maxTotalCost;
+  const maxTotalCost =
+    typeof maxCostCandidate === 'number'
+      ? maxCostCandidate
+      : typeof maxCostCandidate === 'string'
+        ? Number(maxCostCandidate)
+        : null;
+  if (typeof maxTotalCost === 'number' && Number.isFinite(maxTotalCost) && maxTotalCost > 0) {
+    normalized.maxTotalCost = maxTotalCost;
   }
 
   if (config.requiresIndexOptimization === true) {
@@ -492,10 +510,22 @@ async function buildDraftValidation(
 
   const baselineCandidate = normalized.validatorConfig?.baselineDurationMs;
   const baselineDurationMs =
-    typeof baselineCandidate === 'number' ? baselineCandidate : null;
+    typeof baselineCandidate === 'number' && Number.isFinite(baselineCandidate)
+      ? baselineCandidate
+      : null;
 
-  if (baselineDurationMs !== null && baselineDurationMs <= 0) {
-    errors.push('Baseline duration must be greater than 0 ms.');
+  if (baselineDurationMs === null || baselineDurationMs <= 0) {
+    errors.push('baselineDurationMs must be a positive number (ms) — required for pass.');
+  }
+
+  const maxCostCandidate = normalized.validatorConfig?.maxTotalCost;
+  const maxTotalCostDraft =
+    typeof maxCostCandidate === 'number' && Number.isFinite(maxCostCandidate)
+      ? maxCostCandidate
+      : null;
+
+  if (maxTotalCostDraft === null || maxTotalCostDraft <= 0) {
+    errors.push('maxTotalCost must be a positive number — EXPLAIN total cost ceiling for pass.');
   }
 
   if (
@@ -1034,6 +1064,21 @@ function buildFeedback(evaluation: AttemptEvaluation): string {
     );
   }
 
+  if (evaluation.maxTotalCost != null) {
+    const cost = evaluation.queryTotalCost;
+    if (evaluation.meetsCostTarget === true) {
+      notes.push(
+        `Cost target met: ${cost ?? 'unknown'} within the ${evaluation.maxTotalCost} planner limit.`,
+      );
+    } else if (cost === null || cost === undefined) {
+      notes.push(`Cost target could not be verified against the ${evaluation.maxTotalCost} planner limit.`);
+    } else {
+      notes.push(
+        `Cost target missed: ${cost} exceeds the ${evaluation.maxTotalCost} planner limit.`,
+      );
+    }
+  }
+
   return notes.join(' ');
 }
 
@@ -1058,9 +1103,26 @@ export function evaluateAttempt(
       ? (challengeVersion.validatorConfig as Record<string, unknown>)
       : {};
   const baselineDurationMs =
-    typeof config.baselineDurationMs === 'number' ? config.baselineDurationMs : null;
+    typeof config.baselineDurationMs === 'number' &&
+    Number.isFinite(config.baselineDurationMs) &&
+    config.baselineDurationMs > 0
+      ? config.baselineDurationMs
+      : null;
+  const maxTotalCost =
+    typeof config.maxTotalCost === 'number' &&
+    Number.isFinite(config.maxTotalCost) &&
+    config.maxTotalCost > 0
+      ? config.maxTotalCost
+      : null;
   const requiresIndexOptimization = config.requiresIndexOptimization === true;
   const totalPoints = Math.max(0, challengeVersion.points ?? 100);
+
+  const failMeta = {
+    baselineDurationMs,
+    maxTotalCost,
+    meetsCostTarget: maxTotalCost === null ? null : false,
+    queryTotalCost: null as number | null,
+  };
 
   if (queryExecution.status !== 'succeeded') {
     return {
@@ -1072,6 +1134,9 @@ export function evaluateAttempt(
       baselineDurationMs,
       latestDurationMs: queryExecution.durationMs ?? null,
       meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+      maxTotalCost: failMeta.maxTotalCost,
+      meetsCostTarget: failMeta.meetsCostTarget,
+      queryTotalCost: failMeta.queryTotalCost,
       requiresIndexOptimization,
       usedIndexing: false,
     };
@@ -1091,6 +1156,9 @@ export function evaluateAttempt(
         baselineDurationMs,
         latestDurationMs: queryExecution.durationMs ?? null,
         meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+        maxTotalCost: failMeta.maxTotalCost,
+        meetsCostTarget: failMeta.meetsCostTarget,
+        queryTotalCost: failMeta.queryTotalCost,
         requiresIndexOptimization,
         usedIndexing: false,
       };
@@ -1113,6 +1181,9 @@ export function evaluateAttempt(
           baselineDurationMs,
           latestDurationMs: queryExecution.durationMs ?? null,
           meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+          maxTotalCost: failMeta.maxTotalCost,
+          meetsCostTarget: failMeta.meetsCostTarget,
+          queryTotalCost: failMeta.queryTotalCost,
           requiresIndexOptimization,
           usedIndexing: false,
         };
@@ -1127,6 +1198,9 @@ export function evaluateAttempt(
         baselineDurationMs,
         latestDurationMs: queryExecution.durationMs ?? null,
         meetsPerformanceTarget: baselineDurationMs === null ? null : false,
+        maxTotalCost: failMeta.maxTotalCost,
+        meetsCostTarget: failMeta.meetsCostTarget,
+        queryTotalCost: failMeta.queryTotalCost,
         requiresIndexOptimization,
         usedIndexing: false,
       };
@@ -1137,12 +1211,17 @@ export function evaluateAttempt(
   const meetsPerformanceTarget =
     baselineDurationMs === null ? null : latestDurationMs !== null && latestDurationMs <= baselineDurationMs;
 
+  const latestTotalCost = normalizeNullableMetric(context.explainPlan?.planSummary?.totalCost);
+  const meetsCostTarget =
+    maxTotalCost === null ? null : latestTotalCost !== null && latestTotalCost <= maxTotalCost;
+
   const usedIndexing =
     requiresIndexOptimization
       ? detectIndexUsage(sessionExecutions, queryExecution.id, context.explainPlan)
       : false;
   const passesChallenge =
     (baselineDurationMs === null || meetsPerformanceTarget === true) &&
+    (maxTotalCost === null || meetsCostTarget === true) &&
     (!requiresIndexOptimization || usedIndexing);
 
   const evaluation: AttemptEvaluation = {
@@ -1154,6 +1233,9 @@ export function evaluateAttempt(
     baselineDurationMs,
     latestDurationMs,
     meetsPerformanceTarget,
+    maxTotalCost,
+    meetsCostTarget,
+    queryTotalCost: latestTotalCost,
     requiresIndexOptimization,
     usedIndexing,
   };
@@ -1224,9 +1306,16 @@ async function buildEvaluationContext(
     };
   }
 
+  const needsPlannerCost =
+    typeof validatorConfig.maxTotalCost === 'number' &&
+    Number.isFinite(validatorConfig.maxTotalCost) &&
+    validatorConfig.maxTotalCost > 0;
+
   if (
     shouldExplainAnalyze(queryExecution.sqlText) &&
-    (validatorConfig.requiresIndexOptimization === true || challengeVersion.validatorType === 'result_set')
+    (validatorConfig.requiresIndexOptimization === true ||
+      challengeVersion.validatorType === 'result_set' ||
+      needsPlannerCost)
   ) {
     try {
       context.explainPlan = await getExplainPlan(
