@@ -4,7 +4,9 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-const sandboxDockerNetwork = process.env.SANDBOX_DOCKER_NETWORK ?? 'sqlcraft-dev';
+const configuredSandboxDockerNetwork = process.env.SANDBOX_DOCKER_NETWORK?.trim();
+const stackName = process.env.STACK_NAME?.trim() || 'sqlcraft';
+const fallbackSandboxDockerNetwork = `${stackName}-prod`;
 const sandboxPostgresImage = process.env.SANDBOX_POSTGRES_IMAGE ?? 'postgres:16-alpine';
 const sandboxPostgresMaxWalSize = process.env.SANDBOX_POSTGRES_MAX_WAL_SIZE ?? '4GB';
 const sandboxPostgresMinWalSize = process.env.SANDBOX_POSTGRES_MIN_WAL_SIZE ?? '1GB';
@@ -95,6 +97,58 @@ async function runDockerBinary(args: string[]): Promise<Buffer> {
   });
 }
 
+async function dockerNetworkExists(networkName: string): Promise<boolean> {
+  if (!networkName) return false;
+  try {
+    await runDocker(['network', 'inspect', networkName]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function detectCurrentContainerNetworks(): Promise<string[]> {
+  const currentContainer = process.env.HOSTNAME?.trim();
+  if (!currentContainer) return [];
+
+  try {
+    const names = await runDocker([
+      'inspect',
+      '-f',
+      '{{range $k, $_ := .NetworkSettings.Networks}}{{printf "%s\\n" $k}}{{end}}',
+      currentContainer,
+    ]);
+    return names
+      .split('\n')
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function resolveSandboxDockerNetwork(): Promise<string> {
+  const candidates: string[] = [];
+  if (configuredSandboxDockerNetwork) {
+    candidates.push(configuredSandboxDockerNetwork);
+  }
+  candidates.push(fallbackSandboxDockerNetwork);
+  candidates.push(...(await detectCurrentContainerNetworks()));
+
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    if (await dockerNetworkExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Unable to resolve Docker network for sandbox (checked: ${Array.from(seen).join(', ') || 'none'})`,
+  );
+}
+
 function shQuote(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -126,6 +180,7 @@ export async function createSandboxContainer(params: {
   sandboxId: string;
 }): Promise<void> {
   const { containerRef, dbName, dbUser, dbPassword, sandboxId } = params;
+  const sandboxDockerNetwork = await resolveSandboxDockerNetwork();
 
   await ensureSandboxContainerRemoved(containerRef);
 
@@ -138,6 +193,8 @@ export async function createSandboxContainer(params: {
     containerRef,
     '--network',
     sandboxDockerNetwork,
+    '--add-host',
+    'host.docker.internal:host-gateway',
     '--label',
     'sqlcraft.managed=true',
     '--label',

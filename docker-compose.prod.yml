@@ -66,7 +66,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    image: ${API_IMAGE:-sqlcraft-api:prod}
+    image: ${API_IMAGE:-ghcr.io/thaonv7995/sqlcraft-api:latest}
     container_name: "${STACK_NAME:-sqlcraft}-api"
     env_file:
       - .env.production
@@ -74,6 +74,8 @@ services:
       NODE_ENV: production
     ports:
       - "${API_PORT:-4000}:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,7 +94,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/v1}
         NEXT_INTERNAL_API_ORIGIN: ${NEXT_INTERNAL_API_ORIGIN:-http://api:4000}
-    image: ${WEB_IMAGE:-sqlcraft-web:prod}
+    image: ${WEB_IMAGE:-ghcr.io/thaonv7995/sqlcraft-web:latest}
     container_name: "${STACK_NAME:-sqlcraft}-web"
     environment:
       NODE_ENV: production
@@ -109,7 +111,7 @@ services:
     build:
       context: .
       dockerfile: services/worker/Dockerfile
-    image: ${WORKER_IMAGE:-sqlcraft-worker:prod}
+    image: ${WORKER_IMAGE:-ghcr.io/thaonv7995/sqlcraft-worker:latest}
     container_name: "${STACK_NAME:-sqlcraft}-worker"
     env_file:
       - .env.production

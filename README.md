@@ -50,8 +50,10 @@ What `./install.sh` does:
 - Auto-generates secrets (`JWT_SECRET`, DB/storage/sandbox passwords)
 - Prompts for first admin (or uses defaults)
 - Prompts for `PUBLIC_DOMAIN` and configures app/API URLs for reverse proxy
+- Pulls prebuilt release images from GHCR first (fast path)
+- Falls back to local Docker build automatically if image pull fails
 - Bootstraps DB (`migrate` + `seed`)
-- Builds and starts production images (`api`, `web`, `worker`)
+- Starts production services (`api`, `web`, `worker`)
 
 Reverse proxy note (single-domain):
 
@@ -68,6 +70,12 @@ After startup:
 - **API**: http://localhost:4000
 - **MinIO Console**: http://localhost:9001
 - First admin credentials are printed in terminal
+
+If a session shows **"Sandbox could not start"** on Linux:
+
+- Pull latest and restart worker (`docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build worker`)
+- Ensure `.env.production` has `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod`
+- Check worker errors: `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker`
 
 ### 2) Useful production commands
 

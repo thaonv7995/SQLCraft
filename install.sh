@@ -249,6 +249,40 @@ ensure_core_env() {
     set_env_value "API_DOMAIN" "${public_domain}" "$ENV_FILE"
     set_env_value "STORAGE_PUBLIC_URL" "https://${public_domain}" "$ENV_FILE"
   fi
+
+  local use_prebuilt ghcr_owner ghcr_owner_lc sqlcraft_version api_image web_image worker_image
+  use_prebuilt="$(get_env_value "USE_PREBUILT_IMAGES" "$ENV_FILE")"
+  if [[ -z "$use_prebuilt" ]]; then
+    use_prebuilt="true"
+  fi
+  set_env_value "USE_PREBUILT_IMAGES" "$use_prebuilt" "$ENV_FILE"
+
+  ghcr_owner="$(get_env_value "SQLCRAFT_GHCR_OWNER" "$ENV_FILE")"
+  if [[ -z "$ghcr_owner" ]]; then
+    ghcr_owner="thaonv7995"
+  fi
+  ghcr_owner_lc="$(printf '%s' "$ghcr_owner" | tr '[:upper:]' '[:lower:]')"
+  set_env_value "SQLCRAFT_GHCR_OWNER" "$ghcr_owner_lc" "$ENV_FILE"
+
+  sqlcraft_version="$(get_env_value "SQLCRAFT_VERSION" "$ENV_FILE")"
+  if [[ -z "$sqlcraft_version" ]]; then
+    sqlcraft_version="latest"
+  fi
+  set_env_value "SQLCRAFT_VERSION" "$sqlcraft_version" "$ENV_FILE"
+
+  api_image="$(get_env_value "API_IMAGE" "$ENV_FILE")"
+  web_image="$(get_env_value "WEB_IMAGE" "$ENV_FILE")"
+  worker_image="$(get_env_value "WORKER_IMAGE" "$ENV_FILE")"
+
+  if [[ -z "$api_image" || "$api_image" == "sqlcraft-api:prod" ]]; then
+    set_env_value "API_IMAGE" "ghcr.io/${ghcr_owner_lc}/sqlcraft-api:${sqlcraft_version}" "$ENV_FILE"
+  fi
+  if [[ -z "$web_image" || "$web_image" == "sqlcraft-web:prod" ]]; then
+    set_env_value "WEB_IMAGE" "ghcr.io/${ghcr_owner_lc}/sqlcraft-web:${sqlcraft_version}" "$ENV_FILE"
+  fi
+  if [[ -z "$worker_image" || "$worker_image" == "sqlcraft-worker:prod" ]]; then
+    set_env_value "WORKER_IMAGE" "ghcr.io/${ghcr_owner_lc}/sqlcraft-worker:${sqlcraft_version}" "$ENV_FILE"
+  fi
 }
 
 wait_for_docker() {
@@ -385,6 +419,27 @@ run_compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
+should_use_prebuilt_images() {
+  local v
+  v="$(get_env_value "USE_PREBUILT_IMAGES" "$ENV_FILE")"
+  v="$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')"
+  [[ "$v" == "1" || "$v" == "true" || "$v" == "yes" ]]
+}
+
+prepare_app_images() {
+  if should_use_prebuilt_images; then
+    headline "Preparing app images (GHCR prebuilt)"
+    if run_compose pull api web worker; then
+      log "Pulled prebuilt images successfully."
+      return 0
+    fi
+    warn "Failed to pull prebuilt images. Falling back to local build."
+  fi
+
+  headline "Preparing app images (local build)"
+  run_compose build api web worker
+}
+
 port_key_by_number() {
   local port="$1"
   local web_port api_port pg_port redis_port minio_api_port minio_console_port
@@ -452,13 +507,14 @@ bootstrap_stack() {
   log "Using ports -> web:${web_port}, api:${api_port}, postgres:${pg_port}, redis:${redis_port}, minio:${minio_api_port}/${minio_console_port}"
 
   infra_up_with_retry
+  prepare_app_images
 
   headline "Running migrations + seed"
   run_compose run --rm --entrypoint sh api -lc \
     "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:seed"
 
   headline "Starting API + Web + Worker"
-  run_compose up -d --build api web worker
+  run_compose up -d api web worker
 }
 
 print_summary() {
