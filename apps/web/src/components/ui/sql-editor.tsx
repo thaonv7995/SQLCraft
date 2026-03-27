@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { schemaCompletionSource, sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
+import { syntaxTree } from '@codemirror/language';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
-import { Prec } from '@codemirror/state';
+import { Prec, type EditorState } from '@codemirror/state';
 import { cn } from '@/lib/utils';
 
 // ─── Design System Theme ──────────────────────────────────────────────────────
@@ -123,6 +124,252 @@ const FIELD_COMPLETION_SECTION = {
   rank: 0,
 } as const;
 
+const SNIPPET_SECTION = { name: 'Snippets', rank: -1 } as const;
+const KEYWORD_SECTION = { name: 'SQL keywords', rank: 2 } as const;
+const TYPE_SECTION = { name: 'Types', rank: 3 } as const;
+const BUILTIN_SECTION = { name: 'Built-ins', rank: 4 } as const;
+
+/** High-signal clause / DML keywords — boosted so they rank above schema identifiers when both match. */
+const PG_CLAUSE_KEYWORDS = new Set(
+  [
+    'select',
+    'insert',
+    'update',
+    'delete',
+    'with',
+    'create',
+    'drop',
+    'alter',
+    'truncate',
+    'from',
+    'where',
+    'join',
+    'inner',
+    'left',
+    'right',
+    'full',
+    'cross',
+    'on',
+    'and',
+    'or',
+    'not',
+    'group',
+    'by',
+    'order',
+    'having',
+    'limit',
+    'offset',
+    'fetch',
+    'union',
+    'all',
+    'distinct',
+    'except',
+    'intersect',
+    'case',
+    'when',
+    'then',
+    'else',
+    'end',
+    'as',
+    'into',
+    'values',
+    'set',
+    'returning',
+    'exists',
+    'in',
+    'between',
+    'like',
+    'ilike',
+    'is',
+    'null',
+    'true',
+    'false',
+    'primary',
+    'key',
+    'foreign',
+    'references',
+    'constraint',
+    'unique',
+    'check',
+    'default',
+    'index',
+    'table',
+    'view',
+    'if',
+    'exists',
+    'cascade',
+    'restrict',
+    'using',
+    'explain',
+    'analyze',
+    'grant',
+    'revoke',
+    'asc',
+    'desc',
+    'nulls',
+    'filter',
+    'over',
+    'partition',
+    'window',
+    'recursive',
+    'vacuum',
+    'commit',
+    'rollback',
+    'begin',
+  ].map((w) => w.toLowerCase()),
+);
+
+function postgresKeywordCompletion(label: string, type: string) {
+  const lower = label.toLowerCase();
+  const section =
+    type === 'type'
+      ? TYPE_SECTION
+      : type === 'variable'
+        ? BUILTIN_SECTION
+        : KEYWORD_SECTION;
+
+  let boost = 74;
+  if (type === 'type') {
+    boost = 86;
+  } else if (type === 'variable') {
+    boost = 82;
+  } else if (type === 'keyword' && PG_CLAUSE_KEYWORDS.has(lower)) {
+    boost = 92;
+  }
+
+  return { label, type, boost, section };
+}
+
+/** Snippet row shape (mirrors @codemirror/autocomplete Completion fields we use). */
+type SqlSnippetCompletion = {
+  label: string;
+  type: 'keyword';
+  detail: string;
+  boost: number;
+  section: typeof SNIPPET_SECTION;
+  apply: string;
+};
+
+/**
+ * Like @codemirror/autocomplete `prefixMatch`, for labels that are not plain \w+ (e.g. "SELECT * FROM …").
+ */
+function snippetPrefixMatch(options: readonly { label: string }[]): [RegExp, RegExp] {
+  const first = Object.create(null) as Record<string, boolean>;
+  const rest = Object.create(null) as Record<string, boolean>;
+  for (const { label } of options) {
+    if (!label.length) continue;
+    first[label[0]!] = true;
+    for (let i = 1; i < label.length; i++) {
+      rest[label[i]!] = true;
+    }
+  }
+  const toSet = (chars: Record<string, boolean>) => {
+    const flat = Object.keys(chars).join('');
+    const words = /\w/.test(flat);
+    const stripped = words ? flat.replace(/\w/g, '') : flat;
+    return `[${words ? '\\w' : ''}${stripped.replace(/[^\w\s]/g, '\\$&')}]`;
+  };
+  const source = toSet(first) + toSet(rest) + '*$';
+  return [new RegExp(`^${source}`), new RegExp(source)];
+}
+
+const SNIPPET_BLOCK_SYNTAX_NODES = new Set([
+  'QuotedIdentifier',
+  'String',
+  'LineComment',
+  'BlockComment',
+]);
+
+const SQL_SNIPPETS: readonly SqlSnippetCompletion[] = [
+  {
+    label: 'SELECT * FROM …',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 96,
+    section: SNIPPET_SECTION,
+    apply: 'SELECT *\nFROM ',
+  },
+  {
+    label: 'SELECT COUNT(*) …',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 95,
+    section: SNIPPET_SECTION,
+    apply: 'SELECT COUNT(*)\nFROM ',
+  },
+  {
+    label: 'INSERT INTO … VALUES',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 94,
+    section: SNIPPET_SECTION,
+    apply: 'INSERT INTO ',
+  },
+  {
+    label: 'WHERE …',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 90,
+    section: SNIPPET_SECTION,
+    apply: 'WHERE ',
+  },
+  {
+    label: 'LEFT JOIN … ON',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 93,
+    section: SNIPPET_SECTION,
+    apply: 'LEFT JOIN ',
+  },
+  {
+    label: 'GROUP BY …',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 91,
+    section: SNIPPET_SECTION,
+    apply: 'GROUP BY ',
+  },
+  {
+    label: 'ORDER BY …',
+    type: 'keyword',
+    detail: 'Snippet',
+    boost: 91,
+    section: SNIPPET_SECTION,
+    apply: 'ORDER BY ',
+  },
+];
+
+/**
+ * Snippet completions without importing `@codemirror/autocomplete` (avoids Next/Turbopack resolution issues).
+ */
+function sqlSnippetCompletionSource(context: {
+  pos: number;
+  state: EditorState;
+  explicit: boolean;
+  matchBefore: (expr: RegExp) => { from: number; text: string } | null;
+}): { from: number; options: readonly SqlSnippetCompletion[]; validFor: RegExp } | null {
+  type WalkNode = { name: string; type: { isTop: boolean }; parent: WalkNode | null };
+  let node: WalkNode | null = syntaxTree(context.state).resolveInner(context.pos, -1) as WalkNode;
+  while (node) {
+    if (SNIPPET_BLOCK_SYNTAX_NODES.has(node.name)) {
+      return null;
+    }
+    if (node.type.isTop) {
+      break;
+    }
+    node = node.parent;
+  }
+
+  const options = SQL_SNIPPETS;
+  const allWordLabels = options.every((o) => /^\w+$/.test(o.label));
+  const [validFor, match] = allWordLabels ? [/\w*$/, /\w+$/] : snippetPrefixMatch(options);
+  const token = context.matchBefore(match);
+  if (!token && !context.explicit) {
+    return null;
+  }
+  return { from: token ? token.from : context.pos, options, validFor };
+}
+
 type SqlCompletionContextKind = 'table' | 'field' | 'any';
 
 type SqlCompletionResult = {
@@ -153,7 +400,7 @@ function buildColumnCompletion(column: SqlEditorSchemaColumn, info?: string): Sc
     type: 'property',
     detail: buildColumnDetail(column),
     info,
-    boost: column.isPrimary ? 100 : column.isForeign ? 98 : 96,
+    boost: column.isPrimary ? 58 : column.isForeign ? 56 : 52,
     section: FIELD_COMPLETION_SECTION,
   };
 }
@@ -164,7 +411,7 @@ function buildTableNamespace(table: SqlEditorSchemaTable): SqlNamespaceTag {
       label: table.name,
       type: 'table',
       detail: `${table.columns.length} cols`,
-      boost: 99,
+      boost: 64,
       section: TABLE_COMPLETION_SECTION,
     },
     children: table.columns.map((column) =>
@@ -245,6 +492,20 @@ function getSqlCompletionContext(value: string, cursor = value.length): SqlCompl
 
   if (/(?:"[^"]*"|`[^`]*`|\[[^\]]*\]|[a-z_][\w$]*)\.\s*$/i.test(trimmedContext)) {
     return 'field';
+  }
+
+  // FROM a, | FROM a ,  → next token is a table
+  if (/\bfrom\b/i.test(trimmedContext) && /,\s*$/i.test(trimmedContext)) {
+    return 'table';
+  }
+
+  // … JOIN (incl. OUTER / NATURAL / CROSS)  → table name
+  if (
+    /\b(?:(?:inner|cross)\s+join|(?:left|right|full)(?:\s+outer)?\s+join|natural\s+join|join)\s+$/i.test(
+      trimmedContext,
+    )
+  ) {
+    return 'table';
   }
 
   if (
@@ -394,7 +655,13 @@ export function SqlEditor({
 
   const extensions = useCallback(() => {
     const exts = [
-      sql({ dialect: PostgreSQL }),
+      sql({
+        dialect: PostgreSQL,
+        keywordCompletion: postgresKeywordCompletion,
+      }),
+      PostgreSQL.language.data.of({
+        autocomplete: sqlSnippetCompletionSource,
+      }),
       sqlForgeTheme,
       EditorView.lineWrapping,
       keymap.of([indentWithTab, ...defaultKeymap]),

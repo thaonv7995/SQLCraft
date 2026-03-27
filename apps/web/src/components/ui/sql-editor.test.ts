@@ -121,6 +121,11 @@ describe('buildSqlSchemaCompletionSource', () => {
   it('detects table-only completion contexts after FROM-like clauses', () => {
     expect(__private__.getSqlCompletionContext('SELECT * FROM c')).toBe('table');
     expect(__private__.getSqlCompletionContext('DELETE FROM c')).toBe('table');
+    expect(__private__.getSqlCompletionContext('SELECT * FROM countries, c')).toBe('table');
+    expect(__private__.getSqlCompletionContext('SELECT * FROM countries LEFT JOIN c')).toBe('table');
+    expect(__private__.getSqlCompletionContext('SELECT * FROM t INNER JOIN c')).toBe('table');
+    expect(__private__.getSqlCompletionContext('SELECT * FROM t NATURAL JOIN c')).toBe('table');
+    expect(__private__.getSqlCompletionContext('SELECT * FROM t LEFT OUTER JOIN c')).toBe('table');
   });
 
   it('detects field-only completion contexts after a qualified table prefix', () => {
