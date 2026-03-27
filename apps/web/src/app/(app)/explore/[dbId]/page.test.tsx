@@ -1,9 +1,9 @@
-import { Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import DatabaseDetailPage from './page';
+import DatabaseDetailPage from './page-client';
+import type { ClientPageProps } from '@/lib/page-props';
 
 const mocks = vi.hoisted(() => ({
   getDatabase: vi.fn(),
@@ -71,18 +71,16 @@ async function renderPage() {
     },
   });
 
-  const pageProps: PageProps<'/explore/[dbId]'> = {
-    params: Promise.resolve({ dbId: 'warehouse-ops' }),
-    searchParams: Promise.resolve({}),
+  const pageProps: ClientPageProps = {
+    params: { dbId: 'warehouse-ops' },
+    searchParams: {},
   };
 
   let result: ReturnType<typeof render>;
   await act(async () => {
     result = render(
       <QueryClientProvider client={queryClient}>
-        <Suspense fallback={null}>
-          <DatabaseDetailPage {...pageProps} />
-        </Suspense>
+        <DatabaseDetailPage {...pageProps} />
       </QueryClientProvider>,
     );
   });

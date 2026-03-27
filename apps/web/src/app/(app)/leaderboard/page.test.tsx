@@ -1,9 +1,9 @@
-import { Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import LeaderboardPage from './page';
+import LeaderboardPage from './page-client';
+import type { ClientPageProps } from '@/lib/page-props';
 import { useAuthStore } from '@/stores/auth';
 
 const routerPush = vi.fn();
@@ -44,18 +44,16 @@ async function renderLeaderboardPage() {
     },
   });
 
-  const pageProps: PageProps<'/leaderboard'> = {
-    params: Promise.resolve({}),
-    searchParams: Promise.resolve({}),
+  const pageProps: ClientPageProps = {
+    params: {},
+    searchParams: {},
   };
 
   let result: ReturnType<typeof render>;
   await act(async () => {
     result = render(
       <QueryClientProvider client={queryClient}>
-        <Suspense fallback={null}>
-          <LeaderboardPage {...pageProps} />
-        </Suspense>
+        <LeaderboardPage {...pageProps} />
       </QueryClientProvider>,
     );
   });

@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 export type BadgeVariant =
   | 'provisioning'
   | 'ready'
+  | 'healthy'
   | 'success'
   | 'error'
   | 'pending'
@@ -34,6 +35,11 @@ const variantConfig: Record<BadgeVariant, { label: string; classes: string; dotC
   },
   ready: {
     label: 'Ready',
+    classes: 'text-secondary bg-secondary/15',
+    dotClass: 'bg-secondary',
+  },
+  healthy: {
+    label: 'Healthy',
     classes: 'text-secondary bg-secondary/15',
     dotClass: 'bg-secondary',
   },
@@ -144,6 +150,7 @@ export function StatusBadge({ status, ...props }: { status: string } & Omit<Badg
   const map: Record<string, BadgeVariant> = {
     provisioning: 'provisioning',
     ready: 'ready',
+    healthy: 'healthy',
     active: 'active',
     idle: 'idle',
     terminated: 'terminated',

@@ -1,8 +1,9 @@
-import { StrictMode, Suspense } from 'react';
+import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import LabPage from './page';
+import LabPage from './page-client';
+import type { ClientPageProps } from '@/lib/page-props';
 import { useLabStore } from '@/stores/lab';
 import { createDefaultLabEditorState } from '@/lib/lab-editor-tabs';
 import type { LearningSession } from '@/lib/api';
@@ -116,16 +117,14 @@ async function renderLabPage(options?: { strictMode?: boolean }) {
     },
   });
 
-  const pageProps: PageProps<'/lab/[sessionId]'> = {
-    params: Promise.resolve({ sessionId: 'session-1234567890' }),
-    searchParams: Promise.resolve({}),
+  const pageProps: ClientPageProps = {
+    params: { sessionId: 'session-1234567890' },
+    searchParams: {},
   };
 
   const tree = (
     <QueryClientProvider client={queryClient}>
-      <Suspense fallback={null}>
-        <LabPage {...pageProps} />
-      </Suspense>
+      <LabPage {...pageProps} />
     </QueryClientProvider>
   );
 

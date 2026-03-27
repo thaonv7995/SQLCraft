@@ -6,14 +6,7 @@ import toast from 'react-hot-toast';
 import { adminApi, type AdminConfig, type AdminConfigRecord } from '@/lib/api';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  StatCard,
-} from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { cn, formatRelativeTime } from '@/lib/utils';
 
@@ -41,31 +34,31 @@ const FEATURE_FLAGS: FeatureFlagMeta[] = [
   {
     key: 'globalRankings',
     label: 'Global rankings',
-    description: 'Expose the main SQLForge ranking board across fixed-point challenges.',
+    description: 'Main leaderboard across challenges.',
     audience: 'Users',
   },
   {
     key: 'challengeRankings',
     label: 'Challenge rankings',
-    description: 'Show per-challenge placements and recent movement on challenge detail screens.',
+    description: 'Per-challenge standings.',
     audience: 'Users',
   },
   {
     key: 'submissionQueue',
     label: 'Submission review queue',
-    description: 'Keep admin review enabled for challenge and lesson submissions before publish.',
+    description: 'Admin review queue for submissions (when moderation UI is in use).',
     audience: 'Admins',
   },
   {
     key: 'explanationPanel',
     label: 'Explain plan panel',
-    description: 'Enable deeper query-plan hints for admins during review and support triage.',
+    description: 'Deeper query-plan hints in admin review.',
     audience: 'Admins',
   },
   {
     key: 'snapshotExports',
     label: 'Snapshot exports',
-    description: 'Allow admins to export the current config snapshot for audits and rollback notes.',
+    description: 'Export JSON snapshots via Export Snapshot.',
     audience: 'Admins',
   },
 ];
@@ -176,6 +169,7 @@ export function AdminConfigPanel() {
   });
 
   const [draft, setDraft] = useState<AdminConfig | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const persistConfigRecord = (record: AdminConfigRecord) => {
     queryClient.setQueryData(CONFIG_QUERY_KEY, record);
@@ -329,17 +323,22 @@ export function AdminConfigPanel() {
             <StatusBadge status={unsavedChanges > 0 ? 'draft' : 'published'} />
           </div>
           <p className="max-w-3xl text-sm text-on-surface-variant">
-            Persisted admin defaults for rankings, moderation, workers, and platform behavior.
-            This panel is backed by the real `/admin/config` API.
+            Essentials: feature flags, ranking defaults, and core practice limits. Advanced hides
+            moderation copy, worker/storage placeholders, and extra platform fields—still saved
+            with the same API payload.
           </p>
         </div>
 
-        <div className="rounded-xl bg-surface-container-low px-4 py-3 text-right">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Last Persisted</p>
-          <p className="mt-2 text-sm font-semibold text-on-surface">
+        <div className="w-full shrink-0 rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2 text-right sm:ml-auto sm:w-auto sm:min-w-[6.5rem] sm:max-w-[9.5rem]">
+          <p className="text-[9px] font-medium uppercase leading-tight tracking-wide text-outline">
+            Last persisted
+          </p>
+          <p className="mt-0.5 text-sm font-semibold tabular-nums leading-none text-on-surface">
             {formatRelativeTime(persisted.updatedAt)}
           </p>
-          <p className="mt-1 text-xs text-on-surface-variant">{persisted.scope}</p>
+          <p className="mt-0.5 truncate font-mono text-[10px] leading-tight text-on-surface-variant">
+            {persisted.scope}
+          </p>
         </div>
       </div>
 
@@ -391,504 +390,535 @@ export function AdminConfigPanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Unsaved Changes"
-          value={unsavedChanges}
-          icon={<span className="material-symbols-outlined">edit_note</span>}
-          accent="tertiary"
-        />
-        <StatCard
-          label="Enabled Flags"
-          value={`${enabledFlagsCount}/${FEATURE_FLAGS.length}`}
-          icon={<span className="material-symbols-outlined">toggle_on</span>}
-          accent="secondary"
-        />
-        <StatCard
-          label="Warm Sandbox Pool"
-          value={currentConfig.infrastructure.sandboxWarmPool}
-          icon={<span className="material-symbols-outlined">deployed_code</span>}
-          accent="primary"
-        />
-        <StatCard
-          label="Ranking Refresh"
-          value={currentConfig.rankings.refreshInterval}
-          icon={<span className="material-symbols-outlined">schedule</span>}
-          accent="primary"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="page-stack">
         <Card>
           <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
             <div>
-              <CardTitle>Platform Defaults</CardTitle>
+              <CardTitle>Feature Flags</CardTitle>
               <CardDescription>
-                Core behavior for new SQL practice sessions and fixed-point challenge setup.
+                Rollout controls for ranking surfaces, review tooling, and admin exports.
               </CardDescription>
             </div>
-            <Badge className="bg-primary/10 text-primary">Persisted</Badge>
+            <Badge className="bg-surface-container-high text-on-surface-variant">
+              {enabledFlagsCount} enabled
+            </Badge>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Select
-                label="Default SQL dialect"
-                value={currentConfig.platform.defaultDialect}
-                onChange={(event) =>
-                  updateSection('platform', { defaultDialect: event.target.value as AdminConfig['platform']['defaultDialect'] })
-                }
-                options={[
-                  { value: 'postgresql-16', label: 'PostgreSQL 16' },
-                  { value: 'mysql-8', label: 'MySQL 8' },
-                  { value: 'sqlite-3', label: 'SQLite 3' },
-                ]}
-              />
-              <Input
-                label="Fixed challenge points"
-                value={currentConfig.platform.defaultChallengePoints}
-                onChange={(event) =>
-                  updateSection('platform', { defaultChallengePoints: event.target.value })
-                }
-              />
-              <Input
-                label="Session timeout (minutes)"
-                value={currentConfig.platform.sessionTimeoutMinutes}
-                onChange={(event) =>
-                  updateSection('platform', { sessionTimeoutMinutes: event.target.value })
-                }
-              />
-              <Select
-                label="Daily query budget"
-                value={currentConfig.platform.dailyQueryBudget}
-                onChange={(event) =>
-                  updateSection('platform', { dailyQueryBudget: event.target.value })
-                }
-                options={[
-                  { value: '400', label: '400 queries per user' },
-                  { value: '800', label: '800 queries per user' },
-                  { value: '1200', label: '1,200 queries per user' },
-                ]}
-              />
-              <Select
-                label="Starter schema visibility"
-                value={currentConfig.platform.starterSchemaVisibility}
-                onChange={(event) =>
-                  updateSection('platform', {
-                    starterSchemaVisibility:
-                      event.target.value as AdminConfig['platform']['starterSchemaVisibility'],
-                  })
-                }
-                options={[
-                  { value: 'schema-only', label: 'Schema only' },
-                  { value: 'schema-and-sample', label: 'Schema + sample rows' },
-                  { value: 'delayed-sample', label: 'Sample rows after first run' },
-                ]}
-              />
-            </div>
+          <CardContent className="space-y-3">
+            {FEATURE_FLAGS.map((flag) => (
+              <div
+                key={flag.key}
+                className="rounded-xl border border-outline-variant/10 bg-surface-container p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-on-surface">{flag.label}</p>
+                      <Badge
+                        className={cn(
+                          flag.audience === 'Users'
+                            ? 'bg-primary/10 text-primary'
+                            : 'bg-surface-container-high text-on-surface-variant',
+                        )}
+                      >
+                        {flag.audience}
+                      </Badge>
+                    </div>
+                    <p className="max-w-2xl text-xs leading-relaxed text-on-surface-variant">
+                      {flag.description}
+                    </p>
+                  </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <button
+                    type="button"
+                    aria-pressed={currentConfig.flags[flag.key]}
+                    onClick={() =>
+                      updateSection('flags', {
+                        [flag.key]: !currentConfig.flags[flag.key],
+                      } as Partial<AdminConfig['flags']>)
+                    }
+                    className={cn(
+                      'inline-flex h-9 min-w-28 items-center justify-center rounded-lg border px-4 text-sm font-medium transition-colors',
+                      currentConfig.flags[flag.key]
+                        ? 'border-primary/30 bg-primary/10 text-primary'
+                        : 'border-outline-variant/20 bg-surface-container-high text-on-surface-variant',
+                    )}
+                  >
+                    {currentConfig.flags[flag.key] ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Card>
+            <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+              <div>
+                <CardTitle>Ranking Defaults</CardTitle>
+                <CardDescription>
+                  Window, tie-break, table sizes, and refresh cadence.
+                </CardDescription>
+              </div>
+              <Badge className="bg-secondary/10 text-secondary">Live rankings</Badge>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Select
+                  label="Global ranking window"
+                  value={currentConfig.rankings.globalWindow}
+                  onChange={(event) =>
+                    updateSection('rankings', {
+                      globalWindow: event.target.value as AdminConfig['rankings']['globalWindow'],
+                    })
+                  }
+                  options={[
+                    { value: 'all-time', label: 'All time' },
+                    { value: 'seasonal', label: 'Current season' },
+                    { value: 'rolling-30', label: 'Rolling 30 days' },
+                  ]}
+                />
+                <Select
+                  label="Tie-break rule"
+                  value={currentConfig.rankings.tieBreaker}
+                  onChange={(event) =>
+                    updateSection('rankings', {
+                      tieBreaker: event.target.value as AdminConfig['rankings']['tieBreaker'],
+                    })
+                  }
+                  options={[
+                    { value: 'completion-speed', label: 'Fastest solve time' },
+                    { value: 'accuracy-first', label: 'Most accurate first run' },
+                    { value: 'recent-activity', label: 'Most recent activity' },
+                  ]}
+                />
+                <Input
+                  label="Global leaderboard rows"
+                  value={currentConfig.rankings.globalLeaderboardSize}
+                  onChange={(event) =>
+                    updateSection('rankings', { globalLeaderboardSize: event.target.value })
+                  }
+                />
+                <Input
+                  label="Challenge leaderboard rows"
+                  value={currentConfig.rankings.challengeLeaderboardSize}
+                  onChange={(event) =>
+                    updateSection('rankings', { challengeLeaderboardSize: event.target.value })
+                  }
+                />
+                <Select
+                  label="Refresh cadence"
+                  value={currentConfig.rankings.refreshInterval}
+                  onChange={(event) =>
+                    updateSection('rankings', {
+                      refreshInterval:
+                        event.target.value as AdminConfig['rankings']['refreshInterval'],
+                    })
+                  }
+                  options={[
+                    { value: '1m', label: 'Every minute' },
+                    { value: '5m', label: 'Every 5 minutes' },
+                    { value: '15m', label: 'Every 15 minutes' },
+                  ]}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+              <div>
+                <CardTitle>Practice sessions</CardTitle>
+                <CardDescription>
+                  Defaults that matter most for lab usage and challenge points.
+                </CardDescription>
+              </div>
+              <Badge className="bg-primary/10 text-primary">Platform</Badge>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input
+                  label="Fixed challenge points"
+                  value={currentConfig.platform.defaultChallengePoints}
+                  onChange={(event) =>
+                    updateSection('platform', { defaultChallengePoints: event.target.value })
+                  }
+                />
+                <Input
+                  label="Session timeout (minutes)"
+                  value={currentConfig.platform.sessionTimeoutMinutes}
+                  onChange={(event) =>
+                    updateSection('platform', { sessionTimeoutMinutes: event.target.value })
+                  }
+                />
+                <Select
+                  label="Daily query budget"
+                  value={currentConfig.platform.dailyQueryBudget}
+                  onChange={(event) =>
+                    updateSection('platform', { dailyQueryBudget: event.target.value })
+                  }
+                  options={[
+                    { value: '400', label: '400 queries per user' },
+                    { value: '800', label: '800 queries per user' },
+                    { value: '1200', label: '1,200 queries per user' },
+                  ]}
+                />
+              </div>
               <ToggleRow
                 label="Explain-plan hints"
                 hint="Show focused SQL plan hints to help users recover from failed submissions."
                 checked={currentConfig.platform.enableExplainHints}
                 onChange={(value) => updateSection('platform', { enableExplainHints: value })}
               />
-              <ToggleRow
-                label="Sample data downloads"
-                hint="Allow admins to export sample datasets directly from practice screens."
-                checked={currentConfig.platform.allowSampleDataDownloads}
-                onChange={(value) =>
-                  updateSection('platform', { allowSampleDataDownloads: value })
-                }
-              />
-            </div>
+            </CardContent>
+          </Card>
+        </div>
 
-            <Textarea
-              label="Operator note"
-              value={currentConfig.platform.operatorNote}
-              onChange={(event) => updateSection('platform', { operatorNote: event.target.value })}
-              rows={4}
-            />
-          </CardContent>
-        </Card>
+        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full sm:w-auto"
+            leftIcon={
+              <span className="material-symbols-outlined text-base">
+                {showAdvanced ? 'expand_less' : 'tune'}
+              </span>
+            }
+            onClick={() => setShowAdvanced((v) => !v)}
+          >
+            {showAdvanced ? 'Hide advanced settings' : 'Show advanced settings'}
+          </Button>
+          <p className="mt-2 text-xs text-on-surface-variant">
+            Moderation templates, worker/storage fields, dialect &amp; schema visibility, ranking UI
+            toggles, release summary, and readiness checks.
+          </p>
+        </div>
 
-        <Card>
-          <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
-            <div>
-              <CardTitle>Ranking Defaults</CardTitle>
-              <CardDescription>
-                Controls for global rankings, challenge placements, and tie-break behavior.
-              </CardDescription>
-            </div>
-            <Badge className="bg-secondary/10 text-secondary">Live rankings</Badge>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Select
-                label="Global ranking window"
-                value={currentConfig.rankings.globalWindow}
-                onChange={(event) =>
-                  updateSection('rankings', {
-                    globalWindow: event.target.value as AdminConfig['rankings']['globalWindow'],
-                  })
-                }
-                options={[
-                  { value: 'all-time', label: 'All time' },
-                  { value: 'seasonal', label: 'Current season' },
-                  { value: 'rolling-30', label: 'Rolling 30 days' },
-                ]}
-              />
-              <Select
-                label="Tie-break rule"
-                value={currentConfig.rankings.tieBreaker}
-                onChange={(event) =>
-                  updateSection('rankings', {
-                    tieBreaker: event.target.value as AdminConfig['rankings']['tieBreaker'],
-                  })
-                }
-                options={[
-                  { value: 'completion-speed', label: 'Fastest solve time' },
-                  { value: 'accuracy-first', label: 'Most accurate first run' },
-                  { value: 'recent-activity', label: 'Most recent activity' },
-                ]}
-              />
-              <Input
-                label="Global leaderboard rows"
-                value={currentConfig.rankings.globalLeaderboardSize}
-                onChange={(event) =>
-                  updateSection('rankings', { globalLeaderboardSize: event.target.value })
-                }
-              />
-              <Input
-                label="Challenge leaderboard rows"
-                value={currentConfig.rankings.challengeLeaderboardSize}
-                onChange={(event) =>
-                  updateSection('rankings', { challengeLeaderboardSize: event.target.value })
-                }
-              />
-              <Select
-                label="Refresh cadence"
-                value={currentConfig.rankings.refreshInterval}
-                onChange={(event) =>
-                  updateSection('rankings', {
-                    refreshInterval:
-                      event.target.value as AdminConfig['rankings']['refreshInterval'],
-                  })
-                }
-                options={[
-                  { value: '1m', label: 'Every minute' },
-                  { value: '5m', label: 'Every 5 minutes' },
-                  { value: '15m', label: 'Every 15 minutes' },
-                ]}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <ToggleRow
-                label="Provisional placements"
-                hint="Show temporary ranking movement before the next full standings refresh."
-                checked={currentConfig.rankings.displayProvisionalRanks}
-                onChange={(value) =>
-                  updateSection('rankings', { displayProvisionalRanks: value })
-                }
-              />
-              <ToggleRow
-                label="Recent mover highlights"
-                hint="Highlight users gaining or losing placement during the active ranking window."
-                checked={currentConfig.rankings.highlightRecentMovers}
-                onChange={(value) =>
-                  updateSection('rankings', { highlightRecentMovers: value })
-                }
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
-            <div>
-              <CardTitle>Submission Moderation</CardTitle>
-              <CardDescription>
-                Rules for review flow, validation gates, and admin feedback on incoming submissions.
-              </CardDescription>
-            </div>
-            <Badge className="bg-tertiary/10 text-tertiary">Admin review</Badge>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3">
-              <ToggleRow
-                label="Require draft validation"
-                hint="Check reference SQL and blocked statements before a submission enters review."
-                checked={currentConfig.moderation.requireDraftValidation}
-                onChange={(value) =>
-                  updateSection('moderation', { requireDraftValidation: value })
-                }
-              />
-              <ToggleRow
-                label="Block dangerous SQL"
-                hint="Stop submissions that include destructive statements or policy violations."
-                checked={currentConfig.moderation.blockDangerousSql}
-                onChange={(value) =>
-                  updateSection('moderation', { blockDangerousSql: value })
-                }
-              />
-              <ToggleRow
-                label="Hold high-point submissions"
-                hint="Send high-value challenge changes to manual admin review before publish."
-                checked={currentConfig.moderation.autoHoldHighPointSubmissions}
-                onChange={(value) =>
-                  updateSection('moderation', { autoHoldHighPointSubmissions: value })
-                }
-              />
-            </div>
-
-            <Input
-              label="Manual review SLA (hours)"
-              value={currentConfig.moderation.manualReviewSlaHours}
-              onChange={(event) =>
-                updateSection('moderation', { manualReviewSlaHours: event.target.value })
-              }
-            />
-
-            <Textarea
-              label="Publish checklist"
-              value={currentConfig.moderation.publishChecklist}
-              onChange={(event) =>
-                updateSection('moderation', { publishChecklist: event.target.value })
-              }
-              rows={4}
-            />
-
-            <Textarea
-              label="Default rejection guidance"
-              value={currentConfig.moderation.rejectionTemplate}
-              onChange={(event) =>
-                updateSection('moderation', { rejectionTemplate: event.target.value })
-              }
-              rows={4}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
-            <div>
-              <CardTitle>Workers &amp; Storage</CardTitle>
-              <CardDescription>
-                Runtime defaults for query workers, evaluation throughput, and storage retention.
-              </CardDescription>
-            </div>
-            <Badge className="bg-primary/10 text-primary">Runtime guardrails</Badge>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Input
-                label="Query worker concurrency"
-                value={currentConfig.infrastructure.queryWorkerConcurrency}
-                onChange={(event) =>
-                  updateSection('infrastructure', {
-                    queryWorkerConcurrency: event.target.value,
-                  })
-                }
-              />
-              <Input
-                label="Evaluation worker concurrency"
-                value={currentConfig.infrastructure.evaluationWorkerConcurrency}
-                onChange={(event) =>
-                  updateSection('infrastructure', {
-                    evaluationWorkerConcurrency: event.target.value,
-                  })
-                }
-              />
-              <Input
-                label="Warm sandbox pool"
-                value={currentConfig.infrastructure.sandboxWarmPool}
-                onChange={(event) =>
-                  updateSection('infrastructure', { sandboxWarmPool: event.target.value })
-                }
-              />
-              <Input
-                label="Run retention (days)"
-                value={currentConfig.infrastructure.runRetentionDays}
-                onChange={(event) =>
-                  updateSection('infrastructure', { runRetentionDays: event.target.value })
-                }
-              />
-              <Select
-                label="Object storage class"
-                value={currentConfig.infrastructure.objectStorageClass}
-                onChange={(event) =>
-                  updateSection('infrastructure', {
-                    objectStorageClass:
-                      event.target.value as AdminConfig['infrastructure']['objectStorageClass'],
-                  })
-                }
-                options={[
-                  { value: 'standard', label: 'Standard' },
-                  { value: 'infrequent', label: 'Infrequent access' },
-                  { value: 'archive', label: 'Archive' },
-                ]}
-              />
-              <Input
-                label="Storage warning threshold (GB)"
-                value={currentConfig.infrastructure.warningThresholdGb}
-                onChange={(event) =>
-                  updateSection('infrastructure', { warningThresholdGb: event.target.value })
-                }
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <ToggleRow
-                label="Keep execution snapshots"
-                hint="Retain snapshot bundles for challenge review and ranking disputes."
-                checked={currentConfig.infrastructure.keepExecutionSnapshots}
-                onChange={(value) =>
-                  updateSection('infrastructure', { keepExecutionSnapshots: value })
-                }
-              />
-              <ToggleRow
-                label="Nightly exports"
-                hint="Create nightly admin snapshots for rollback checks and release notes."
-                checked={currentConfig.infrastructure.enableNightlyExports}
-                onChange={(value) =>
-                  updateSection('infrastructure', { enableNightlyExports: value })
-                }
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
-          <div>
-            <CardTitle>Feature Flags</CardTitle>
-            <CardDescription>
-              Rollout controls for ranking surfaces, review tooling, and admin exports.
-            </CardDescription>
-          </div>
-          <Badge className="bg-surface-container-high text-on-surface-variant">
-            {enabledFlagsCount} enabled
-          </Badge>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {FEATURE_FLAGS.map((flag) => (
-            <div
-              key={flag.key}
-              className="rounded-xl border border-outline-variant/10 bg-surface-container p-4"
-            >
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-on-surface">{flag.label}</p>
-                    <Badge
-                      className={cn(
-                        flag.audience === 'Users'
-                          ? 'bg-primary/10 text-primary'
-                          : 'bg-surface-container-high text-on-surface-variant',
-                      )}
-                    >
-                      {flag.audience}
-                    </Badge>
+        {showAdvanced ? (
+          <div className="page-stack">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+                  <div>
+                    <CardTitle>Platform (extended)</CardTitle>
+                    <CardDescription>
+                      Dialect, starter schema visibility, downloads, and operator note.
+                    </CardDescription>
                   </div>
-                  <p className="max-w-2xl text-xs leading-relaxed text-on-surface-variant">
-                    {flag.description}
-                  </p>
-                </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Select
+                      label="Default SQL dialect"
+                      value={currentConfig.platform.defaultDialect}
+                      onChange={(event) =>
+                        updateSection('platform', {
+                          defaultDialect: event.target.value as AdminConfig['platform']['defaultDialect'],
+                        })
+                      }
+                      options={[
+                        { value: 'postgresql-16', label: 'PostgreSQL 16' },
+                        { value: 'mysql-8', label: 'MySQL 8' },
+                        { value: 'sqlite-3', label: 'SQLite 3' },
+                      ]}
+                    />
+                    <Select
+                      label="Starter schema visibility"
+                      value={currentConfig.platform.starterSchemaVisibility}
+                      onChange={(event) =>
+                        updateSection('platform', {
+                          starterSchemaVisibility:
+                            event.target.value as AdminConfig['platform']['starterSchemaVisibility'],
+                        })
+                      }
+                      options={[
+                        { value: 'schema-only', label: 'Schema only' },
+                        { value: 'schema-and-sample', label: 'Schema + sample rows' },
+                        { value: 'delayed-sample', label: 'Sample rows after first run' },
+                      ]}
+                    />
+                  </div>
+                  <ToggleRow
+                    label="Sample data downloads"
+                    hint="Allow admins to export sample datasets directly from practice screens."
+                    checked={currentConfig.platform.allowSampleDataDownloads}
+                    onChange={(value) =>
+                      updateSection('platform', { allowSampleDataDownloads: value })
+                    }
+                  />
+                  <Textarea
+                    label="Operator note"
+                    value={currentConfig.platform.operatorNote}
+                    onChange={(event) =>
+                      updateSection('platform', { operatorNote: event.target.value })
+                    }
+                    rows={4}
+                  />
+                </CardContent>
+              </Card>
 
-                <button
-                  type="button"
-                  aria-pressed={currentConfig.flags[flag.key]}
-                  onClick={() =>
-                    updateSection('flags', {
-                      [flag.key]: !currentConfig.flags[flag.key],
-                    } as Partial<AdminConfig['flags']>)
-                  }
-                  className={cn(
-                    'inline-flex h-9 min-w-28 items-center justify-center rounded-lg border px-4 text-sm font-medium transition-colors',
-                    currentConfig.flags[flag.key]
-                      ? 'border-primary/30 bg-primary/10 text-primary'
-                      : 'border-outline-variant/20 bg-surface-container-high text-on-surface-variant',
-                  )}
-                >
-                  {currentConfig.flags[flag.key] ? 'Enabled' : 'Disabled'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+                  <div>
+                    <CardTitle>Ranking display</CardTitle>
+                    <CardDescription>
+                      Optional UI behavior for provisional ranks and mover highlights.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <ToggleRow
+                    label="Provisional placements"
+                    hint="Show temporary ranking movement before the next full standings refresh."
+                    checked={currentConfig.rankings.displayProvisionalRanks}
+                    onChange={(value) =>
+                      updateSection('rankings', { displayProvisionalRanks: value })
+                    }
+                  />
+                  <ToggleRow
+                    label="Recent mover highlights"
+                    hint="Highlight users gaining or losing placement during the active ranking window."
+                    checked={currentConfig.rankings.highlightRecentMovers}
+                    onChange={(value) =>
+                      updateSection('rankings', { highlightRecentMovers: value })
+                    }
+                  />
+                </CardContent>
+              </Card>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
-        <Card>
-          <CardHeader className="items-start gap-3 border-b border-outline-variant/10">
-            <div>
-              <CardTitle>Release Summary</CardTitle>
-              <CardDescription>
-                Snapshot of what will change when the current draft is persisted.
-              </CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-xl bg-surface-container p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Affected Sections</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {pendingSections.length > 0 ? (
-                  pendingSections.map((section) => (
-                    <Badge key={section} className="bg-primary/10 text-primary">
-                      {SECTION_LABELS[section]}
-                    </Badge>
-                  ))
-                ) : (
-                  <Badge className="bg-secondary/10 text-secondary">No unsaved sections</Badge>
-                )}
-              </div>
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+                  <div>
+                    <CardTitle>Submission Moderation</CardTitle>
+                    <CardDescription>
+                      Review flow, validation gates, and admin feedback templates.
+                    </CardDescription>
+                  </div>
+                  <Badge className="bg-tertiary/10 text-tertiary">Admin review</Badge>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3">
+                    <ToggleRow
+                      label="Require draft validation"
+                      hint="Check reference SQL and blocked statements before a submission enters review."
+                      checked={currentConfig.moderation.requireDraftValidation}
+                      onChange={(value) =>
+                        updateSection('moderation', { requireDraftValidation: value })
+                      }
+                    />
+                    <ToggleRow
+                      label="Block dangerous SQL"
+                      hint="Stop submissions that include destructive statements or policy violations."
+                      checked={currentConfig.moderation.blockDangerousSql}
+                      onChange={(value) =>
+                        updateSection('moderation', { blockDangerousSql: value })
+                      }
+                    />
+                    <ToggleRow
+                      label="Hold high-point submissions"
+                      hint="Send high-value challenge changes to manual admin review before publish."
+                      checked={currentConfig.moderation.autoHoldHighPointSubmissions}
+                      onChange={(value) =>
+                        updateSection('moderation', { autoHoldHighPointSubmissions: value })
+                      }
+                    />
+                  </div>
+
+                  <Input
+                    label="Manual review SLA (hours)"
+                    value={currentConfig.moderation.manualReviewSlaHours}
+                    onChange={(event) =>
+                      updateSection('moderation', { manualReviewSlaHours: event.target.value })
+                    }
+                  />
+
+                  <Textarea
+                    label="Publish checklist"
+                    value={currentConfig.moderation.publishChecklist}
+                    onChange={(event) =>
+                      updateSection('moderation', { publishChecklist: event.target.value })
+                    }
+                    rows={4}
+                  />
+
+                  <Textarea
+                    label="Default rejection guidance"
+                    value={currentConfig.moderation.rejectionTemplate}
+                    onChange={(event) =>
+                      updateSection('moderation', { rejectionTemplate: event.target.value })
+                    }
+                    rows={4}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+                  <div>
+                    <CardTitle>Workers &amp; Storage</CardTitle>
+                    <CardDescription>
+                      Runtime defaults for workers, sandboxes, and retention (mostly informational).
+                    </CardDescription>
+                  </div>
+                  <Badge className="bg-primary/10 text-primary">Runtime</Badge>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Input
+                      label="Query worker concurrency"
+                      value={currentConfig.infrastructure.queryWorkerConcurrency}
+                      onChange={(event) =>
+                        updateSection('infrastructure', {
+                          queryWorkerConcurrency: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      label="Evaluation worker concurrency"
+                      value={currentConfig.infrastructure.evaluationWorkerConcurrency}
+                      onChange={(event) =>
+                        updateSection('infrastructure', {
+                          evaluationWorkerConcurrency: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      label="Warm sandbox pool"
+                      value={currentConfig.infrastructure.sandboxWarmPool}
+                      onChange={(event) =>
+                        updateSection('infrastructure', { sandboxWarmPool: event.target.value })
+                      }
+                    />
+                    <Input
+                      label="Run retention (days)"
+                      value={currentConfig.infrastructure.runRetentionDays}
+                      onChange={(event) =>
+                        updateSection('infrastructure', { runRetentionDays: event.target.value })
+                      }
+                    />
+                    <Select
+                      label="Object storage class"
+                      value={currentConfig.infrastructure.objectStorageClass}
+                      onChange={(event) =>
+                        updateSection('infrastructure', {
+                          objectStorageClass:
+                            event.target.value as AdminConfig['infrastructure']['objectStorageClass'],
+                        })
+                      }
+                      options={[
+                        { value: 'standard', label: 'Standard' },
+                        { value: 'infrequent', label: 'Infrequent access' },
+                        { value: 'archive', label: 'Archive' },
+                      ]}
+                    />
+                    <Input
+                      label="Storage warning threshold (GB)"
+                      value={currentConfig.infrastructure.warningThresholdGb}
+                      onChange={(event) =>
+                        updateSection('infrastructure', { warningThresholdGb: event.target.value })
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <ToggleRow
+                      label="Keep execution snapshots"
+                      hint="Retain snapshot bundles for challenge review and ranking disputes."
+                      checked={currentConfig.infrastructure.keepExecutionSnapshots}
+                      onChange={(value) =>
+                        updateSection('infrastructure', { keepExecutionSnapshots: value })
+                      }
+                    />
+                    <ToggleRow
+                      label="Nightly exports"
+                      hint="Create nightly admin snapshots for rollback checks and release notes."
+                      checked={currentConfig.infrastructure.enableNightlyExports}
+                      onChange={(value) =>
+                        updateSection('infrastructure', { enableNightlyExports: value })
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
-            <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Persisted Scope</p>
-              <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
-                This config record is stored centrally under the <span className="font-mono">{persisted.scope}</span>{' '}
-                scope and is consumed by admin ranking and system surfaces.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10">
+                  <div>
+                    <CardTitle>Release Summary</CardTitle>
+                    <CardDescription>
+                      Snapshot of what will change when the current draft is persisted.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-xl bg-surface-container p-4">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-outline">
+                      Affected Sections
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {pendingSections.length > 0 ? (
+                        pendingSections.map((section) => (
+                          <Badge key={section} className="bg-primary/10 text-primary">
+                            {SECTION_LABELS[section]}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Badge className="bg-secondary/10 text-secondary">No unsaved sections</Badge>
+                      )}
+                    </div>
+                  </div>
 
-        <Card>
-          <CardHeader className="items-start gap-3 border-b border-outline-variant/10">
-            <div>
-              <CardTitle>Readiness Checks</CardTitle>
-              <CardDescription>
-                Quick sanity checks before saving admin config to the backend.
-              </CardDescription>
+                  <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-low p-4">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-outline">
+                      Persisted Scope
+                    </p>
+                    <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+                      This config record is stored centrally under the{' '}
+                      <span className="font-mono">{persisted.scope}</span> scope and is consumed by
+                      admin ranking and system surfaces.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10">
+                  <div>
+                    <CardTitle>Readiness Checks</CardTitle>
+                    <CardDescription>
+                      Quick sanity checks before saving admin config to the backend.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {readinessChecks.map((check) => (
+                    <div
+                      key={check.label}
+                      className="flex items-start gap-3 rounded-xl border border-outline-variant/10 bg-surface-container p-3"
+                    >
+                      <span
+                        className={cn(
+                          'material-symbols-outlined text-base',
+                          check.ok ? 'text-secondary' : 'text-error',
+                        )}
+                      >
+                        {check.ok ? 'check_circle' : 'error'}
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium text-on-surface">{check.label}</p>
+                        <p className="text-xs text-on-surface-variant">
+                          {check.ok ? 'Ready' : 'Needs attention before saving'}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {readinessChecks.map((check) => (
-              <div
-                key={check.label}
-                className="flex items-start gap-3 rounded-xl border border-outline-variant/10 bg-surface-container p-3"
-              >
-                <span
-                  className={cn(
-                    'material-symbols-outlined text-base',
-                    check.ok ? 'text-secondary' : 'text-error',
-                  )}
-                >
-                  {check.ok ? 'check_circle' : 'error'}
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-on-surface">{check.label}</p>
-                  <p className="text-xs text-on-surface-variant">
-                    {check.ok ? 'Ready' : 'Needs attention before saving'}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+          </div>
+        ) : null}
       </div>
     </div>
   );
