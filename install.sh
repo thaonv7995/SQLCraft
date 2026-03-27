@@ -175,20 +175,37 @@ configure_admin() {
 }
 
 ensure_core_env() {
+  local current_stack desired_stack
+  current_stack="$(get_env_value "STACK_NAME" "$ENV_FILE")"
+  desired_stack="$(pick_stack_name "${current_stack:-sqlcraft}")"
+  if [[ "$desired_stack" != "${current_stack:-}" ]]; then
+    warn "Using stack name: ${desired_stack}"
+  fi
+  set_env_value "STACK_NAME" "$desired_stack" "$ENV_FILE"
+  set_env_value "SANDBOX_DOCKER_NETWORK" "${desired_stack}-prod" "$ENV_FILE"
+
+  ensure_port "WEB_PORT" 13029
+  ensure_port "API_PORT" 4000
+  ensure_port "POSTGRES_PORT" 5432
+  ensure_port "REDIS_PORT" 6379
+  ensure_port "MINIO_API_PORT" 9000
+  ensure_port "MINIO_CONSOLE_PORT" 9001
+
   ensure_or_generate_secret "JWT_SECRET" 32
   ensure_or_generate_secret "POSTGRES_PASSWORD" 16
   ensure_or_generate_secret "MINIO_ROOT_PASSWORD" 16
   ensure_or_generate_secret "STORAGE_SECRET_KEY" 16
   ensure_or_generate_secret "SANDBOX_DB_PASSWORD" 16
 
-  local postgres_password
+  local postgres_password web_port api_port
   postgres_password="$(get_env_value "POSTGRES_PASSWORD" "$ENV_FILE")"
+  web_port="$(get_env_value "WEB_PORT" "$ENV_FILE")"
+  api_port="$(get_env_value "API_PORT" "$ENV_FILE")"
 
   set_env_value "DATABASE_URL" "postgresql://sqlcraft:${postgres_password}@postgres:5432/sqlcraft" "$ENV_FILE"
-  set_env_value "NEXT_PUBLIC_APP_URL" "http://localhost:13029" "$ENV_FILE"
-  set_env_value "ALLOWED_ORIGINS" "http://localhost:13029" "$ENV_FILE"
-  set_env_value "NEXT_PUBLIC_API_URL" "http://localhost:4000/v1" "$ENV_FILE"
-  set_env_value "WEB_PORT" "13029" "$ENV_FILE"
+  set_env_value "NEXT_PUBLIC_APP_URL" "http://localhost:${web_port}" "$ENV_FILE"
+  set_env_value "ALLOWED_ORIGINS" "http://localhost:${web_port}" "$ENV_FILE"
+  set_env_value "NEXT_PUBLIC_API_URL" "http://localhost:${api_port}/v1" "$ENV_FILE"
 }
 
 wait_for_docker() {
@@ -196,6 +213,61 @@ wait_for_docker() {
     error "Docker daemon is not running. Please start Docker Desktop / dockerd."
     exit 1
   fi
+}
+
+is_port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return $?
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "( sport = :${port} )" | awk 'NR>1{found=1} END{exit(found?0:1)}'
+    return $?
+  fi
+  (echo >"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1
+}
+
+find_free_port() {
+  local candidate="$1"
+  while is_port_in_use "$candidate"; do
+    candidate=$((candidate + 1))
+  done
+  echo "$candidate"
+}
+
+ensure_port() {
+  local key="$1"
+  local default_port="$2"
+  local value selected
+  value="$(get_env_value "$key" "$ENV_FILE")"
+  if [[ -z "$value" ]]; then
+    value="$default_port"
+  fi
+  selected="$(find_free_port "$value")"
+  if [[ "$selected" != "$value" ]]; then
+    warn "Port ${value} is busy; using ${selected} for ${key}."
+  fi
+  set_env_value "$key" "$selected" "$ENV_FILE"
+}
+
+pick_stack_name() {
+  local base desired candidate suffix
+  base="${1:-sqlcraft}"
+  desired="$base"
+  local names
+  names="$(docker ps -a --format '{{.Names}}')"
+  if ! grep -Eq "^${desired}-(postgres|redis|minio|api|web|worker)$" <<<"$names"; then
+    echo "$desired"
+    return
+  fi
+  suffix="${USER:-dev}"
+  candidate="${base}-${suffix}"
+  if ! grep -Eq "^${candidate}-(postgres|redis|minio|api|web|worker)$" <<<"$names"; then
+    echo "$candidate"
+    return
+  fi
+  echo "${base}-$(date +%s)"
 }
 
 run_compose() {
@@ -215,14 +287,18 @@ bootstrap_stack() {
 }
 
 print_summary() {
-  local admin_email admin_username admin_password
+  local admin_email admin_username admin_password web_port api_port minio_console_port stack_name
   admin_email="$(get_env_value "FIRST_ADMIN_EMAIL" "$ENV_FILE")"
   admin_username="$(get_env_value "FIRST_ADMIN_USERNAME" "$ENV_FILE")"
   admin_password="$(get_env_value "FIRST_ADMIN_PASSWORD" "$ENV_FILE")"
+  web_port="$(get_env_value "WEB_PORT" "$ENV_FILE")"
+  api_port="$(get_env_value "API_PORT" "$ENV_FILE")"
+  minio_console_port="$(get_env_value "MINIO_CONSOLE_PORT" "$ENV_FILE")"
+  stack_name="$(get_env_value "STACK_NAME" "$ENV_FILE")"
   local access_url api_url minio_url
-  access_url="http://localhost:13029"
-  api_url="http://localhost:4000"
-  minio_url="http://localhost:9001"
+  access_url="http://localhost:${web_port}"
+  api_url="http://localhost:${api_port}"
+  minio_url="http://localhost:${minio_console_port}"
 
   print_logo
 
@@ -235,6 +311,7 @@ print_summary() {
   printf "${GREEN}|${RESET} Admin email     ${CYAN}%-49s${RESET}${GREEN}|${RESET}\n" "$admin_email"
   printf "${GREEN}|${RESET} Admin username  ${CYAN}%-49s${RESET}${GREEN}|${RESET}\n" "$admin_username"
   printf "${GREEN}|${RESET} Admin password  ${CYAN}%-49s${RESET}${GREEN}|${RESET}\n" "$admin_password"
+  printf "${GREEN}|${RESET} Stack name      ${CYAN}%-49s${RESET}${GREEN}|${RESET}\n" "$stack_name"
   printf "${GREEN}|${RESET} Config          %-49s${GREEN}|${RESET}\n" "$ENV_FILE"
   printf "${GREEN}+------------------------------------------------------------------+${RESET}\n"
   printf "${GREEN}|${RESET} ${BOLD}Next steps${RESET}                                                       ${GREEN}|${RESET}\n"

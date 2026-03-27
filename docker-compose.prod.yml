@@ -10,7 +10,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: sqlcraft-postgres
+    container_name: "${STACK_NAME:-sqlcraft}-postgres"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sqlcraft}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sqlcraft}
@@ -29,7 +29,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: sqlcraft-redis
+    container_name: "${STACK_NAME:-sqlcraft}-redis"
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -44,7 +44,7 @@ services:
 
   minio:
     image: minio/minio
-    container_name: sqlcraft-minio
+    container_name: "${STACK_NAME:-sqlcraft}-minio"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -67,7 +67,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     image: ${API_IMAGE:-sqlcraft-api:prod}
-    container_name: sqlcraft-api
+    container_name: "${STACK_NAME:-sqlcraft}-api"
     env_file:
       - .env.production
     environment:
@@ -92,7 +92,7 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/v1}
     image: ${WEB_IMAGE:-sqlcraft-web:prod}
-    container_name: sqlcraft-web
+    container_name: "${STACK_NAME:-sqlcraft}-web"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -109,11 +109,12 @@ services:
       context: .
       dockerfile: services/worker/Dockerfile
     image: ${WORKER_IMAGE:-sqlcraft-worker:prod}
-    container_name: sqlcraft-worker
+    container_name: "${STACK_NAME:-sqlcraft}-worker"
     env_file:
       - .env.production
     environment:
       NODE_ENV: production
+      STORAGE_DOCKER_CONTAINER: "${STACK_NAME:-sqlcraft}-minio"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
@@ -134,4 +135,4 @@ volumes:
 
 networks:
   sqlcraft:
-    name: sqlcraft-prod
+    name: "${STACK_NAME:-sqlcraft}-prod"
