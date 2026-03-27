@@ -51,17 +51,6 @@ import {
 } from '@/lib/lab-editor-tabs';
 import type { ClientPageProps } from '@/lib/page-props';
 
-function normalizeMetric(value: number | null | undefined) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function compareNullableAscending(left: number | null, right: number | null) {
-  if (left === null && right === null) return 0;
-  if (left === null) return 1;
-  if (right === null) return -1;
-  return left - right;
-}
-
 /** API appends ` OK: [type] …` per criterion after the main verdict; cards already show those lines. */
 function extractPrimaryChallengeFeedback(text: string | undefined): string {
   if (!text?.trim()) return '';
@@ -2172,37 +2161,6 @@ export default function LabPage({ params }: ClientPageProps) {
   const isLatestExecutionAlreadySubmitted = Boolean(
     latestSuccessfulExecution && submittedQueryExecutionIds.has(latestSuccessfulExecution.id),
   );
-  const bestChallengeAttempt = challengeAttempts
-    .filter((attempt) => attempt.status === 'passed')
-    .reduce<(typeof challengeAttempts)[number] | null>((best, attempt) => {
-      if (!best) {
-        return attempt;
-      }
-
-      const durationComparison = compareNullableAscending(
-        normalizeMetric(attempt.queryExecution.durationMs),
-        normalizeMetric(best.queryExecution.durationMs),
-      );
-      if (durationComparison < 0) {
-        return attempt;
-      }
-      if (durationComparison > 0) {
-        return best;
-      }
-
-      const costComparison = compareNullableAscending(
-        normalizeMetric(attempt.queryExecution.totalCost),
-        normalizeMetric(best.queryExecution.totalCost),
-      );
-      if (costComparison < 0) {
-        return attempt;
-      }
-      if (costComparison > 0) {
-        return best;
-      }
-
-      return new Date(attempt.submittedAt) < new Date(best.submittedAt) ? attempt : best;
-    }, null);
   const latestChallengeAttempt = challengeAttempts[0] ?? null;
   const latestAttemptEvaluation = latestChallengeAttempt?.evaluation ?? null;
   const latestAttemptPassChecks = latestAttemptEvaluation?.passCriterionChecks ?? [];
@@ -2716,7 +2674,7 @@ export default function LabPage({ params }: ClientPageProps) {
                         : 'Submit the latest successful query execution for challenge scoring'
                   }
                 >
-                  Submit Attempt
+                  Submit
                 </Button>
               ) : null}
             </div>
@@ -2743,16 +2701,29 @@ export default function LabPage({ params }: ClientPageProps) {
                 {lessonTitle}
               </span>
             )}
-            {session?.challengeVersionId && bestChallengeAttempt ? (
-              <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant lg:inline-flex">
-                Best {bestChallengeAttempt.queryExecution.durationMs != null ? `${bestChallengeAttempt.queryExecution.durationMs} ms` : 'validated run'}
+            <div
+              className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2 py-1 sm:px-2.5"
+              title={
+                effectiveSessionStatus === 'provisioning'
+                  ? 'Sandbox: Provisioning'
+                  : effectiveSessionStatus === 'active'
+                    ? 'Sandbox: Ready'
+                    : `Sandbox: ${effectiveSessionStatus ?? 'Unknown'}`
+              }
+              aria-label={
+                effectiveSessionStatus === 'provisioning'
+                  ? 'Sandbox provisioning'
+                  : effectiveSessionStatus === 'active'
+                    ? 'Sandbox ready'
+                    : `Sandbox ${effectiveSessionStatus ?? 'unknown'}`
+              }
+            >
+              <span className="hidden text-[10px] font-medium uppercase tracking-wider text-outline sm:inline">
+                Sandbox
               </span>
-            ) : null}
-            <div className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-outline">Sandbox</span>
               <span
                 className={cn(
-                  'h-2 w-2 rounded-full',
+                  'h-2 w-2 shrink-0 rounded-full',
                   effectiveSessionStatus === 'active'
                     ? 'bg-green-400 shadow-[0_0_8px_rgba(34,197,94,0.45)]'
                     : effectiveSessionStatus === 'provisioning'
@@ -2760,7 +2731,7 @@ export default function LabPage({ params }: ClientPageProps) {
                       : 'bg-outline',
                 )}
               />
-              <span className="text-[11px] font-medium text-on-surface-variant">
+              <span className="hidden text-[11px] font-medium text-on-surface-variant sm:inline">
                 {effectiveSessionStatus === 'provisioning'
                   ? 'Provisioning'
                   : effectiveSessionStatus === 'active'
@@ -2794,7 +2765,7 @@ export default function LabPage({ params }: ClientPageProps) {
           className={cn(
             'shrink-0 border-b text-sm',
             latestChallengeAttempt.status === 'passed'
-              ? 'border-green-500/25 bg-green-500/5'
+              ? 'border-outline-variant/50 bg-surface-container-low'
               : 'border-error/25 bg-error/5',
           )}
         >
@@ -2817,9 +2788,14 @@ export default function LabPage({ params }: ClientPageProps) {
                   </div>
                 ) : null}
                 <div role="status" className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="shrink-0 text-xs font-medium text-on-surface-variant">Expected:</span>
-                  <div className="min-w-0 min-h-[28px] flex-1 basis-0">
-                    <ChallengeAttemptCriteriaChecks checks={latestAttemptPassChecks} />
+                  <span className="inline-flex shrink-0 items-center self-center text-xs font-medium leading-none text-on-surface-variant">
+                    Expected:
+                  </span>
+                  <div className="flex min-h-[28px] min-w-0 flex-1 basis-0 items-center">
+                    <ChallengeAttemptCriteriaChecks
+                      checks={latestAttemptPassChecks}
+                      evaluation={latestAttemptEvaluation}
+                    />
                   </div>
                 </div>
               </div>

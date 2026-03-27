@@ -344,11 +344,11 @@ test.describe('lesson happy path on the real stack', () => {
     );
 
     await page.getByRole('button', { name: /Run$/ }).click();
-    await expect(page.getByRole('button', { name: /Submit Attempt$/ })).toBeEnabled({
+    await expect(page.getByRole('button', { name: /^Submit$/ })).toBeEnabled({
       timeout: 60_000,
     });
 
-    await page.getByRole('button', { name: /Submit Attempt$/ }).click();
+    await page.getByRole('button', { name: /^Submit$/ }).click();
 
     await expect(page.locator('header').getByText('Best 100 pts')).toBeVisible({
       timeout: 60_000,

@@ -904,14 +904,14 @@ function passChecksWhenQueryFailed(
         type: c.type,
         passed: ok,
         detail: ok
-          ? `SQL references required table(s) (${c.matchMode}).`
-          : `SQL must ${c.matchMode === 'all' ? 'reference all of' : 'reference at least one of'}: ${c.tables.join(', ')}.`,
+          ? `${c.matchMode === 'all' ? 'all' : 'any'}: ${c.tables.join(', ')}`
+          : `Need ${c.matchMode === 'all' ? 'all' : 'any'}: ${c.tables.join(', ')}`,
       };
     }
     return {
       type: c.type,
       passed: false,
-      detail: 'Query did not complete successfully.',
+      detail: 'Query failed',
     };
   });
 }
@@ -941,10 +941,10 @@ function runPassCriteriaChecks(params: {
           type: c.type,
           passed: ok,
           detail: ok
-            ? `Runtime ${latestDurationMs} ms ≤ ${c.maxMs} ms.`
+            ? `<= ${c.maxMs} ms`
             : latestDurationMs === null
-              ? `Runtime unknown; limit is ${c.maxMs} ms.`
-              : `Runtime ${latestDurationMs} ms exceeds ${c.maxMs} ms.`,
+              ? `? / max ${c.maxMs} ms`
+              : `${latestDurationMs} ms > ${c.maxMs} ms`,
         };
       }
       case 'max_explain_total_cost': {
@@ -953,19 +953,17 @@ function runPassCriteriaChecks(params: {
           type: c.type,
           passed: ok,
           detail: ok
-            ? `Planner total cost ${latestTotalCost} ≤ ${c.maxTotalCost}.`
+            ? `<= ${c.maxTotalCost}`
             : latestTotalCost === null
-              ? `Planner cost unknown; limit is ${c.maxTotalCost}.`
-              : `Planner total cost ${latestTotalCost} exceeds ${c.maxTotalCost}.`,
+              ? `? / max ${c.maxTotalCost}`
+              : `${latestTotalCost !== null ? Math.round(latestTotalCost) : '?'} > ${c.maxTotalCost}`,
         };
       }
       case 'requires_index_usage':
         return {
           type: c.type,
           passed: usedIndexing,
-          detail: usedIndexing
-            ? 'Plan shows index usage and prior session DDL supports it.'
-            : 'Plan does not show required index usage (or no CREATE INDEX before this query).',
+          detail: usedIndexing ? 'OK' : 'Not in plan',
         };
       case 'required_output_columns': {
         const ok = resultContainsAllColumnNames(resultPreview.columns, c.columns);
@@ -973,8 +971,8 @@ function runPassCriteriaChecks(params: {
           type: c.type,
           passed: ok,
           detail: ok
-            ? `Output includes required columns: ${c.columns.join(', ')}.`
-            : `Output must include all columns: ${c.columns.join(', ')}. Got: ${resultPreview.columns.join(', ') || '(none)'}.`,
+            ? c.columns.join(', ')
+            : `need ${c.columns.join(', ')} · got ${resultPreview.columns.join(', ') || '—'}`,
         };
       }
       case 'required_tables_in_query': {
@@ -984,8 +982,8 @@ function runPassCriteriaChecks(params: {
           type: c.type,
           passed: ok,
           detail: ok
-            ? `SQL references required table(s) (${c.matchMode}).`
-            : `SQL must ${c.matchMode === 'all' ? 'use all of' : 'use at least one of'}: ${c.tables.join(', ')}.`,
+            ? `${c.matchMode === 'all' ? 'all' : 'any'}: ${c.tables.join(', ')}`
+            : `need ${c.matchMode === 'all' ? 'all' : 'any'}: ${c.tables.join(', ')}`,
         };
       }
     }

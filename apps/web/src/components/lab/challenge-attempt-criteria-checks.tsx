@@ -1,28 +1,40 @@
 'use client';
 
-import type { PassCriterionCheckClient } from '@/lib/api';
+import type { ChallengeEvaluation, PassCriterionCheckClient } from '@/lib/api';
+import { compactPassCriterionChipDetail } from '@/lib/pass-criterion-chip-display';
 import { labelForPassCriterionType } from '@/lib/pass-criterion-labels';
 import { cn } from '@/lib/utils';
 
-export function ChallengeAttemptCriteriaChecks({ checks }: { checks: PassCriterionCheckClient[] }) {
+export function ChallengeAttemptCriteriaChecks({
+  checks,
+  evaluation,
+}: {
+  checks: PassCriterionCheckClient[];
+  /** Used to show threshold-only text when API `detail` is missing or legacy. */
+  evaluation?: ChallengeEvaluation | null;
+}) {
   if (checks.length === 0) return null;
 
   return (
-    <ul className="m-0 flex max-w-full min-w-0 list-none flex-nowrap items-stretch justify-start gap-2 overflow-x-auto p-0 pb-0.5 [scrollbar-width:thin]">
-      {checks.map((ch, i) => (
-        <li key={`${ch.type}-${i}`} className="shrink-0">
-          <span
-            className={cn(
-              'inline-flex max-w-[min(100vw-4rem,22rem)] flex-col gap-0.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium leading-tight',
-              ch.passed
-                ? 'border-outline-variant bg-green-500/10 text-on-surface'
-                : 'border-outline-variant bg-error/10 text-on-surface',
-            )}
-          >
-            <span className="inline-flex min-w-0 items-center gap-1">
+    <ul className="m-0 flex max-w-full min-w-0 list-none flex-nowrap items-center justify-start gap-2 overflow-x-auto p-0 py-0.5 [scrollbar-width:thin]">
+      {checks.map((ch, i) => {
+        const label = labelForPassCriterionType(ch.type);
+        const displayDetail = compactPassCriterionChipDetail(ch, evaluation);
+        const fullTitle = ch.detail ? `${label}: ${ch.detail}` : label;
+        return (
+          <li key={`${ch.type}-${i}`} className="min-w-0 max-w-[min(100vw-4rem,20rem)] shrink-0">
+            <span
+              className={cn(
+                'inline-flex w-full min-w-0 max-w-full flex-row items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] leading-tight',
+                ch.passed
+                  ? 'border-outline-variant/80 bg-surface-container-high/60 text-on-surface'
+                  : 'border-outline-variant bg-error/10 text-on-surface',
+              )}
+              title={fullTitle}
+            >
               <span
                 className={cn(
-                  'material-symbols-outlined shrink-0 text-[16px] leading-none',
+                  'material-symbols-outlined shrink-0 text-[15px] leading-none',
                   ch.passed ? 'text-green-400' : 'text-error',
                 )}
                 style={ch.passed ? { fontVariationSettings: "'FILL' 1" } : undefined}
@@ -30,19 +42,18 @@ export function ChallengeAttemptCriteriaChecks({ checks }: { checks: PassCriteri
               >
                 {ch.passed ? 'check_circle' : 'cancel'}
               </span>
-              <span className="truncate">{labelForPassCriterionType(ch.type)}</span>
-            </span>
-            {ch.detail ? (
-              <span
-                className="line-clamp-2 pl-[22px] text-[10px] font-normal leading-snug text-on-surface-variant"
-                title={ch.detail}
-              >
-                {ch.detail}
+              <span className="min-w-0 truncate font-medium">
+                {label}
+                {displayDetail ? (
+                  <span className="text-[10px] font-normal text-on-surface-variant">
+                    : {displayDetail}
+                  </span>
+                ) : null}
               </span>
-            ) : null}
-          </span>
-        </li>
-      ))}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }
