@@ -1,4 +1,4 @@
-.PHONY: dev build prod stop clean logs migrate seed test lint help
+.PHONY: dev build prod-setup prod prod-build prod-stop prod-logs prod-clean release-docker stop clean logs migrate seed test lint help
 
 # Default target
 .DEFAULT_GOAL := help
@@ -62,11 +62,102 @@ db-studio: ## Open Drizzle Studio
 build: ## Build all packages for production
 	pnpm run build
 
-prod: ## Start production environment
-	docker compose -f docker-compose.prod.yml up -d
+prod-setup: ## Generate .env.production with auto secrets + first admin (interactive)
+	@set -e; \
+	if [ ! -f .env.production ]; then \
+		cp .env.production.example .env.production; \
+		echo "Created .env.production from template."; \
+	fi; \
+	get_kv() { awk -F= -v k="$$1" '$$1==k {print $$2; exit}' "$$2"; }; \
+	set_kv() { \
+		key="$$1"; value="$$2"; file="$$3"; \
+		awk -v k="$$key" -v v="$$value" 'BEGIN{done=0} $$0 ~ ("^"k"=") { print k"="v; done=1; next } { print } END { if (!done) print k"="v }' "$$file" > "$$file.tmp"; \
+		mv "$$file.tmp" "$$file"; \
+	}; \
+	jwt_secret="$$(get_kv JWT_SECRET .env.production)"; \
+	postgres_password="$$(get_kv POSTGRES_PASSWORD .env.production)"; \
+	minio_password="$$(get_kv MINIO_ROOT_PASSWORD .env.production)"; \
+	storage_secret="$$(get_kv STORAGE_SECRET_KEY .env.production)"; \
+	sandbox_password="$$(get_kv SANDBOX_DB_PASSWORD .env.production)"; \
+	admin_email="$$(get_kv FIRST_ADMIN_EMAIL .env.production)"; \
+	admin_username="$$(get_kv FIRST_ADMIN_USERNAME .env.production)"; \
+	admin_password="$$(get_kv FIRST_ADMIN_PASSWORD .env.production)"; \
+	if [ -z "$$jwt_secret" ] || [ "$$jwt_secret" = "change-me" ]; then jwt_secret="$$(openssl rand -hex 32)"; fi; \
+	if [ -z "$$postgres_password" ] || [ "$$postgres_password" = "change-me" ]; then postgres_password="$$(openssl rand -hex 16)"; fi; \
+	if [ -z "$$minio_password" ] || [ "$$minio_password" = "change-me" ]; then minio_password="$$(openssl rand -hex 16)"; fi; \
+	if [ -z "$$storage_secret" ] || [ "$$storage_secret" = "change-me" ]; then storage_secret="$$minio_password"; fi; \
+	if [ -z "$$sandbox_password" ] || [ "$$sandbox_password" = "change-me" ]; then sandbox_password="$$(openssl rand -hex 16)"; fi; \
+	if [ -z "$$admin_email" ] || [ "$$admin_email" = "admin@sqlcraft.local" ]; then \
+		echo ""; \
+		echo "Configure first admin (press Enter for defaults):"; \
+		default_email="admin@sqlcraft.local"; \
+		default_username="admin"; \
+		default_password="$$(openssl rand -hex 12)"; \
+		printf "  FIRST_ADMIN_EMAIL [$${default_email}]: "; \
+		read input_admin_email; \
+		admin_email="$${input_admin_email:-$${default_email}}"; \
+		printf "  FIRST_ADMIN_USERNAME [$${default_username}]: "; \
+		read input_admin_username; \
+		admin_username="$${input_admin_username:-$${default_username}}"; \
+		printf "  FIRST_ADMIN_PASSWORD [auto-generated]: "; \
+		read input_admin_password; \
+		admin_password="$${input_admin_password:-$${default_password}}"; \
+	elif [ -z "$$admin_password" ] || [ "$$admin_password" = "change-me" ]; then \
+		admin_password="$$(openssl rand -hex 12)"; \
+	fi; \
+	set_kv "JWT_SECRET" "$$jwt_secret" ".env.production"; \
+	set_kv "POSTGRES_PASSWORD" "$$postgres_password" ".env.production"; \
+	set_kv "DATABASE_URL" "postgresql://sqlcraft:$$postgres_password@postgres:5432/sqlcraft" ".env.production"; \
+	set_kv "MINIO_ROOT_PASSWORD" "$$minio_password" ".env.production"; \
+	set_kv "STORAGE_SECRET_KEY" "$$storage_secret" ".env.production"; \
+	set_kv "SANDBOX_DB_PASSWORD" "$$sandbox_password" ".env.production"; \
+	set_kv "FIRST_ADMIN_EMAIL" "$$admin_email" ".env.production"; \
+	set_kv "FIRST_ADMIN_USERNAME" "$$admin_username" ".env.production"; \
+	set_kv "FIRST_ADMIN_PASSWORD" "$$admin_password" ".env.production"; \
+	set_kv "NEXT_PUBLIC_APP_URL" "http://localhost:13029" ".env.production"; \
+	set_kv "ALLOWED_ORIGINS" "http://localhost:13029" ".env.production"; \
+	set_kv "NEXT_PUBLIC_API_URL" "http://localhost:4000/v1" ".env.production"; \
+	echo ""; \
+	echo "Saved .env.production (secrets ensured)."; \
+	echo "First admin:"; \
+	echo "  email: $$admin_email"; \
+	echo "  username: $$admin_username"; \
+	echo "  password: $$admin_password"; \
+	echo ""
 
-prod-build: ## Build and start production environment
-	docker compose -f docker-compose.prod.yml up -d --build
+prod-build: prod-setup ## Build images, bootstrap DB/admin, and start production stack
+	@set -e; \
+	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build postgres redis minio; \
+	docker compose --env-file .env.production -f docker-compose.prod.yml run --rm --entrypoint sh api -lc "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:seed"; \
+	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build api web worker; \
+	first_admin_email="$$(awk -F= '/^FIRST_ADMIN_EMAIL=/{print $$2}' .env.production)"; \
+	first_admin_username="$$(awk -F= '/^FIRST_ADMIN_USERNAME=/{print $$2}' .env.production)"; \
+	first_admin_password="$$(awk -F= '/^FIRST_ADMIN_PASSWORD=/{print $$2}' .env.production)"; \
+	echo ""; \
+	echo "Production stack is running."; \
+	echo "Web: http://localhost:13029"; \
+	echo "API: http://localhost:4000"; \
+	echo "First admin login:"; \
+	echo "  email: $$first_admin_email"; \
+	echo "  username: $$first_admin_username"; \
+	echo "  password: $$first_admin_password"; \
+	echo "Use: make prod-logs"
+
+prod: ## Start production stack without rebuilding images
+	@test -f .env.production || (echo "Missing .env.production — copy from .env.production.example and edit." && exit 1)
+	docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+
+prod-stop: ## Stop production stack
+	@docker compose --env-file .env.production -f docker-compose.prod.yml down 2>/dev/null || docker compose -f docker-compose.prod.yml down
+
+prod-logs: ## Tail production stack logs
+	@docker compose --env-file .env.production -f docker-compose.prod.yml logs -f 2>/dev/null || docker compose -f docker-compose.prod.yml logs -f
+
+prod-clean: ## Stop production stack and remove volumes
+	docker compose -f docker-compose.prod.yml down -v
+
+release-docker: ## Build production Docker images only (no compose up; optional: NEXT_PUBLIC_API_URL=... for web)
+	docker compose -f docker-compose.prod.yml build
 
 # ---- Testing ----
 test: ## Run all tests

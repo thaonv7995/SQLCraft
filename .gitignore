@@ -12,10 +12,12 @@ out/
 
 # ─── Environment files ────────────────────────────────────────────────────────
 .env
+.env.production
 .env.local
 .env.*.local
 # Keep .env.example committed (it's the template)
 !.env.example
+!.env.production.example
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log

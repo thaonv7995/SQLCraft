@@ -48,7 +48,7 @@ Before you begin, make sure you have the following installed:
 
 5. **Open the app**
 
-   - Web: http://localhost:3000
+   - Web: http://localhost:13029
    - API: http://localhost:4000
    - MinIO Console: http://localhost:9001
 

@@ -37,41 +37,55 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 
 ### Prerequisites
 
-- Node.js >= 20.9 (required by Next.js 16)
-- pnpm >= 9 (`npm install -g pnpm@9`)
-- Docker and Docker Compose
+- Docker + Docker Compose
+- `make` (preinstalled on most macOS/Linux)
 
-### Run locally
+### 1) Clone and start production stack
 
 ```bash
-# Clone the repo
 git clone https://github.com/thaonv7995/SQLCraft.git
 cd sqlcraft
+make prod-build
+```
 
-# Install dependencies and copy env
+What `make prod-build` does:
+
+- Generates/updates `.env.production` from `.env.production.example`
+- Auto-generates secrets (`JWT_SECRET`, DB/storage/sandbox passwords)
+- Prompts for first admin (or uses defaults)
+- Bootstraps DB (`migrate` + `seed`)
+- Builds and starts production images (`api`, `web`, `worker`)
+
+After startup:
+
+- **Web**: http://localhost:13029
+- **API**: http://localhost:4000
+- **MinIO Console**: http://localhost:9001
+- First admin credentials are printed in terminal
+
+### 2) Useful production commands
+
+```bash
+make prod         # Start production stack (no rebuild)
+make prod-stop    # Stop production stack
+make prod-logs    # Tail production logs
+make prod-clean   # Stop + remove production volumes
+make release-docker  # Build production images only
+```
+
+### Development (optional)
+
+If you want local development with hot-reload:
+
+```bash
 make setup
-
-# Start everything (infra + services)
 make dev
 ```
 
-The app will be available at:
-- **Web**: http://localhost:3000
+Dev URLs:
+
+- **Web**: http://localhost:13029
 - **API**: http://localhost:4000
-- **MinIO Console**: http://localhost:9001 (user: `minioadmin`, pass: `minioadmin`)
-
-### Useful commands
-
-```bash
-make help         # Show all available commands
-make dev-infra    # Start only infrastructure (Postgres, Redis, MinIO)
-make migrate      # Run database migrations
-make seed         # Seed sample data
-make test         # Run all tests
-make lint         # Run linter
-make stop         # Stop all Docker services
-make clean        # Stop and remove all volumes
-```
 
 ### Docker (dev images)
 
@@ -84,6 +98,22 @@ docker compose -f docker-compose.dev.yml up --build -d
 ```
 
 This brings up **postgres**, **redis**, **minio**, **api**, **web**, and **worker**.
+
+### Production release (Docker)
+
+Optimized images (no bind mounts) are defined in **`docker-compose.prod.yml`** with **`apps/api/Dockerfile`**, **`apps/web/Dockerfile`**, and **`services/worker/Dockerfile`**. The API container runs **migrations on startup** (`drizzle-kit migrate`) via `apps/api/docker-entrypoint.sh`.
+
+1. Run:
+
+   ```bash
+   make prod-build
+   ```
+
+2. `make prod-build` will auto-create/update `.env.production`, auto-generate secrets, prompt for first admin, migrate + seed DB, then start services.
+
+3. Other targets: **`make prod`** (no rebuild), **`make prod-stop`**, **`make prod-logs`**, **`make prod-clean`** (removes volumes), **`make release-docker`** (images only).
+
+**CI:** [`.github/workflows/docker.yml`](.github/workflows/docker.yml) runs `docker compose … build` on pushes/PRs. Tag a release as **`v*`** (e.g. `v0.1.0`) to push **`api`**, **`web`**, and **`worker`** images to **GHCR** ([`.github/workflows/release.yml`](.github/workflows/release.yml)). Pull them as `ghcr.io/<owner>/sqlcraft-api:<tag>` (same pattern for `sqlcraft-web`, `sqlcraft-worker`). Package visibility may need to be set to public in GitHub for unauthenticated pulls.
 
 ## Project Structure
 
@@ -99,6 +129,7 @@ sqlcraft/
 │   └── config/       # Shared ESLint & TS config
 ├── docs/             # Architecture & design docs
 ├── docker-compose.dev.yml
+├── docker-compose.prod.yml
 ├── Makefile
 └── turbo.json
 ```
@@ -112,7 +143,7 @@ The `docs/` directory contains comprehensive specifications and architecture dec
 - [Database Design](./docs/database-design.md)
 - [API Specification](./docs/api-spec.md)
 - [Contributing Guide](./CONTRIBUTING.md)
-- [Environment Variables](./.env.example)
+- [Environment Variables](./.env.example) — production: [`.env.production.example`](./.env.production.example)
 
 ## Contributing
 

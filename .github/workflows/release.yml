@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish-images:
+    name: Build and push Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image prefix (GHCR requires lowercase)
+        run: |
+          echo "IMAGE_PREFIX=${{ env.REGISTRY }}/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/sqlcraft-api:${{ github.ref_name }}
+            ${{ env.IMAGE_PREFIX }}/sqlcraft-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:4000/v1
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/sqlcraft-web:${{ github.ref_name }}
+            ${{ env.IMAGE_PREFIX }}/sqlcraft-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/sqlcraft-worker:${{ github.ref_name }}
+            ${{ env.IMAGE_PREFIX }}/sqlcraft-worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,137 @@
+# Production-style stack (optimized images, no source bind mounts).
+#
+#   cp .env.production.example .env.production   # edit secrets + URLs
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+#   make prod-build
+#
+# Requires .env.production (see .env.production.example). Use hostnames postgres, redis,
+# minio for URLs inside containers (see example file).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sqlcraft-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sqlcraft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sqlcraft}
+      POSTGRES_DB: ${POSTGRES_DB:-sqlcraft}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sqlcraft}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sqlcraft
+
+  redis:
+    image: redis:7-alpine
+    container_name: sqlcraft-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - sqlcraft
+
+  minio:
+    image: minio/minio
+    container_name: sqlcraft-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_prod_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    networks:
+      - sqlcraft
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${API_IMAGE:-sqlcraft-api:prod}
+    container_name: sqlcraft-api
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+    ports:
+      - "${API_PORT:-4000}:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - sqlcraft
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000/v1}
+    image: ${WEB_IMAGE:-sqlcraft-web:prod}
+    container_name: sqlcraft-web
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "${WEB_PORT:-13029}:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - sqlcraft
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    image: ${WORKER_IMAGE:-sqlcraft-worker:prod}
+    container_name: sqlcraft-worker
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sqlcraft
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:
+  minio_prod_data:
+
+networks:
+  sqlcraft:
+    name: sqlcraft-prod

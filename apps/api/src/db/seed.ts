@@ -15,6 +15,9 @@ async function seed() {
   const db = drizzle(pool, { schema });
 
   console.log('Seeding database...');
+  const firstAdminEmail = process.env.FIRST_ADMIN_EMAIL?.trim() || 'admin@sqlcraft.dev';
+  const firstAdminUsername = process.env.FIRST_ADMIN_USERNAME?.trim() || 'admin';
+  const firstAdminPassword = process.env.FIRST_ADMIN_PASSWORD?.trim() || 'admin123';
 
   // 1. Create roles
   console.log('Creating roles...');
@@ -56,12 +59,12 @@ async function seed() {
 
   // 2. Create admin user
   console.log('Creating admin user...');
-  const adminPasswordHash = await bcrypt.hash('admin123', 12);
+  const adminPasswordHash = await bcrypt.hash(firstAdminPassword, 12);
   let adminUser = (
     await db
       .select()
       .from(schema.users)
-      .where(or(eq(schema.users.email, 'admin@sqlcraft.dev'), eq(schema.users.username, 'admin')))
+      .where(or(eq(schema.users.email, firstAdminEmail), eq(schema.users.username, firstAdminUsername)))
       .limit(1)
   )[0];
 
@@ -69,8 +72,8 @@ async function seed() {
     const [u] = await db
       .insert(schema.users)
       .values({
-        email: 'admin@sqlcraft.dev',
-        username: 'admin',
+        email: firstAdminEmail,
+        username: firstAdminUsername,
         passwordHash: adminPasswordHash,
         displayName: 'SQLCraft Admin',
         status: 'active',
@@ -78,13 +81,13 @@ async function seed() {
       })
       .returning();
     adminUser = u;
-    console.log('  Created admin user: admin@sqlcraft.dev / admin123');
+    console.log(`  Created admin user: ${firstAdminEmail} / ${firstAdminPassword}`);
   } else {
     const [u] = await db
       .update(schema.users)
       .set({
-        email: 'admin@sqlcraft.dev',
-        username: 'admin',
+        email: firstAdminEmail,
+        username: firstAdminUsername,
         passwordHash: adminPasswordHash,
         displayName: 'SQLCraft Admin',
         status: 'active',
@@ -94,7 +97,7 @@ async function seed() {
       .where(eq(schema.users.id, adminUser.id))
       .returning();
     adminUser = u;
-    console.log('  Updated admin user: admin@sqlcraft.dev / admin123');
+    console.log(`  Updated admin user: ${firstAdminEmail} / ${firstAdminPassword}`);
   }
 
   // Assign admin role
@@ -343,6 +346,10 @@ async function seed() {
   }
 
   console.log('\nSeed completed successfully!');
+  console.log('First admin credentials:');
+  console.log(`  email: ${firstAdminEmail}`);
+  console.log(`  username: ${firstAdminUsername}`);
+  console.log(`  password: ${firstAdminPassword}`);
   await pool.end();
 }
 
