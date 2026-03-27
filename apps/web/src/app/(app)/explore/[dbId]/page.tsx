@@ -24,6 +24,24 @@ const SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
   { value: 'large', label: DATABASE_SCALE_LABELS.large },
 ];
 
+const SCALE_RANK: Record<DatasetScale, number> = {
+  tiny: 0,
+  small: 1,
+  medium: 2,
+  large: 3,
+};
+
+function inferScaleFromRows(rowCount?: number | null): DatasetScale | null {
+  if (typeof rowCount !== 'number' || !Number.isFinite(rowCount) || rowCount <= 0) {
+    return null;
+  }
+
+  if (rowCount <= 1_000) return 'tiny';
+  if (rowCount <= 200_000) return 'small';
+  if (rowCount <= 5_000_000) return 'medium';
+  return 'large';
+}
+
 const ROLE_STYLES = {
   primary: 'border-primary/30 bg-primary/5 text-primary',
   secondary: 'border-tertiary/30 bg-tertiary/5 text-tertiary',
@@ -441,13 +459,31 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
     return database.availableScales;
   }, [database?.availableScales]);
 
+  const sourceRows = database?.sourceRowCount ?? database?.rowCount;
+  const inferredSourceScale = useMemo(() => inferScaleFromRows(sourceRows), [sourceRows]);
+  const effectiveSourceScale: DatasetScale = inferredSourceScale ?? database?.sourceScale ?? 'large';
+
+  // Business rule: only scale down from source dataset.
+  const effectiveAvailableScales = useMemo(() => {
+    const sourceRank = SCALE_RANK[effectiveSourceScale];
+    const capped = availableScales.filter((scale) => SCALE_RANK[scale] <= sourceRank);
+    if (capped.length > 0) {
+      return capped;
+    }
+    return SCALE_OPTIONS.map((option) => option.value).filter(
+      (scale) => SCALE_RANK[scale] <= sourceRank,
+    );
+  }, [availableScales, effectiveSourceScale]);
+
   const defaultScale =
-    database?.selectedScale ??
-    database?.sourceScale ??
-    availableScales[availableScales.length - 1] ??
+    (database?.selectedScale && effectiveAvailableScales.includes(database.selectedScale)
+      ? database.selectedScale
+      : null) ??
+    (effectiveAvailableScales.includes(effectiveSourceScale) ? effectiveSourceScale : null) ??
+    effectiveAvailableScales[effectiveAvailableScales.length - 1] ??
     'medium';
   const selectedScale =
-    scaleOverride && availableScales.includes(scaleOverride) ? scaleOverride : defaultScale;
+    scaleOverride && effectiveAvailableScales.includes(scaleOverride) ? scaleOverride : defaultScale;
 
   const launchMutation = useMutation({
     mutationFn: async () => {
@@ -550,7 +586,7 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
       role="group"
       aria-label="Sandbox dataset size"
     >
-      {availableScales.map((scaleValue) => (
+      {effectiveAvailableScales.map((scaleValue) => (
         <button
           key={scaleValue}
           type="button"
@@ -588,14 +624,8 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
         {database.tableCount} tables
         <span className="mx-1.5 text-outline">·</span>
         {database.estimatedSizeGb.toFixed(1)} GB
-        <span className="mx-1.5 text-outline">·</span>
-        Source scale {DATABASE_SCALE_LABELS[database.sourceScale ?? selectedScale]}
       </p>
-      <p className="text-[11px] text-outline">
-        Launch scale <span className="font-medium text-on-surface-variant">{DATABASE_SCALE_LABELS[selectedScale]}</span>
-        <span className="mx-1.5">·</span>
-        {availableScales.length} option{availableScales.length === 1 ? '' : 's'} available
-      </p>
+
       <p className="text-[11px] text-outline">
         Region{' '}
         <span className="font-mono text-on-surface-variant">{database.region ?? 'global-edge'}</span>
