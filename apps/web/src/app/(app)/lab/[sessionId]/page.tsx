@@ -1558,7 +1558,7 @@ function SchemaDiffPanel({
             No schema drift.
           </div>
         ) : (
-          <div className="grid gap-3 2xl:grid-cols-2">
+          <div className="grid gap-3">
             {renderSection(
               'Indexes',
               'database',
