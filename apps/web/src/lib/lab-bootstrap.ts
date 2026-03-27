@@ -4,6 +4,7 @@ export interface LabBootstrapPayload {
   mode?: 'lesson' | 'challenge';
   lessonPath?: string;
   lessonTitle?: string;
+  databaseName?: string;
   challengePath?: string;
   challengeTitle?: string;
   starterQuery?: string | null;

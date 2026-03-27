@@ -97,6 +97,7 @@ export interface CreateSessionResult {
     SessionRow,
     'id' | 'userId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
   > & {
+    databaseName: string | null;
     sourceScale: DatasetSize | null;
     selectedScale: DatasetSize | null;
     availableScales: DatasetSize[];
@@ -107,6 +108,7 @@ export interface CreateSessionResult {
 }
 
 export interface GetSessionResult extends SessionRow {
+  databaseName: string | null;
   sandbox: Pick<SandboxRow, 'id' | 'status' | 'dbName' | 'expiresAt' | 'updatedAt'> | null;
   dataset: SessionDatasetSummary;
   sourceScale: DatasetSize | null;
@@ -378,6 +380,8 @@ export async function createSession(
     datasetTemplateId: selectedTemplate?.id ?? null,
   });
 
+  const schemaTemplate = await sessionsRepository.findSchemaTemplateById(challengeVersion.databaseId);
+
   return {
     session: {
       id: session.id,
@@ -386,6 +390,7 @@ export async function createSession(
       status: session.status,
       startedAt: session.startedAt,
       createdAt: session.createdAt,
+      databaseName: schemaTemplate?.name ?? null,
       sourceScale: dataset.sourceScale,
       selectedScale: dataset.selectedScale,
       availableScales: dataset.availableScales,
@@ -419,9 +424,11 @@ export async function getSession(
   const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
   const detailedSandbox = await sessionsRepository.findDetailedSandboxBySessionId(sessionId);
   const dataset = await resolveSandboxDatasetSummary(detailedSandbox);
+  const schemaTemplate = await resolveSchemaTemplateForSession(normalizedSession, detailedSandbox);
 
   return {
     ...normalizedSession,
+    databaseName: schemaTemplate?.name ?? null,
     sandbox: sandbox ?? null,
     dataset,
     sourceScale: dataset.sourceScale,

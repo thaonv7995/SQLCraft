@@ -8,9 +8,6 @@ import type {
   SessionSchemaDiffResponse,
   SessionSchemaResponse,
 } from '@/lib/api';
-import toast from 'react-hot-toast';
-import { toastError } from '@/lib/toast-error';
-import { formatDuration, formatRows } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,11 +64,9 @@ export function useExecuteQuery() {
         queryHistory: [data, ...state.queryHistory].slice(0, 100),
       }));
       if (data.status === 'success') {
-        const msg = `Query finished in ${formatDuration(data.durationMs ?? 0)} end-to-end — ${formatRows(data.rowCount ?? 0)} rows`;
-        toast.success(msg, { duration: 3000 });
         setActiveTab('results');
       } else if (data.status === 'error') {
-        toastError('Query failed', new Error(data.errorMessage ?? 'Server rejected query or SQL is invalid'));
+        // Lab UI displays inline error state; avoid global toast noise.
       }
       queryClient.invalidateQueries({ queryKey: ['query-history'] });
 
@@ -82,7 +77,7 @@ export function useExecuteQuery() {
     },
     onError: (err) => {
       useLabStore.setState({ isExecuting: false, error: err.message });
-      toastError('Unable to execute query (network or lab session)', err);
+      // Lab UI displays inline error state; avoid global toast noise.
     },
   });
 }
@@ -112,16 +107,15 @@ export function useExplainQuery() {
         error: data.status === 'error' ? (data.errorMessage ?? 'Explain failed') : null,
       });
       if (data.status === 'success') {
-        toast.success('Execution plan generated');
         setActiveTab('plan');
       } else {
-        toastError('Explain plan failed', new Error(data.errorMessage ?? 'Could not fetch execution plan'));
+        // Lab UI displays inline error state; avoid global toast noise.
       }
       queryClient.invalidateQueries({ queryKey: ['query-history'] });
     },
     onError: (err) => {
       useLabStore.setState({ isExplaining: false, error: err.message });
-      toastError('Unable to fetch execution plan', err);
+      // Lab UI displays inline error state; avoid global toast noise.
     },
   });
 }

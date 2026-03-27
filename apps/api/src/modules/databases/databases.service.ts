@@ -424,6 +424,7 @@ export async function createDatabaseSession(
       status: session.status,
       startedAt: session.startedAt,
       createdAt: session.createdAt,
+      databaseName: database.name,
       sourceScale,
       selectedScale: requestedScale,
       availableScales: database.availableScales,

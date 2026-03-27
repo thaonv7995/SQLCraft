@@ -86,6 +86,7 @@ export default function ChallengeDetailPage() {
       saveLabBootstrap(session.id, {
         mode: 'challenge',
         lessonTitle: challenge.databaseName ?? undefined,
+        databaseName: challenge.databaseName ?? undefined,
         challengePath: `/challenges/${challenge.id}`,
         challengeTitle: challenge.title,
         starterQuery: null,

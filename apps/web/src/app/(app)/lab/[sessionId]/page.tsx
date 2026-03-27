@@ -132,56 +132,38 @@ function DatasetScaleSelector({
   selectedScale,
   sourceScale,
   sourceRowCount,
-  availableScales,
-  isSwitching,
-  sessionStatus,
-  onChange,
+  databaseName,
 }: {
   selectedScale: DatasetScale | null;
   sourceScale: DatasetScale | null;
   sourceRowCount: number | null;
-  availableScales: DatasetScale[];
-  isSwitching: boolean;
-  sessionStatus?: string | null;
-  onChange: (scale: DatasetScale) => void;
+  databaseName?: string | null;
 }) {
-  const scales = availableScales.length > 0 ? availableScales : (Object.keys(DATASET_SCALE_META) as DatasetScale[]);
-  const isDisabled = sessionStatus !== 'active' || isSwitching;
   const sourceScaleLabel = sourceScale ? DATASET_SCALE_META[sourceScale].label : null;
   const sourceSummary =
     typeof sourceRowCount === 'number'
       ? `${formatRows(sourceRowCount)} rows`
       : sourceScaleLabel ?? 'Unknown';
 
+  const hintText = `DB ${databaseName ?? 'N/A'} · Source ${sourceSummary}${
+    sourceScaleLabel && typeof sourceRowCount === 'number' ? ` (${sourceScaleLabel})` : ''
+  }${selectedScale ? ` · Scale ${DATASET_SCALE_META[selectedScale].label}` : ''}`;
+
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div
-        className="flex items-center gap-0.5 rounded-lg border border-outline-variant/10 bg-surface-container-low p-0.5"
-        title="Changing scale reprovisions the sandbox from a prepared dataset artifact"
-      >
-        {scales.map((scale) => (
-          <button
-            key={scale}
-            type="button"
-            disabled={isDisabled}
-            onClick={() => onChange(scale)}
-            className={cn(
-              'rounded-md px-2 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-              selectedScale === scale
-                ? 'bg-surface-container-high text-on-surface shadow-sm'
-                : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
-            )}
-            title={DATASET_SCALE_META[scale].desc}
-          >
-            {DATASET_SCALE_META[scale].label}
-          </button>
-        ))}
-      </div>
-      <p className="text-[10px] text-outline">
-        Source {sourceSummary}
-        {sourceScaleLabel && typeof sourceRowCount === 'number' ? ` (${sourceScaleLabel})` : ''}
-        {selectedScale ? ` · Selected ${DATASET_SCALE_META[selectedScale].label}` : ''}
-      </p>
+    <div
+      className="inline-flex h-9 items-center gap-2 rounded-lg border border-outline-variant/10 bg-surface-container-low px-3"
+      title={hintText}
+      aria-label={hintText}
+    >
+      <span className="text-[10px] uppercase tracking-[0.14em] text-outline">DB</span>
+      <span className="max-w-[120px] truncate text-xs font-medium text-on-surface-variant">
+        {databaseName ?? 'N/A'}
+      </span>
+      <span className="text-outline">•</span>
+      <span className="text-[10px] uppercase tracking-[0.14em] text-outline">Scale</span>
+      <span className="rounded-md bg-surface-container-high px-2 py-1 text-xs font-medium text-on-surface">
+        {selectedScale ? DATASET_SCALE_META[selectedScale].label : 'N/A'}
+      </span>
     </div>
   );
 }
@@ -342,11 +324,15 @@ function SqlEditorPanel({
   schemaTables,
   onFormat,
   onCopy,
+  onClear,
+  notice,
 }: {
   sessionId: string;
   schemaTables?: SessionSchemaTable[];
   onFormat: () => void;
   onCopy: () => void;
+  onClear: () => void;
+  notice: 'success' | 'error' | 'info' | null;
 }) {
   const currentQuery = useLabStore((state) => state.currentQuery);
   const setQuery = useLabStore((state) => state.setQuery);
@@ -365,6 +351,8 @@ function SqlEditorPanel({
       onExecute={handleExecute}
       onFormat={onFormat}
       onCopy={onCopy}
+      onClear={onClear}
+      notice={notice}
       schema={schemaTables}
       placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
       testId="lab-sql-editor"
@@ -428,12 +416,21 @@ function ResultsPanel() {
             <TableRow>
               {results.columns.map((col: QueryResultColumn) => (
                 <TableHead key={col.name}>
+                  {(() => {
+                    const dataTypeLabel = typeof col.dataType === 'string' ? col.dataType.trim() : '';
+                    const shouldShowDataType =
+                      dataTypeLabel.length > 0 && dataTypeLabel.toLowerCase() !== 'unknown';
+                    return (
                   <div className="flex flex-col gap-0.5">
                     <span>{col.name}</span>
-                    <span className="text-outline font-normal normal-case tracking-normal">
-                      {col.dataType}
-                    </span>
+                    {shouldShowDataType ? (
+                      <span className="text-outline font-normal normal-case tracking-normal">
+                        {dataTypeLabel}
+                      </span>
+                    ) : null}
                   </div>
+                    );
+                  })()}
                 </TableHead>
               ))}
             </TableRow>
@@ -1379,12 +1376,20 @@ export default function LabPage() {
     enabled: Boolean(session?.challengeVersionId),
     staleTime: 15_000,
   });
-  const entryPath = lessonContext?.challengePath ?? lessonContext?.lessonPath ?? '/leaderboard';
-  const entryLabel = 'Back to challenge';
-  const modeLabel =
-    lessonContext?.mode === 'challenge' || session?.challengeVersionId ? 'Challenge' : 'Lesson';
+  const entryPath = lessonContext?.challengePath ?? lessonContext?.lessonPath ?? null;
+  const entryLabel = lessonContext?.challengePath
+    ? 'Back to challenge'
+    : lessonContext?.lessonPath
+      ? 'Back'
+      : null;
   const lessonTitle = session?.lessonTitle ?? lessonContext?.lessonTitle;
-  const challengeTitle = lessonContext?.challengeTitle;
+  const displayDatabaseName =
+    lessonContext?.databaseName?.trim() ||
+    lessonContext?.lessonTitle?.trim() ||
+    session?.databaseName?.trim() ||
+    session?.displayTitle?.trim() ||
+    session?.lessonTitle?.trim() ||
+    'N/A';
   const latestSuccessfulExecution =
     queryHistory.find((execution) => execution.status === 'success') ?? null;
   const bestChallengeAttempt = challengeAttempts
@@ -1549,6 +1554,8 @@ export default function LabPage() {
 
   const hydratedEditorSessionIdRef = useRef<string | null>(null);
   const [isEndSessionModalOpen, setIsEndSessionModalOpen] = useState(false);
+  const [editorNotice, setEditorNotice] = useState<'success' | 'error' | 'info' | null>(null);
+  const editorNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistedEditorState = useMemo(
     () => (sessionId ? readLabEditorState(sessionId) : null),
     [sessionId],
@@ -1653,34 +1660,23 @@ export default function LabPage() {
   const handleFormatSql = useCallback(() => {
     try {
       setQuery(formatSqlInBrowser(currentQuery));
-      toast.success('Đã format SQL');
+      setEditorNotice('success');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Không format được SQL');
+      setEditorNotice('error');
     }
   }, [currentQuery, setQuery]);
 
   const handleCopyQuery = useCallback(() => {
-    navigator.clipboard.writeText(currentQuery).then(() => toast.success('Đã copy query'));
+    navigator.clipboard
+      .writeText(currentQuery)
+      .then(() => setEditorNotice('success'))
+      .catch(() => setEditorNotice('error'));
   }, [currentQuery]);
 
   const handleClearEditor = useCallback(() => {
     setQuery('');
     useLabStore.getState().resetResults();
   }, [setQuery]);
-  const handleScaleChange = useCallback(
-    (nextScale: DatasetScale) => {
-      if (!session || !isSessionReady || scaleSwitchMutation.isPending) {
-        return;
-      }
-
-      if (selectedScale === nextScale) {
-        return;
-      }
-
-      scaleSwitchMutation.mutate(nextScale);
-    },
-    [isSessionReady, scaleSwitchMutation, selectedScale, session],
-  );
   const handleOpenEndSessionModal = useCallback(() => {
     setIsEndSessionModalOpen(true);
   }, [setIsEndSessionModalOpen]);
@@ -1694,6 +1690,35 @@ export default function LabPage() {
   const handleConfirmEndSession = useCallback(() => {
     endSessionMutation.mutate();
   }, [endSessionMutation]);
+
+  useEffect(() => {
+    if (!editorNotice) {
+      return;
+    }
+
+    if (editorNoticeTimeoutRef.current) {
+      clearTimeout(editorNoticeTimeoutRef.current);
+    }
+
+    editorNoticeTimeoutRef.current = setTimeout(() => {
+      setEditorNotice(null);
+      editorNoticeTimeoutRef.current = null;
+    }, 1200);
+
+    return () => {
+      if (editorNoticeTimeoutRef.current) {
+        clearTimeout(editorNoticeTimeoutRef.current);
+        editorNoticeTimeoutRef.current = null;
+      }
+    };
+  }, [editorNotice]);
+
+  useEffect(() => {
+    if (!lastExecution) {
+      return;
+    }
+    setEditorNotice(lastExecution.status === 'success' ? 'success' : 'error');
+  }, [lastExecution]);
 
   if (!sessionId) {
     return (
@@ -1723,7 +1748,7 @@ export default function LabPage() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <header className="shrink-0 border-b border-outline-variant/10 bg-surface-container-low/90">
         <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-          <div className="scrollbar-none flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto">
+          <div className="scrollbar-none flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto lg:flex-nowrap">
             <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-outline-variant/10 bg-surface-container/70 p-1">
               <Button
                 variant="primary"
@@ -1767,16 +1792,6 @@ export default function LabPage() {
               >
                 Explain
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!currentQuery.trim()}
-                onClick={handleClearEditor}
-                title="Clear editor and results"
-                leftIcon={<span className="material-symbols-outlined text-[18px]">delete_sweep</span>}
-              >
-                Clear
-              </Button>
               {session?.challengeVersionId ? (
                 <Button
                   variant="secondary"
@@ -1805,10 +1820,7 @@ export default function LabPage() {
               selectedScale={selectedScale}
               sourceScale={sourceScale}
               sourceRowCount={sourceRowCount}
-              availableScales={availableScales}
-              isSwitching={scaleSwitchMutation.isPending}
-              sessionStatus={effectiveSessionStatus}
-              onChange={handleScaleChange}
+              databaseName={displayDatabaseName}
             />
           </div>
 
@@ -1822,17 +1834,9 @@ export default function LabPage() {
                 {entryLabel}
               </Link>
             )}
-            <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant md:inline-flex">
-              {modeLabel}
-            </span>
             {lessonTitle && (
               <span className="hidden max-w-[14rem] truncate text-xs text-on-surface-variant md:block">
                 {lessonTitle}
-              </span>
-            )}
-            {challengeTitle && (
-              <span className="hidden max-w-[14rem] truncate text-xs text-outline lg:block">
-                {challengeTitle}
               </span>
             )}
             {session?.challengeVersionId && bestChallengeAttempt ? (
@@ -1851,7 +1855,7 @@ export default function LabPage() {
                 className={cn(
                   'h-2 w-2 rounded-full',
                   effectiveSessionStatus === 'active'
-                    ? 'bg-secondary shadow-[0_0_8px_rgba(255,255,255,0.15)]'
+                    ? 'bg-green-400 shadow-[0_0_8px_rgba(34,197,94,0.45)]'
                     : effectiveSessionStatus === 'provisioning'
                       ? 'animate-pulse bg-tertiary'
                       : 'bg-outline',
@@ -1872,7 +1876,11 @@ export default function LabPage() {
               disabled={!session || session.status === 'ended'}
               onClick={handleOpenEndSessionModal}
               title="Stop this sandbox and end the current session immediately"
-              leftIcon={<span className="material-symbols-outlined text-[18px]">stop_circle</span>}
+              leftIcon={
+                <span className="material-symbols-outlined text-base leading-none align-middle">
+                  stop_circle
+                </span>
+              }
             >
               End Session
             </Button>
@@ -1910,7 +1918,7 @@ export default function LabPage() {
               </span>
             </div>
             <EditorTabsBar />
-            <div className="shrink-0 flex items-center gap-2 px-2">
+            <div className="shrink-0 flex items-center gap-1.5 px-2">
               <span className="font-mono text-[10px] text-outline">
                 Ln {currentQuery.split('\n').length}
               </span>
@@ -1924,6 +1932,8 @@ export default function LabPage() {
             schemaTables={sessionSchema?.tables}
             onFormat={handleFormatSql}
             onCopy={handleCopyQuery}
+            onClear={handleClearEditor}
+            notice={editorNotice}
           />
         </div>
 
@@ -2015,7 +2025,7 @@ export default function LabPage() {
               className={cn(
                 'w-1.5 h-1.5 rounded-full',
                 effectiveSessionStatus === 'active'
-                  ? 'bg-on-surface-variant'
+                  ? 'bg-green-400'
                   : effectiveSessionStatus === 'provisioning'
                   ? 'bg-on-surface-variant/70 animate-pulse'
                   : 'bg-outline'

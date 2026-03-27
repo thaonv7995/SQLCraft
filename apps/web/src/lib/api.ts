@@ -498,6 +498,7 @@ export interface LearningSession {
   userId: string;
   lessonVersionId: string | null;
   challengeVersionId?: string | null;
+  databaseName?: string | null;
   status: 'provisioning' | 'active' | 'paused' | 'ended' | 'expired' | 'failed';
   sandboxStatus?: string | null;
   lessonTitle?: string | null;

@@ -335,6 +335,8 @@ export interface SqlEditorProps {
   onExecute?: () => void;
   onFormat?: () => void;
   onCopy?: () => void;
+  onClear?: () => void;
+  notice?: 'success' | 'error' | 'info' | null;
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
@@ -348,6 +350,8 @@ export function SqlEditor({
   onExecute,
   onFormat,
   onCopy,
+  onClear,
+  notice = null,
   placeholder = '-- Write your SQL query here...',
   readOnly = false,
   className,
@@ -393,7 +397,7 @@ export function SqlEditor({
     return exts;
   }, [completionSchema, onExecute]);
 
-  const hasActions = onFormat || onCopy;
+  const hasActions = onFormat || onCopy || onClear;
 
   return (
     <div data-testid={testId} className={`relative h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
@@ -428,9 +432,9 @@ export function SqlEditor({
         height="100%"
       />
 
-      {/* Floating action buttons — bottom-right of editor */}
+      {/* Inline editor actions — bottom-right inside input */}
       {hasActions && (
-        <div className="absolute bottom-3 right-3 flex items-center gap-1 z-10">
+        <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1">
           {onFormat && (
             <button
               type="button"
@@ -455,6 +459,38 @@ export function SqlEditor({
               Copy
             </button>
           )}
+          {onClear && (
+            <button
+              type="button"
+              onClick={onClear}
+              disabled={!value.trim()}
+              title="Clear editor and results"
+              className="flex items-center gap-1 rounded-md bg-[#2a2a2a]/90 border border-white/10 px-2 py-1 text-[11px] font-medium text-white/60 hover:text-white hover:bg-[#333]/90 transition-colors disabled:opacity-30 backdrop-blur-sm"
+            >
+              <span className="material-symbols-outlined text-sm">delete_sweep</span>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {notice && (
+        <div className="pointer-events-none absolute right-3 top-3 z-10">
+          <span
+            className={[
+              'inline-flex h-5 w-5 items-center justify-center rounded-full border backdrop-blur-sm',
+              notice === 'success'
+                ? 'border-green-500/40 bg-green-500/20 text-green-400'
+                : notice === 'error'
+                  ? 'border-error/30 bg-error/15 text-error'
+                  : 'border-outline-variant/30 bg-surface-container/80 text-on-surface-variant',
+            ].join(' ')}
+            aria-label={notice}
+          >
+            <span className="material-symbols-outlined text-[12px]">
+              {notice === 'success' ? 'check' : notice === 'error' ? 'error' : 'info'}
+            </span>
+          </span>
         </div>
       )}
     </div>

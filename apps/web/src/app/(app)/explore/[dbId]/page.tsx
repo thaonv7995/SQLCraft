@@ -16,6 +16,7 @@ import {
   DATABASE_SCALE_LABELS,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
+import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 
 const SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
   { value: 'tiny', label: DATABASE_SCALE_LABELS.tiny },
@@ -497,6 +498,13 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
       toast.success('Sandbox ready. Opening SQL Lab.');
       window.setTimeout(() => {
         setIsModalOpen(false);
+        saveLabBootstrap(session.id, {
+          mode: 'lesson',
+          databaseName: database?.name ?? undefined,
+          lessonTitle: database?.name ?? undefined,
+          starterQuery: null,
+          starterQueryConsumed: false,
+        });
         router.push(`/lab/${session.id}`);
       }, 900);
     },

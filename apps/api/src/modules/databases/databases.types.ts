@@ -70,6 +70,7 @@ export interface CreateDatabaseSessionResult {
     status: string;
     startedAt: Date;
     createdAt: Date;
+    databaseName: string;
     sourceScale: DatabaseScale;
     selectedScale: DatabaseScale;
     availableScales: DatabaseScale[];
