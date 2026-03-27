@@ -752,6 +752,25 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
               </span>
               <span className="material-symbols-outlined text-base text-tertiary">table_chart</span>
               <span className="text-sm font-mono text-on-surface">{table.name}</span>
+              {partitionNames.length > 0 ? (
+                <span className="inline-flex h-4 items-center rounded-[10px] border border-outline-variant/10 bg-surface-container-high px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-on-surface-variant">
+                  part:{partitionNames.length}
+                </span>
+              ) : null}
+              {addedPartitionNames.length > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex h-4 items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-blue-200 hover:bg-blue-500/25"
+                  title="Mở table để xem chi tiết partition mới"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setExpandedTable(table.name);
+                  }}
+                >
+                  +part:{addedPartitionNames.length}
+                </button>
+              ) : null}
               <span className="text-xs text-outline ml-auto">{table.columns.length} cols</span>
             </button>
             {isExpanded && (
@@ -790,6 +809,31 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                     <span className="text-xs font-mono text-outline shrink-0">{col.type}</span>
                   </div>
                 ))}
+                {partitionNames.length > 0 || addedPartitionNames.length > 0 ? (
+                  <div className="mt-2 rounded-md border border-outline-variant/10 bg-surface-container-low/70 px-3 py-2">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-outline">
+                      Partitions
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {partitionNames.map((name) => (
+                        <span
+                          key={`base-part-${table.name}-${name}`}
+                          className="inline-flex items-center rounded-[10px] border border-outline-variant/10 bg-surface-container-high px-1.5 py-0.5 text-[10px] font-mono text-on-surface-variant"
+                        >
+                          {name}
+                        </span>
+                      ))}
+                      {addedPartitionNames.map((name) => (
+                        <span
+                          key={`added-part-${table.name}-${name}`}
+                          className="inline-flex items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-mono text-blue-200"
+                        >
+                          + {name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
