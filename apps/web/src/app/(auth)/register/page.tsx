@@ -231,9 +231,8 @@ function PasswordStrengthBar({ strength }: { strength: 0 | 1 | 2 | 3 | 4 }) {
         {[1, 2, 3, 4].map((level) => (
           <div
             key={level}
-            className={`h-1 flex-1 rounded-full transition-colors duration-300 ${
-              strength >= level ? strengthColors[strength] : 'bg-surface-container-highest'
-            }`}
+            className={`h-1 flex-1 rounded-full transition-colors duration-300 ${strength >= level ? strengthColors[strength] : 'bg-surface-container-highest'
+              }`}
           />
         ))}
       </div>
@@ -245,10 +244,10 @@ function PasswordStrengthBar({ strength }: { strength: 0 | 1 | 2 | 3 | 4 }) {
               strength <= 1
                 ? 'text-error'
                 : strength === 2
-                ? 'text-[#f5b942]'
-                : strength === 3
-                ? 'text-tertiary'
-                : 'text-secondary'
+                  ? 'text-[#f5b942]'
+                  : strength === 3
+                    ? 'text-tertiary'
+                    : 'text-secondary'
             }
           >
             {strengthLabels[strength]}
