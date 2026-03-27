@@ -14,6 +14,7 @@ import {
 import { toStoredRoleName } from '../../lib/roles';
 import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
 import { enqueueDestroySandbox } from '../../lib/queue';
+import { resolvePublicAvatarUrl } from '../../lib/storage';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
 import type {
   AdminConfigBody,
@@ -77,7 +78,7 @@ async function buildAdminUserMutationResult(userId: string): Promise<CreateAdmin
     email: user.email,
     username: user.username,
     displayName: user.displayName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: await resolvePublicAvatarUrl(user.avatarUrl),
     bio: user.bio,
     status: user.status,
     provider: user.provider ?? null,

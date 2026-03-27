@@ -1668,7 +1668,6 @@ export const queryApi = {
 export interface UpdateProfilePayload {
   displayName?: string;
   bio?: string;
-  avatarUrl?: string | null;
 }
 
 export interface AdminCreateUserPayload {

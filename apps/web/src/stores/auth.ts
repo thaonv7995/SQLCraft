@@ -45,7 +45,14 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'sqlcraft-auth',
-      partialize: (state) => ({ user: state.user, tokens: state.tokens }),
+      // `avatarUrl` from the API is a presigned MinIO/S3 URL (short TTL, default 24h on API).
+      // Persisting it causes broken images after expiry while tokens are still valid.
+      partialize: (state) => ({
+        tokens: state.tokens,
+        user: state.user
+          ? { ...state.user, avatarUrl: null }
+          : null,
+      }),
     }
   )
 );

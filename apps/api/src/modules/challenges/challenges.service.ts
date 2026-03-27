@@ -18,6 +18,7 @@ import type {
   SessionExecutionSummaryRow,
 } from '../../db/repositories';
 import { ForbiddenError, NotFoundError, QueryExecutionFailedError, ValidationError } from '../../lib/errors';
+import { resolvePublicAvatarUrl } from '../../lib/storage';
 import type { ExplainResult } from '../../services/query-executor';
 import { executeSql, getExplainPlan, validateSql } from '../../services/query-executor';
 import { getSessionSchemaDiff, type SessionSchemaDiffResult } from '../sessions/sessions.service';
@@ -28,6 +29,17 @@ import type {
   SubmitAttemptBody,
   ValidateChallengeDraftBody,
 } from './challenges.schema';
+
+async function withPresignedLeaderboardAvatars<T extends { avatarUrl: string | null }>(
+  entries: T[],
+): Promise<T[]> {
+  return Promise.all(
+    entries.map(async (entry) => ({
+      ...entry,
+      avatarUrl: await resolvePublicAvatarUrl(entry.avatarUrl),
+    })),
+  );
+}
 
 export interface AttemptEvaluation {
   isCorrect: boolean;
@@ -1405,7 +1417,8 @@ export async function getChallengeLeaderboard(
   }
 
   const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
-  return buildLeaderboard(attempts, limit);
+  const rows = buildLeaderboard(attempts, limit);
+  return withPresignedLeaderboardAvatars(rows);
 }
 
 export async function getChallengeLeaderboardContext(
@@ -1421,13 +1434,24 @@ export async function getChallengeLeaderboardContext(
 
   const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
   const all = buildChallengeLeaderboardEntries(attempts);
-  const viewerEntry =
+  const viewerEntryRaw =
     viewerUserId && viewerUserId.length > 0
       ? all.find((entry) => entry.userId === viewerUserId) ?? null
       : null;
 
+  const top = all.slice(0, limit);
+  const [entries, viewerEntry] = await Promise.all([
+    withPresignedLeaderboardAvatars(top),
+    viewerEntryRaw
+      ? (async () => ({
+          ...viewerEntryRaw,
+          avatarUrl: await resolvePublicAvatarUrl(viewerEntryRaw.avatarUrl),
+        }))()
+      : Promise.resolve(null),
+  ]);
+
   return {
-    entries: all.slice(0, limit),
+    entries,
     totalRankedUsers: all.length,
     viewerRank: viewerEntry?.rank ?? null,
     viewerEntry,
@@ -1441,7 +1465,8 @@ export async function getGlobalLeaderboard(
   const attempts = await challengesRepository.listPassedAttemptsForGlobalLeaderboard(
     getGlobalLeaderboardSince(period),
   );
-  return buildGlobalLeaderboard(attempts, limit);
+  const rows = buildGlobalLeaderboard(attempts, limit);
+  return withPresignedLeaderboardAvatars(rows);
 }
 
 export async function getAttempt(

@@ -71,6 +71,24 @@ export async function getPresignedUrl(
   return getPublicClient().presignedGetObject(config.STORAGE_BUCKET, objectName, ttlSeconds);
 }
 
+/**
+ * Value stored in `users.avatar_url` should be an S3/MinIO object key (e.g. `avatars/{id}.jpg`).
+ * API responses must expose a browser-loadable URL: presign keys, pass through absolute http(s) URLs
+ * (e.g. OAuth provider avatars) unchanged.
+ */
+export async function resolvePublicAvatarUrl(
+  stored: string | null | undefined,
+): Promise<string | null> {
+  if (stored == null || stored === '') {
+    return null;
+  }
+  const trimmed = stored.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return getPresignedUrl(trimmed);
+}
+
 export async function readFile(objectName: string): Promise<Buffer> {
   const client = getClient();
   const stream = await client.getObject(config.STORAGE_BUCKET, objectName);

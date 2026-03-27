@@ -11,7 +11,7 @@ import {
 } from '../../lib/errors';
 import { DEFAULT_USER_ROLE_NAME } from '../../lib/roles';
 import { config } from '../../lib/config';
-import { getPresignedUrl } from '../../lib/storage';
+import { resolvePublicAvatarUrl } from '../../lib/storage';
 import type { AuthTokens, AuthResult, TokenUser, UserProfile } from './auth.types';
 
 const ACCESS_TOKEN_TTL = config.JWT_EXPIRES_IN;
@@ -94,7 +94,7 @@ export async function registerUser(
       email: newUser.email,
       username: newUser.username,
       displayName: newUser.displayName,
-      avatarUrl: newUser.avatarUrl,
+      avatarUrl: await resolvePublicAvatarUrl(newUser.avatarUrl),
       status: newUser.status,
       createdAt: newUser.createdAt,
       roles,
@@ -127,7 +127,7 @@ export async function loginUser(
   const roles = await usersRepository.getRoleNames(user.id);
   const tokens = await generateTokens(fastify, user, roles);
 
-  const avatarUrl = user.avatarUrl ? await getPresignedUrl(user.avatarUrl) : null;
+  const avatarUrl = await resolvePublicAvatarUrl(user.avatarUrl);
 
   return {
     user: {
@@ -191,7 +191,7 @@ export async function getMe(userId: string): Promise<UserProfile> {
   const [roles, stats, avatarUrl] = await Promise.all([
     usersRepository.getRoleNames(user.id),
     usersRepository.getUserStats(user.id),
-    user.avatarUrl ? getPresignedUrl(user.avatarUrl) : Promise.resolve(null),
+    resolvePublicAvatarUrl(user.avatarUrl),
   ]);
 
   return {

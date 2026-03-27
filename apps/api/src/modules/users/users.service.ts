@@ -4,7 +4,7 @@ import { usersRepository } from '../../db/repositories/users.repository';
 import { queriesRepository } from '../../db/repositories/queries.repository';
 import { getDb, schema } from '../../db/index';
 import { NotFoundError, ValidationError } from '../../lib/errors';
-import { uploadFile, getPresignedUrl } from '../../lib/storage';
+import { uploadFile, getPresignedUrl, resolvePublicAvatarUrl } from '../../lib/storage';
 import type {
   UserProfileResponse,
   UserProfileUpdateResponse,
@@ -25,9 +25,7 @@ export async function getUserProfile(userId: string): Promise<UserProfileRespons
     usersRepository.getUserStats(userId),
   ]);
 
-  const avatarUrl = user.avatarUrl
-    ? await getPresignedUrl(user.avatarUrl)
-    : null;
+  const avatarUrl = await resolvePublicAvatarUrl(user.avatarUrl);
 
   return {
     id: user.id,
@@ -50,7 +48,6 @@ export async function updateUserProfile(
   data: {
     displayName?: string;
     bio?: string;
-    avatarUrl?: string | null;
   },
 ): Promise<UserProfileUpdateResponse> {
   const updated = await usersRepository.update(userId, data);
@@ -59,9 +56,7 @@ export async function updateUserProfile(
     throw new NotFoundError('User not found');
   }
 
-  const avatarUrl = updated.avatarUrl
-    ? await getPresignedUrl(updated.avatarUrl)
-    : null;
+  const avatarUrl = await resolvePublicAvatarUrl(updated.avatarUrl);
 
   return {
     id: updated.id,
@@ -93,8 +88,7 @@ export async function uploadAvatar(
   const updated = await usersRepository.update(userId, { avatarUrl: objectName });
   if (!updated) throw new NotFoundError('User not found');
 
-  const avatarUrl = await getPresignedUrl(objectName);
-  return { avatarUrl };
+  return { avatarUrl: await getPresignedUrl(objectName) };
 }
 
 export async function changePassword(

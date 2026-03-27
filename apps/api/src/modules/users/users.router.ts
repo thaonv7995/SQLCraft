@@ -36,7 +36,6 @@ export default async function usersRouter(fastify: FastifyInstance): Promise<voi
           properties: {
             displayName: { type: 'string', maxLength: 100 },
             bio: { type: 'string', maxLength: 1000 },
-            avatarUrl: { type: 'string', nullable: true },
           },
         },
       },
