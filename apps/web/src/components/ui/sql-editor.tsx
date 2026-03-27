@@ -792,7 +792,7 @@ export function SqlEditor({
                   'inline-flex h-5 w-5 items-center justify-center rounded-full border backdrop-blur-sm transition-colors',
                   'border-error/30 bg-error/15 text-error hover:bg-error/25',
                 ].join(' ')}
-                aria-label={errorDetailOpen ? 'Ẩn chi tiết lỗi' : 'Xem chi tiết lỗi'}
+                aria-label={errorDetailOpen ? 'Hide error details' : 'Show error details'}
                 aria-expanded={errorDetailOpen}
               >
                 <span className="material-symbols-outlined text-[12px]">error</span>
@@ -800,14 +800,14 @@ export function SqlEditor({
               {errorDetailOpen ? (
                 <div
                   role="region"
-                  aria-label="Thông báo lỗi"
+                  aria-label="Error message"
                   className="w-[min(100vw-2rem,22rem)] max-h-48 overflow-auto rounded-lg border border-error/25 bg-[#252525] p-3 text-left shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
                 >
                   <p className="text-[11px] font-medium uppercase tracking-wide text-error/90">
-                    Lỗi thực thi
+                    Execution error
                   </p>
                   <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-red-100/90">
-                    {noticeMessage?.trim() || 'Không có chi tiết lỗi.'}
+                    {noticeMessage?.trim() || 'No error details.'}
                   </pre>
                   <div className="mt-3 flex justify-end gap-2">
                     <button
@@ -815,7 +815,7 @@ export function SqlEditor({
                       onClick={() => setErrorDetailOpen(false)}
                       className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/70 hover:bg-white/10"
                     >
-                      Thu gọn
+                      Collapse
                     </button>
                     {onDismissErrorNotice ? (
                       <button

@@ -439,11 +439,11 @@ function ResultsPanel() {
         <div className="shrink-0 flex items-center gap-2 border-t border-outline-variant/10 bg-surface-container-low px-4 py-2">
           <span className="material-symbols-outlined text-sm text-tertiary">info</span>
           <span className="text-xs text-on-surface-variant">
-            Hiển thị{' '}
+            Showing{' '}
             <span className="font-mono text-on-surface">{results.rows.length}</span>
             {' '}trong{' '}
             <span className="font-mono text-on-surface">{results.totalRows.toLocaleString()}</span>
-            {' '}dòng — kết quả bị giới hạn ở 500 dòng đầu.
+            {' '}rows — results are limited to the first 500 rows.
           </span>
         </div>
       )}
@@ -565,7 +565,7 @@ function QueryHistoryPanel({ sessionId }: { sessionId: string }) {
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
           <span className="material-symbols-outlined text-4xl text-outline block">error</span>
-          <p className="text-sm text-on-surface-variant">Không tải được history</p>
+          <p className="text-sm text-on-surface-variant">Could not load history</p>
         </div>
       </div>
     );
@@ -746,7 +746,7 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="text-center space-y-2">
           <span className="material-symbols-outlined text-3xl text-outline block">error</span>
-          <p className="text-xs text-on-surface-variant">Không tải được schema</p>
+          <p className="text-xs text-on-surface-variant">Could not load schema</p>
         </div>
       </div>
     );
@@ -755,7 +755,7 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
   if (schema.tables.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-4">
-        <p className="text-xs text-on-surface-variant">Không có bảng nào trong schema</p>
+        <p className="text-xs text-on-surface-variant">No tables in schema</p>
       </div>
     );
   }
@@ -801,7 +801,7 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                 <button
                   type="button"
                   className="inline-flex h-4 items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-blue-200 hover:bg-blue-500/25"
-                  title="Mở table để xem chi tiết partition mới"
+                  title="Open table to see new partition details"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -815,7 +815,7 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                 <button
                   type="button"
                   className="inline-flex h-4 items-center rounded-[10px] border border-error/35 bg-error/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-error hover:bg-error/25"
-                  title="Mở table để xem chi tiết partition đã xóa"
+                  title="Open table to see removed partition details"
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1108,17 +1108,17 @@ function ChallengeCompareLeaderboardCard({
         <p className="text-sm font-semibold text-on-surface self-center">Leaderboard</p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:min-w-[280px]">
           <div className="rounded-xl border border-outline-variant/15 bg-surface-container-high/50 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-outline">Hạng bạn</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-outline">Your rank</p>
             <p className="mt-1 text-sm font-semibold text-on-surface">
               {viewerState === 'ranked'
                 ? `#${ctx?.viewerRank}`
                 : viewerState === 'signed-out'
-                  ? 'Chưa đăng nhập'
-                  : 'Chưa có hạng'}
+                  ? 'Not signed in'
+                  : 'No rank yet'}
             </p>
           </div>
           <div className="rounded-xl border border-outline-variant/15 bg-surface-container-high/50 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.14em] text-outline">Đã pass</p>
+            <p className="text-[10px] uppercase tracking-[0.14em] text-outline">Passed</p>
             <p className="mt-1 text-sm font-semibold text-on-surface">{ctx?.totalRankedUsers ?? '—'}</p>
           </div>
         </div>
@@ -1127,9 +1127,9 @@ function ChallengeCompareLeaderboardCard({
       {leaderboardContextQuery.isLoading ? (
         <div className="mt-4 h-24 animate-pulse rounded-xl bg-surface-container-high/60" />
       ) : leaderboardContextQuery.isError ? (
-        <p className="mt-4 text-xs text-error">Lỗi tải bảng.</p>
+        <p className="mt-4 text-xs text-error">Failed to load leaderboard.</p>
       ) : entries.length === 0 ? (
-        <p className="mt-4 text-xs text-on-surface-variant">Chưa có bản pass.</p>
+        <p className="mt-4 text-xs text-on-surface-variant">No passing attempts yet.</p>
       ) : (
         <div className="mt-4 overflow-hidden rounded-xl border border-outline-variant/10">
           <div className="grid grid-cols-[44px_minmax(120px,1fr)_72px_72px_72px] gap-x-2 border-b border-outline-variant/10 bg-surface-container-low px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-outline">
@@ -1154,7 +1154,7 @@ function ChallengeCompareLeaderboardCard({
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium text-on-surface">
                       {entry.displayName}
-                      {isViewer ? <span className="ml-1 text-primary">(bạn)</span> : null}
+                      {isViewer ? <span className="ml-1 text-primary">(you)</span> : null}
                     </p>
                     <p className="truncate font-mono text-[10px] text-on-surface-variant" title={entry.sqlText}>
                       {truncateSql(entry.sqlText, 68)}
@@ -1173,7 +1173,7 @@ function ChallengeCompareLeaderboardCard({
                       className="h-7 px-1.5 text-[11px]"
                       onClick={() => {
                         void navigator.clipboard.writeText(entry.sqlText).then(() => {
-                          toast.success('Đã copy');
+                          toast.success('Copied');
                         });
                       }}
                     >
@@ -1194,11 +1194,11 @@ function ChallengeCompareLeaderboardCard({
             size="sm"
             onClick={() => {
               void navigator.clipboard.writeText(ctx.viewerEntry!.sqlText).then(() => {
-                toast.success('Đã copy');
+                toast.success('Copied');
               });
             }}
           >
-            Copy SQL của tôi
+            Copy my SQL
           </Button>
         </div>
       ) : null}
@@ -1311,7 +1311,7 @@ function SideBySideComparePanel({
 
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <p className="text-sm font-medium text-on-surface">So sánh</p>
+            <p className="text-sm font-medium text-on-surface">Compare</p>
             <div className="flex items-center gap-1.5">
               <p className="text-[11px] text-on-surface-variant">{introHint}</p>
               <button
@@ -1324,7 +1324,7 @@ function SideBySideComparePanel({
                 )}
                 onClick={addCompareSlot}
                 disabled={activeSlotCount >= compareLabels.length}
-                title="Thêm 1 query compare"
+                title="Add a compare query slot"
               >
                 <span className="material-symbols-outlined text-[14px] leading-none">add</span>
               </button>
@@ -1333,7 +1333,7 @@ function SideBySideComparePanel({
 
           {executions.length < 2 ? (
             <div className="mt-3 rounded-lg border border-dashed border-outline-variant/25 bg-surface-container-high/30 px-3 py-2.5 text-[11px] text-on-surface-variant">
-              Cần thêm ít nhất 1 lần chạy trong History.
+              Add at least one run from History.
             </div>
           ) : (
             <>
@@ -1366,7 +1366,7 @@ function SideBySideComparePanel({
                           });
                         }}
                       >
-                        <option value="">Không chọn</option>
+                        <option value="">None</option>
                         {executions
                           .filter((e) => !blocked.has(e.id) || e.id === current)
                           .map((e) => (
@@ -1386,7 +1386,7 @@ function SideBySideComparePanel({
                       type="button"
                       className="absolute -right-1 -top-1 z-10 inline-flex h-4 w-4 items-center justify-center rounded-full border border-red-300/30 bg-red-400/8 text-red-100/85 hover:bg-red-400/14"
                       onClick={() => removeCompareSlot(slotIndex)}
-                      title={`Xóa slot ${label}`}
+                      title={`Remove slot ${label}`}
                     >
                       <span className="material-symbols-outlined text-[11px] leading-none">remove</span>
                     </button>
@@ -1554,7 +1554,7 @@ function RevertSchemaChangeModal({
               Revert change trong sandbox?
             </h2>
             <p className="mt-2 text-sm leading-6 text-on-surface-variant">
-              Thao tác này sẽ chạy SQL trên database sandbox để hoàn tác thay đổi này.
+              This will run SQL on the sandbox database to revert this change.
             </p>
           </div>
         </div>
@@ -1588,7 +1588,7 @@ function RevertSchemaChangeModal({
 
         <div className="mt-6 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onCancel} disabled={isPending}>
-            Hủy
+            Cancel
           </Button>
           <Button
             variant="destructive"
@@ -1638,7 +1638,7 @@ function SchemaDiffEntry({
         <button
           type="button"
           className="absolute -right-2 -top-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-error/45 bg-surface-container-low/90 text-error/85 shadow-sm hover:bg-error/15 hover:text-error"
-          title="Revert change này trong sandbox"
+          title="Revert this change in the sandbox"
           onClick={onRemove}
         >
           <span className="material-symbols-outlined text-[13px] leading-none">remove</span>
@@ -1911,7 +1911,7 @@ function SchemaDiffPanel({
                 onClick={onReset}
                 className="h-7 whitespace-nowrap px-2.5 text-[11px]"
               >
-                Reset về base
+                Reset to base
               </Button>
             </div>
           </div>
@@ -2013,13 +2013,13 @@ function SchemaDiffPanel({
 
 function LabSessionExpired({ status }: { status: string }) {
   const label =
-    status === 'expired' ? 'Phiên lab đã hết hạn' :
-    status === 'failed'  ? 'Phiên lab gặp lỗi' :
-                           'Phiên lab đã kết thúc';
+    status === 'expired' ? 'Lab session has expired' :
+    status === 'failed'  ? 'Lab session failed' :
+                           'Lab session has ended';
   const desc =
     status === 'failed'
-      ? 'Sandbox không thể khởi động. Hãy thử tạo phiên mới.'
-      : 'Session này không còn hoạt động. Tạo phiên mới để tiếp tục thực hành.';
+      ? 'Sandbox could not start. Try creating a new session.'
+      : 'This session is no longer active. Start a new session to continue.';
 
   return (
     <div className="flex-1 flex items-center justify-center bg-surface">
@@ -2037,11 +2037,11 @@ function LabSessionExpired({ status }: { status: string }) {
               variant="primary"
               leftIcon={<span className="material-symbols-outlined text-lg">travel_explore</span>}
             >
-              Chọn database mới
+              Choose another database
             </Button>
           </Link>
           <Link href="/lab">
-            <Button variant="secondary">Về SQL Lab</Button>
+            <Button variant="secondary">Back to SQL Lab</Button>
           </Link>
         </div>
       </div>
@@ -2085,18 +2085,18 @@ function LabSessionError({
     <div className="flex flex-1 flex-col items-center justify-center gap-5 bg-surface px-4">
       <span className="material-symbols-outlined text-5xl text-outline">cloud_off</span>
       <div className="max-w-md text-center">
-        <h1 className="font-headline text-xl font-semibold text-on-surface">Không tải được phiên lab</h1>
+        <h1 className="font-headline text-xl font-semibold text-on-surface">Could not load lab session</h1>
         <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{message}</p>
         <p className="mt-3 text-xs text-outline">
-          Kiểm tra API đang chạy, bạn đã đăng nhập, và phiên còn tồn tại trên server.
+          Check that the API is running, you are signed in, and the session still exists on the server.
         </p>
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button variant="primary" onClick={onRetry} leftIcon={<span className="material-symbols-outlined text-lg">refresh</span>}>
-          Thử lại
+          Try again
         </Button>
         <Link href="/lab">
-          <Button variant="secondary">Về SQL Lab</Button>
+          <Button variant="secondary">Back to SQL Lab</Button>
         </Link>
         <Link href="/explore">
           <Button variant="ghost">Catalog</Button>
@@ -2624,9 +2624,9 @@ export default function LabPage({ params }: ClientPageProps) {
   if (!sessionId) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-surface px-4">
-        <p className="text-sm text-on-surface-variant">Đường dẫn phiên không hợp lệ.</p>
+        <p className="text-sm text-on-surface-variant">Invalid session path.</p>
         <Link href="/lab">
-          <Button variant="primary">Về SQL Lab</Button>
+          <Button variant="primary">Back to SQL Lab</Button>
         </Link>
       </div>
     );
@@ -2639,7 +2639,7 @@ export default function LabPage({ params }: ClientPageProps) {
   if (sessionError) {
     return (
       <LabSessionError
-        message={sessionFetchError instanceof Error ? sessionFetchError.message : 'Lỗi không xác định'}
+        message={sessionFetchError instanceof Error ? sessionFetchError.message : 'Unknown error'}
         onRetry={() => void refetchSession()}
       />
     );
@@ -2808,7 +2808,7 @@ export default function LabPage({ params }: ClientPageProps) {
                     role="alert"
                     className="rounded-lg border border-error/30 bg-error/10 px-2.5 py-2 text-xs leading-snug text-on-surface"
                   >
-                    <p className="font-semibold text-error">Challenge chưa pass.</p>
+                    <p className="font-semibold text-error">Challenge not passed yet.</p>
                     {extractPrimaryChallengeFeedback(latestAttemptEvaluation.feedbackText) ? (
                       <p className="mt-2 whitespace-pre-wrap break-words text-on-surface">
                         {extractPrimaryChallengeFeedback(latestAttemptEvaluation.feedbackText)}
@@ -2954,7 +2954,7 @@ export default function LabPage({ params }: ClientPageProps) {
                   );
                   navigator.clipboard
                     .writeText([header, ...rows].join('\n'))
-                    .then(() => toast.success('Đã copy kết quả (CSV)'));
+                    .then(() => toast.success('Copied results (CSV)'));
                 }}
                 className="ml-auto mr-2 flex items-center gap-1 rounded px-2 py-1 text-[11px] text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
                 title="Copy results as CSV"

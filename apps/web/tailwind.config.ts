@@ -10,7 +10,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Content-first neutral — dark nhưng không “chìm” (#0a); tầng rõ ràng hơn
+        // Content-first neutral — dark without feeling flat (#0a); clearer layers
         'on-tertiary-fixed-variant': '#5c5c5c',
         'on-secondary-fixed': '#1a1a1a',
         'outline-variant': '#3d3d3d',

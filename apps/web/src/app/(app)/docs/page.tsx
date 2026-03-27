@@ -3,58 +3,58 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
 export const metadata: Metadata = {
-  title: 'Hướng dẫn sử dụng',
+  title: 'User guide',
   description:
-    'Hướng dẫn dùng SQLCraft: các màn hình, luồng luyện SQL, Lab, challenges và phím tắt.',
+    'How to use SQLCraft: screens, SQL practice flow, Lab, challenges, and keyboard shortcuts.',
 };
 
 const TOC = [
-  { href: '#tong-quan', label: 'Tổng quan' },
-  { href: '#luong-su-dung', label: 'Luồng sử dụng' },
-  { href: '#man-hinh', label: 'Các màn hình' },
-  { href: '#khai-niem', label: 'Khái niệm' },
-  { href: '#phim-tat', label: 'Phím tắt' },
+  { href: '#overview', label: 'Overview' },
+  { href: '#typical-flow', label: 'Typical flow' },
+  { href: '#screens', label: 'Screens' },
+  { href: '#concepts', label: 'Concepts' },
+  { href: '#shortcuts', label: 'Shortcuts' },
 ] as const;
 
 const APP_SECTIONS = [
   {
     title: 'Dashboard',
     description:
-      'Tổng quan hoạt động: thống kê phiên đang chạy, số truy vấn (7 ngày gần nhất), challenge đã hoàn thành, gợi ý database nổi bật và truy vấn gần đây.',
+      'Activity overview: running sessions, query count (last 7 days), completed challenges, featured database suggestions, and recent queries.',
     href: '/dashboard',
     icon: 'dashboard',
   },
   {
     title: 'Databases (Explorer)',
     description:
-      'Danh sách bộ dữ liệu mẫu: đọc mô tả, quy mô (số dòng), cấu trúc bảng. Chọn một bộ để xem chi tiết và bắt đầu phiên luyện tập.',
+      'Sample datasets: read descriptions, scale (row counts), and table structure. Pick one to open details and start a practice session.',
     href: '/explore',
     icon: 'database',
   },
   {
     title: 'SQL Lab',
     description:
-      'Danh sách phiên đang hoặc đã tạo; mở một phiên để soạn SQL, chạy câu lệnh, xem kế hoạch thực thi, lịch sử và (khi có) so sánh kết quả.',
+      'Sessions you have created or that are still open; open one to write SQL, run statements, view execution plans, history, and (when available) compare results.',
     href: '/lab',
     icon: 'terminal',
   },
   {
     title: 'Challenges & Leaderboard',
     description:
-      'Bảng xếp hạng và hub challenge: luyện bài có chấm điểm, xem submission và tiến độ cộng đồng.',
+      'Leaderboard and challenge hub: graded exercises, submissions, and community progress.',
     href: '/leaderboard',
     icon: 'target',
   },
   {
     title: 'Query history',
-    description: 'Toàn bộ truy vấn đã chạy qua các phiên, có thể lọc và xem lại SQL cùng kết quả tóm tắt.',
+    description: 'All queries run across sessions, filterable with SQL and summarized results.',
     href: '/history',
     icon: 'history',
   },
   {
     title: 'Profile & Settings',
     description:
-      'Hồ sơ người dùng, thống kê cá nhân; cài đặt tài khoản (Settings) từ menu sidebar.',
+      'User profile and personal stats; account settings from the sidebar menu.',
     href: '/profile',
     icon: 'person',
   },
@@ -72,16 +72,16 @@ export default function DocsPage() {
   return (
     <div className="page-shell-narrow page-stack">
       <header className="space-y-3">
-        <h1 className="page-title-lg">Hướng dẫn sử dụng</h1>
+        <h1 className="page-title-lg">User guide</h1>
         <p className="page-lead max-w-2xl">
-          SQLCraft giúp bạn <strong className="font-semibold text-on-surface">luyện SQL</strong> trên
-          các bộ dữ liệu mẫu trong <strong className="font-semibold text-on-surface">môi trường riêng</strong>{' '}
-          cho từng phiên: soạn câu lệnh, xem kết quả, phân tích truy vấn và tham gia challenge. Trang
-          này chỉ dành cho <strong className="font-semibold text-on-surface">người dùng ứng dụng</strong>
-          — cách điều hướng và thao tác trong từng màn hình.
+          SQLCraft helps you <strong className="font-semibold text-on-surface">practice SQL</strong> on
+          sample datasets in a <strong className="font-semibold text-on-surface">dedicated environment</strong>{' '}
+          per session: write statements, view results, analyze queries, and join challenges. This page is
+          for <strong className="font-semibold text-on-surface">app users</strong>
+          — how to navigate and use each screen.
         </p>
         <nav
-          aria-label="Mục lục"
+          aria-label="Table of contents"
           className="flex flex-wrap gap-2 border-b border-outline-variant/10 pb-4"
         >
           {TOC.map((item) => (
@@ -96,64 +96,63 @@ export default function DocsPage() {
         </nav>
       </header>
 
-      <section id="tong-quan" className="scroll-mt-24 section-card card-padding">
-        <h2 className="page-section-title">SQLCraft là gì?</h2>
+      <section id="overview" className="scroll-mt-24 section-card card-padding">
+        <h2 className="page-section-title">What is SQLCraft?</h2>
         <ul className="mt-4 list-inside list-disc space-y-2 text-sm leading-relaxed text-on-surface-variant">
           <li>
-            <span className="text-on-surface">Soạn và chạy SQL trong trình duyệt</span> — mỗi phiên có
-            database tách biệt; bạn xem được một phần kết quả (đủ để học) và thời gian chạy câu lệnh.
+            <span className="text-on-surface">Write and run SQL in the browser</span> — each session has
+            its own database; you see a subset of rows (enough to learn) and statement runtime.
           </li>
           <li>
-            <span className="text-on-surface">Nhiều mức dữ liệu</span> — cùng một bộ bảng có thể chọn
-            quy mô nhỏ hoặc lớn hơn tùy bài tập; số dòng hiển thị trên màn hình phản ánh đúng bộ dữ
-            liệu bạn đang dùng.
+            <span className="text-on-surface">Multiple data scales</span> — the same table set may offer
+            smaller or larger scales per exercise; on-screen row counts reflect the dataset you chose.
           </li>
           <li>
-            <span className="text-on-surface">Challenges & leaderboard</span> — bài tập có đánh giá,
-            điểm và bảng xếp hạng để theo dõi tiến độ.
+            <span className="text-on-surface">Challenges & leaderboard</span> — graded exercises,
+            points, and rankings to track progress.
           </li>
         </ul>
       </section>
 
-      <section id="luong-su-dung" className="scroll-mt-24 section-card card-padding">
-        <h2 className="page-section-title">Luồng sử dụng điển hình</h2>
+      <section id="typical-flow" className="scroll-mt-24 section-card card-padding">
+        <h2 className="page-section-title">Typical usage flow</h2>
         <ol className="mt-4 list-inside list-decimal space-y-3 text-sm leading-relaxed text-on-surface-variant">
           <li>
-            <span className="text-on-surface">Đăng nhập</span> — bạn cần tài khoản để vào các màn hình
-            luyện tập và lưu tiến độ.
+            <span className="text-on-surface">Sign in</span> — you need an account to access practice
+            screens and save progress.
           </li>
           <li>
-            <span className="text-on-surface">Mở Databases</span> — chọn catalog (ví dụ ecommerce),
-            đọc mô tả và schema.
+            <span className="text-on-surface">Open Databases</span> — pick a catalog (e.g. ecommerce),
+            read the description and schema.
           </li>
           <li>
-            <span className="text-on-surface">Bắt đầu phiên</span> — chọn mức dữ liệu (nếu có nhiều lựa
-            chọn), bấm khởi chạy; ứng dụng mở{' '}
+            <span className="text-on-surface">Start a session</span> — choose a data scale when offered,
+            then launch; the app opens{' '}
             <Link href="/lab" className="font-medium text-primary underline-offset-2 hover:underline">
               SQL Lab
             </Link>{' '}
-            cho phiên vừa tạo.
+            for the new session.
           </li>
           <li>
-            <span className="text-on-surface">Viết và chạy SQL</span> — trong Lab, dùng ô soạn thảo và
-            phím tắt để chạy câu lệnh; xem kế hoạch thực thi và lịch sử trong cùng phiên.
+            <span className="text-on-surface">Write and run SQL</span> — in Lab, use the editor and
+            shortcuts to execute statements; view plans and history in the same session.
           </li>
           <li>
-            <span className="text-on-surface">Kết thúc phiên</span> — khi hết thời gian hoặc bạn chủ
-            động kết thúc, môi trường của phiên đó sẽ đóng và dữ liệu tạm không còn truy cập được.
+            <span className="text-on-surface">End a session</span> — when time expires or you end it,
+            that session&apos;s environment closes and temporary data is no longer available.
           </li>
           <li>
-            <span className="text-on-surface">Challenges</span> — từ leaderboard mở từng challenge,
-            nộp lời giải theo hướng dẫn từng bài.
+            <span className="text-on-surface">Challenges</span> — from the leaderboard, open each
+            challenge and submit solutions per instructions.
           </li>
         </ol>
       </section>
 
-      <section id="man-hinh" className="scroll-mt-24 space-y-4">
-        <h2 className="page-section-title px-1">Các màn hình trong ứng dụng</h2>
+      <section id="screens" className="scroll-mt-24 space-y-4">
+        <h2 className="page-section-title px-1">Screens in the app</h2>
         <p className="px-1 text-sm text-on-surface-variant">
-          Điều hướng chính nằm ở sidebar (desktop) hoặc thanh dưới (mobile). Admin có thêm mục{' '}
-          <strong className="text-on-surface">Admin Panel</strong> khi tài khoản có quyền.
+          Main navigation is in the sidebar (desktop) or bottom bar (mobile). Admins also see{' '}
+          <strong className="text-on-surface">Admin Panel</strong> when their account has access.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           {APP_SECTIONS.map((item) => (
@@ -172,7 +171,7 @@ export default function DocsPage() {
                     {item.description}
                   </p>
                   <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-on-surface">
-                    Mở trang
+                    Open page
                     <span className="material-symbols-outlined text-base">arrow_forward</span>
                   </span>
                 </div>
@@ -181,73 +180,74 @@ export default function DocsPage() {
           ))}
         </div>
         <p className="px-1 text-sm text-on-surface-variant">
-          Trang <Link href="/submissions" className="font-medium text-primary underline-offset-2 hover:underline">Submissions</Link> tổng hợp bài nộp challenge (nếu bạn đã tham gia).
+          The{' '}
+          <Link href="/submissions" className="font-medium text-primary underline-offset-2 hover:underline">
+            Submissions
+          </Link>{' '}
+          page lists your challenge submissions (if you have any).
         </p>
       </section>
 
-      <section id="khai-niem" className="scroll-mt-24 section-card card-padding">
-        <h2 className="page-section-title">Khái niệm quan trọng</h2>
+      <section id="concepts" className="scroll-mt-24 section-card card-padding">
+        <h2 className="page-section-title">Important concepts</h2>
         <dl className="mt-4 space-y-4 text-sm text-on-surface-variant">
           <div>
-            <dt className="font-semibold text-on-surface">Phiên Lab</dt>
+            <dt className="font-semibold text-on-surface">Lab session</dt>
             <dd className="mt-1 leading-relaxed">
-              Một lần “làm việc” gắn với một database riêng, tạm thời. Thường mỗi lần bạn bắt đầu từ
-              trang Databases là một phiên mới; bạn cũng có thể tiếp tục phiên chưa đóng từ danh sách
-              trong SQL Lab.
+              A single work period tied to one temporary database. Starting from Databases usually
+              creates a new session; you can also resume an open session from the list in SQL Lab.
             </dd>
           </div>
           <div>
-            <dt className="font-semibold text-on-surface">Thời hạn phiên</dt>
+            <dt className="font-semibold text-on-surface">Session time limit</dt>
             <dd className="mt-1 leading-relaxed">
-              Phiên có giới hạn thời gian. Khi bạn còn làm việc trong Lab, thời hạn có thể được gia hạn
-              nhẹ. Hết hạn hoặc sau khi đóng phiên, bạn không còn mở lại cùng dữ liệu đó.
+              Sessions have a time limit. While you work in Lab, it may be extended slightly. After
+              expiry or when the session ends, you cannot reopen the same data.
             </dd>
           </div>
           <div>
-            <dt className="font-semibold text-on-surface">Số liệu trên Dashboard và Profile</dt>
+            <dt className="font-semibold text-on-surface">Dashboard and Profile numbers</dt>
             <dd className="mt-1 leading-relaxed">
-              Mục <strong className="text-on-surface">Queries</strong> thường đếm các câu lệnh bạn đã
-              chạy trong <strong className="text-on-surface">7 ngày gần nhất</strong>, để phản ánh
-              mức độ luyện tập gần đây — không phải tổng từ trước đến nay. Số challenge hoàn thành có
-              thể hiển thị theo tổng đã làm được.
+              <strong className="text-on-surface">Queries</strong> usually counts statements you ran in
+              the <strong className="text-on-surface">last 7 days</strong> to reflect recent practice —
+              not an all-time total. Completed challenges may show as a lifetime count.
             </dd>
           </div>
           <div>
-            <dt className="font-semibold text-on-surface">Kết quả và kế hoạch thực thi</dt>
+            <dt className="font-semibold text-on-surface">Results and execution plans</dt>
             <dd className="mt-1 leading-relaxed">
-              Mỗi lần chạy SQL, bảng kết quả chỉ hiển thị một phần các dòng (đủ để đọc và kiểm tra).
-              Phần kế hoạch thực thi giúp bạn hiểu cách hệ quản trị cơ sở dữ liệu xử lý câu lệnh (hữu
-              ích khi học tối ưu truy vấn).
+              Each run shows a subset of result rows (enough to read and verify). The execution plan
+              explains how the database engine processes the statement (useful for query optimization).
             </dd>
           </div>
         </dl>
       </section>
 
-      <section id="phim-tat" className="scroll-mt-24 section-card card-padding">
-        <h2 className="page-section-title">Phím tắt trong SQL Lab</h2>
+      <section id="shortcuts" className="scroll-mt-24 section-card card-padding">
+        <h2 className="page-section-title">SQL Lab shortcuts</h2>
         <ul className="mt-4 space-y-3 text-sm text-on-surface-variant">
           <li className="flex flex-wrap items-center gap-2">
             <Kbd>Ctrl</Kbd>
             <span>+</span>
             <Kbd>Enter</Kbd>
             <span className="text-on-surface-variant">
-              — chạy truy vấn đang soạn{' '}
+              — run the current query{' '}
               <span className="text-on-surface">(macOS: ⌘ + Enter)</span>
             </span>
           </li>
         </ul>
         <p className="mt-4 text-xs text-outline">
-          Gợi ý tương tự cũng hiển thị ngay dưới ô editor trong Lab.
+          A similar hint appears below the editor in Lab.
         </p>
       </section>
 
       <div className="rounded-xl border border-dashed border-outline-variant/25 bg-surface-container-low/50 p-5 text-sm text-on-surface-variant">
         <p>
-          Cần chỉnh tài khoản hoặc theme? Mở{' '}
+          Need to change account or theme? Open{' '}
           <Link href="/settings" className="font-medium text-on-surface underline-offset-2 hover:underline">
             User Settings
           </Link>
-          . Hỗ trợ vận hành: liên hệ quản trị qua kênh nội bộ của tổ chức bạn.
+          . For operations support, contact your organization&apos;s admins.
         </p>
       </div>
     </div>

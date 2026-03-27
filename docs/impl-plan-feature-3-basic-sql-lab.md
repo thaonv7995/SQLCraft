@@ -1,15 +1,15 @@
 # Implementation Plan: Feature #3 — Basic SQL Lab
 
-## Tổng quan
+## Overview
 
-Feature #3 hiện có UI skeleton khá hoàn chỉnh nhưng **không hoạt động** do 3 vấn đề cốt lõi:
-1. Frontend gọi sai API endpoint (endpoint không tồn tại)
-2. Frontend xử lý kết quả như sync trong khi backend thực thi async qua job queue
-3. Schema panel dùng mock data cứng thay vì fetch thật từ sandbox
+Feature #3 has a fairly complete UI skeleton but **does not work** because of three core issues:
+1. Frontend calls the wrong API endpoints (non-existent routes)
+2. Frontend treats results as synchronous while the backend runs async via a job queue
+3. Schema panel uses hardcoded mock data instead of fetching from the sandbox
 
-Plan này chia thành 2 phase:
-- **Phase 1** (Critical): Làm cho feature hoạt động được end-to-end
-- **Phase 2** (Completion): Hoàn thiện UX theo spec
+This plan splits into two phases:
+- **Phase 1** (Critical): Make the feature work end-to-end
+- **Phase 2** (Completion): Polish UX to spec
 
 ---
 
@@ -19,18 +19,18 @@ Plan này chia thành 2 phase:
 
 **File:** `apps/web/src/lib/api.ts`
 
-**Vấn đề:**
-- `queryApi.execute()` gọi `POST /query/execute` → không tồn tại, phải là `POST /v1/query-executions`
-- `queryApi.explain()` gọi `POST /query/explain` → không tồn tại, phải dùng cùng endpoint với `explainPlan: true`
-- Body field `sessionId` → backend expect `learningSessionId`
+**Issues:**
+- `queryApi.execute()` calls `POST /query/execute` → does not exist; should be `POST /v1/query-executions`
+- `queryApi.explain()` calls `POST /query/explain` → does not exist; use the same endpoint with `explainPlan: true`
+- Body field `sessionId` → backend expects `learningSessionId`
 
-**Thay đổi:**
+**Changes:**
 
 ```ts
 // apps/web/src/lib/api.ts
 
 export interface QueryExecutionRequest {
-  sessionId: string;       // giữ nguyên để không break store/hooks
+  sessionId: string;       // keep name to avoid breaking store/hooks
   sql: string;
   datasetSize?: 'tiny' | 'small' | 'medium' | 'large';
 }
@@ -38,7 +38,7 @@ export interface QueryExecutionRequest {
 export const queryApi = {
   execute: (payload: QueryExecutionRequest) =>
     api.post<QueryExecution>('/query-executions', {
-      learningSessionId: payload.sessionId,  // map lại tên field
+      learningSessionId: payload.sessionId,  // map field name
       sql: payload.sql,
     }).then((r) => r.data),
 
@@ -54,14 +54,14 @@ export const queryApi = {
     api.get<QueryExecution>(`/query-executions/${executionId}`).then((r) => r.data),
 
   history: async (sessionId?: string, params?: { page?: number; limit?: number }) => {
-    // ... giữ nguyên logic hiện tại
+    // ... keep existing logic
   },
 };
 ```
 
 **Acceptance criteria:**
-- `POST /v1/query-executions` trả về `{ id, status: 'accepted', sqlText, submittedAt }`
-- Không còn 404 khi bấm Run
+- `POST /v1/query-executions` returns `{ id, status: 'accepted', sqlText, submittedAt }`
+- No 404 when clicking Run
 
 ---
 
@@ -69,12 +69,12 @@ export const queryApi = {
 
 **Files:** `apps/web/src/hooks/use-query-execution.ts`, `apps/web/src/stores/lab.ts`
 
-**Vấn đề:**
-Backend trả về ngay `{ status: 'accepted' }` rồi worker mới chạy query. Frontend hiện tại xử lý response của `execute` như thể đó là kết quả cuối cùng, nên `data.result` luôn `null`.
+**Issue:**
+Backend returns `{ status: 'accepted' }` immediately and the worker runs the query later. The frontend currently treats the `execute` response as final, so `data.result` stays `null`.
 
-**Giải pháp:** Sau khi submit thành công, poll `GET /v1/query-executions/:id` mỗi 500ms cho đến khi `status` là `succeeded`, `failed`, `timed_out`, hoặc `blocked`.
+**Fix:** After a successful submit, poll `GET /v1/query-executions/:id` every 500ms until `status` is `succeeded`, `failed`, `timed_out`, or `blocked`.
 
-**Thay đổi trong `use-query-execution.ts`:**
+**Changes in `use-query-execution.ts`:**
 
 ```ts
 const TERMINAL_STATUSES = new Set(['success', 'error']);
@@ -87,10 +87,10 @@ export function useExecuteQuery() {
 
   return useMutation<QueryExecution, Error, QueryExecutionRequest>({
     mutationFn: async (payload) => {
-      // 1. Submit — nhận về accepted execution với id
+      // 1. Submit — get accepted execution with id
       const accepted = await queryApi.execute(payload);
 
-      // 2. Poll cho đến khi có kết quả
+      // 2. Poll until terminal
       const deadline = Date.now() + POLL_TIMEOUT_MS;
       let execution = accepted;
 
@@ -108,10 +108,10 @@ export function useExecuteQuery() {
       useLabStore.setState({ isExecuting: true, error: null, results: null });
     },
     onSuccess: (data) => {
-      // ... giữ nguyên logic hiện tại
+      // ... keep existing logic
     },
     onError: (err) => {
-      // ... giữ nguyên
+      // ... keep existing
     },
   });
 }
@@ -121,29 +121,29 @@ function sleep(ms: number) {
 }
 ```
 
-**Lưu ý:** `useExplainQuery` áp dụng cùng pattern polling, chỉ khác ở field `executionPlan` được lấy từ kết quả.
+**Note:** `useExplainQuery` uses the same polling pattern; only the `executionPlan` field differs.
 
 **Acceptance criteria:**
-- Bấm Run → spinner → kết quả hiển thị trong bảng sau ~1-3 giây
-- Bấm Explain → spinner → tab Plan hiển thị execution plan
-- Nếu query lỗi → error message hiển thị đúng
+- Run → spinner → results in table after ~1–3s
+- Explain → spinner → Plan tab shows execution plan
+- Failed query → correct error message
 
 ---
 
-### Task 1.3 — Backend: thêm endpoint lấy schema của session
+### Task 1.3 — Backend: session schema endpoint
 
 **Files:**
-- `apps/api/src/modules/sessions/sessions.router.ts` (thêm route)
-- `apps/api/src/modules/sessions/sessions.handler.ts` (thêm handler)
-- `apps/api/src/modules/sessions/sessions.service.ts` (thêm service function)
+- `apps/api/src/modules/sessions/sessions.router.ts` (add route)
+- `apps/api/src/modules/sessions/sessions.handler.ts` (add handler)
+- `apps/api/src/modules/sessions/sessions.service.ts` (add service)
 
-**Endpoint mới:** `GET /v1/learning-sessions/:sessionId/schema`
+**New endpoint:** `GET /v1/learning-sessions/:sessionId/schema`
 
 **Logic:**
-1. Lấy session → lấy `lessonVersionId`
-2. Lấy `lessonVersion` → lấy `schemaTemplateId`
-3. Lấy `schemaTemplate.definition` (JSONB) → parse thành danh sách bảng/cột
-4. Return schema đã normalize (dùng lại logic `parseSchemaDefinition` + `normalizeColumn` đã có trong `databases.service.ts`)
+1. Load session → `lessonVersionId`
+2. Load `lessonVersion` → `schemaTemplateId`
+3. Load `schemaTemplate.definition` (JSONB) → parse to table/column list
+4. Return normalized schema (reuse `parseSchemaDefinition` + `normalizeColumn` from `databases.service.ts`)
 
 **Response type:**
 
@@ -164,26 +164,26 @@ interface SessionSchemaResponse {
 }
 ```
 
-**Lưu ý:** Schema này lấy từ `schemaTemplates` trong DB (định nghĩa gốc), không phải introspect live sandbox. Đây là đủ cho Feature #3. Feature #8 mới cần introspect live.
+**Note:** This schema comes from `schemaTemplates` in the DB (canonical definition), not live introspection. Enough for Feature #3; Feature #8 needs live introspection.
 
 **Acceptance criteria:**
-- `GET /v1/learning-sessions/:id/schema` trả về danh sách bảng + cột đúng với database đang dùng trong session
-- 401 nếu không authed, 403 nếu không phải owner, 404 nếu session không tồn tại
+- `GET /v1/learning-sessions/:id/schema` returns tables + columns for the session database
+- 401 if unauthenticated, 403 if not owner, 404 if session missing
 
 ---
 
-### Task 1.4 — Frontend: Schema Panel fetch thật
+### Task 1.4 — Frontend: Schema Panel real fetch
 
 **File:** `apps/web/src/app/(app)/lab/[sessionId]/page.tsx`
 
-**Vấn đề:** `SchemaPanel` dùng `MOCK_SCHEMA` hardcoded.
+**Issue:** `SchemaPanel` uses hardcoded `MOCK_SCHEMA`.
 
-**Thay đổi:**
-1. Thêm `sessionsApi.getSchema(sessionId)` vào `api.ts`
-2. Thêm `useSessionSchema(sessionId)` hook trong `use-query-execution.ts`
-3. `SchemaPanel` nhận `sessionId` prop, dùng hook để fetch, hiển thị loading/error state
+**Changes:**
+1. Add `sessionsApi.getSchema(sessionId)` in `api.ts`
+2. Add `useSessionSchema(sessionId)` in `use-query-execution.ts`
+3. `SchemaPanel` takes `sessionId`, uses hook, shows loading/error
 
-**Thêm vào `api.ts`:**
+**Add to `api.ts`:**
 
 ```ts
 export const sessionsApi = {
@@ -193,7 +193,7 @@ export const sessionsApi = {
 };
 ```
 
-**SchemaPanel cập nhật:**
+**SchemaPanel update:**
 
 ```tsx
 function SchemaPanel({ sessionId }: { sessionId: string }) {
@@ -203,27 +203,27 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
   if (isLoading) return <SchemaSkeleton />;
   if (isError || !schema) return <SchemaError />;
 
-  // render giống UI cũ nhưng dùng schema.tables thật
+  // same UI as before but with real schema.tables
 }
 ```
 
 **Acceptance criteria:**
-- Schema panel hiển thị đúng bảng/cột của database đang dùng trong session
-- Hiển thị primary key (icon key), foreign key (icon link)
-- Loading skeleton khi fetch
-- Error state nếu fetch thất bại
+- Schema panel shows tables/columns for the session database
+- PK (key icon), FK (link icon)
+- Loading skeleton while fetching
+- Error state on failure
 
 ---
 
 ## Phase 2 — Complete the Spec (UX Polish)
 
-### Task 2.1 — Session Lifecycle Management
+### Task 2.1 — Session lifecycle management
 
 **File:** `apps/web/src/app/(app)/lab/[sessionId]/page.tsx`
 
-**Vấn đề:** Khi session `expired` hoặc `failed`, UI không có CTA nào. Người dùng bị kẹt.
+**Issue:** When session is `expired` or `failed`, there is no CTA; users get stuck.
 
-**Thay đổi:** Thêm `LabSessionExpired` component hiển thị khi `session?.status` là `expired`, `failed`, hoặc `ended`:
+**Change:** Add `LabSessionExpired` when `session?.status` is `expired`, `failed`, or `ended`:
 
 ```tsx
 function LabSessionExpired({ onNewSession }: { onNewSession: () => void }) {
@@ -231,13 +231,13 @@ function LabSessionExpired({ onNewSession }: { onNewSession: () => void }) {
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center space-y-4">
         <span className="material-symbols-outlined text-5xl text-outline">timer_off</span>
-        <h2 className="text-lg font-semibold">Phiên lab đã kết thúc</h2>
+        <h2 className="text-lg font-semibold">Lab session has ended</h2>
         <p className="text-sm text-on-surface-variant max-w-sm">
-          Session này đã hết hạn hoặc bị ngắt. Tạo phiên mới từ trang Explore.
+          This session expired or was stopped. Start a new one from Explore.
         </p>
         <div className="flex gap-2 justify-center">
-          <Link href="/explore"><Button variant="primary">Chọn database mới</Button></Link>
-          <Link href="/lab"><Button variant="secondary">Về SQL Lab</Button></Link>
+          <Link href="/explore"><Button variant="primary">Choose another database</Button></Link>
+          <Link href="/lab"><Button variant="secondary">Back to SQL Lab</Button></Link>
         </div>
       </div>
     </div>
@@ -245,62 +245,62 @@ function LabSessionExpired({ onNewSession }: { onNewSession: () => void }) {
 }
 ```
 
-Hiển thị thay thế nội dung tab khi session không còn active/provisioning.
+Replace tab content when session is not active/provisioning.
 
 **Acceptance criteria:**
-- Session `expired`/`failed`/`ended` → hiển thị màn hình expired với link đến `/explore`
-- Session `provisioning` → spinner + text "Đang khởi động sandbox..." trong result pane
-- Nút Run/Explain bị disable và có tooltip khi session chưa ready
+- `expired`/`failed`/`ended` → expired screen with link to `/explore`
+- `provisioning` → spinner + “Starting sandbox...” in result pane
+- Run/Explain disabled with tooltip until session ready
 
 ---
 
-### Task 2.2 — Result Table: Truncation Indicator & Row Count
+### Task 2.2 — Result table: truncation indicator & row count
 
 **File:** `apps/web/src/app/(app)/lab/[sessionId]/page.tsx` — `ResultsPanel`
 
-**Thêm vào dưới result table khi `results.truncated === true`:**
+**Below result table when `results.truncated === true`:**
 
 ```tsx
 {results.truncated && (
   <div className="shrink-0 flex items-center gap-2 border-t border-outline-variant/10 bg-surface-container-low px-4 py-2">
     <span className="material-symbols-outlined text-sm text-tertiary">info</span>
     <span className="text-xs text-on-surface-variant">
-      Hiển thị <span className="font-mono text-on-surface">{results.rows.length}</span> trong{' '}
-      <span className="font-mono text-on-surface">{results.totalRows.toLocaleString()}</span> dòng.
-      Kết quả bị giới hạn ở 500 dòng đầu.
+      Showing <span className="font-mono text-on-surface">{results.rows.length}</span> of{' '}
+      <span className="font-mono text-on-surface">{results.totalRows.toLocaleString()}</span> rows.
+      Results are limited to the first 500 rows.
     </span>
   </div>
 )}
 ```
 
 **Acceptance criteria:**
-- Khi kết quả bị truncate: banner thông báo hiển thị rõ X/Y rows
-- Khi không truncate: không hiển thị banner
-- Status bar vẫn hiển thị duration + row count như cũ
+- Truncated results → clear X/Y banner
+- No banner when not truncated
+- Status bar still shows duration + row count
 
 ---
 
-### Task 2.3 — Copy to Clipboard
+### Task 2.3 — Copy to clipboard
 
 **File:** `apps/web/src/app/(app)/lab/[sessionId]/page.tsx`
 
-**Thêm 2 nơi:**
+**Two places:**
 
-1. **Copy Query** — icon button ở tab bar của editor pane (cạnh "X lines"):
+1. **Copy Query** — icon in editor tab bar (next to “X lines”):
 ```tsx
 <button onClick={() => copyToClipboard(currentQuery)} title="Copy query">
   <span className="material-symbols-outlined text-base text-outline hover:text-on-surface">content_copy</span>
 </button>
 ```
 
-2. **Copy Results as CSV** — icon button ở tab bar của result pane (chỉ hiển thị khi `activeTab === 'results' && results`):
+2. **Copy Results as CSV** — icon in results tab bar (when `activeTab === 'results' && results`):
 ```tsx
 <button onClick={() => copyResultsAsCsv(results)} title="Copy results as CSV">
   <span className="material-symbols-outlined text-base text-outline hover:text-on-surface">content_copy</span>
 </button>
 ```
 
-**Helper function:**
+**Helper:**
 ```ts
 function copyResultsAsCsv(results: QueryResultPreview) {
   const header = results.columns.map((c) => c.name).join(',');
@@ -308,22 +308,22 @@ function copyResultsAsCsv(results: QueryResultPreview) {
     results.columns.map((c) => JSON.stringify(row[c.name] ?? '')).join(',')
   );
   navigator.clipboard.writeText([header, ...rows].join('\n'));
-  toast.success('Đã copy kết quả');
+  toast.success('Results copied');
 }
 ```
 
 **Acceptance criteria:**
-- Copy query → clipboard chứa SQL hiện tại
-- Copy results → clipboard chứa CSV (header + rows)
-- Toast confirm sau mỗi lần copy
+- Copy query → current SQL in clipboard
+- Copy results → CSV (header + rows)
+- Toast after each copy
 
 ---
 
-### Task 2.4 — Clear Editor Button
+### Task 2.4 — Clear editor button
 
 **File:** `apps/web/src/app/(app)/lab/[sessionId]/page.tsx` — header toolbar
 
-**Thêm vào nhóm button (cạnh Format):**
+**Next to Format:**
 
 ```tsx
 <Button
@@ -334,7 +334,7 @@ function copyResultsAsCsv(results: QueryResultPreview) {
     setQuery('');
     useLabStore.getState().resetResults();
   }}
-  title="Xóa editor và kết quả"
+  title="Clear editor and results"
   leftIcon={<span className="material-symbols-outlined text-[18px]">delete_sweep</span>}
 >
   Clear
@@ -342,60 +342,60 @@ function copyResultsAsCsv(results: QueryResultPreview) {
 ```
 
 **Acceptance criteria:**
-- Bấm Clear → editor trống, results/error/plan đều cleared
-- Button disable khi editor đã trống
-- Không cần confirm dialog (action reversible bằng Ctrl+Z)
+- Clear → empty editor, cleared results/error/plan
+- Disabled when editor empty
+- No confirm (reversible via Ctrl+Z)
 
 ---
 
-## Thứ tự thực hiện
+## Execution order
 
 ```
-Task 1.1 → Task 1.2 → [Task 1.3 song song Task 1.4*] → Task 2.x
+Task 1.1 → Task 1.2 → [Task 1.3 in parallel with Task 1.4*] → Task 2.x
 ```
 
-*Task 1.4 phụ thuộc Task 1.3 (cần backend endpoint trước).
+*Task 1.4 depends on Task 1.3 (backend endpoint first).
 
-**Ưu tiên theo impact:**
+**Priority by impact:**
 
-| Task | Effort | Impact | Thứ tự |
-|------|--------|--------|--------|
-| 1.1 Fix API endpoint | XS (~30 phút) | Critical | 1st |
-| 1.2 Async polling | S (~2 giờ) | Critical | 2nd |
-| 1.3 Backend schema endpoint | S (~2 giờ) | High | 3rd |
-| 1.4 Schema Panel fetch thật | S (~1 giờ) | High | 4th |
-| 2.1 Session lifecycle | S (~1.5 giờ) | Medium | 5th |
-| 2.2 Truncation indicator | XS (~30 phút) | Medium | 6th |
-| 2.3 Copy to clipboard | XS (~45 phút) | Medium | 7th |
-| 2.4 Clear editor | XS (~15 phút) | Low | 8th |
+| Task | Effort | Impact | Order |
+|------|--------|--------|-------|
+| 1.1 Fix API endpoint | XS (~30 min) | Critical | 1st |
+| 1.2 Async polling | S (~2 h) | Critical | 2nd |
+| 1.3 Backend schema endpoint | S (~2 h) | High | 3rd |
+| 1.4 Schema Panel real fetch | S (~1 h) | High | 4th |
+| 2.1 Session lifecycle | S (~1.5 h) | Medium | 5th |
+| 2.2 Truncation indicator | XS (~30 min) | Medium | 6th |
+| 2.3 Copy to clipboard | XS (~45 min) | Medium | 7th |
+| 2.4 Clear editor | XS (~15 min) | Low | 8th |
 
-**Tổng ước tính: ~10 giờ**
+**Rough total: ~10 hours**
 
 ---
 
 ## Definition of Done
 
-Feature #3 hoàn thành khi:
+Feature #3 is done when:
 
-- [ ] Bấm Run → thấy kết quả trong bảng (không phải blank/null)
-- [ ] Bấm Explain → thấy execution plan JSON
-- [ ] Lỗi SQL → hiển thị error message đúng loại (validation vs runtime)
-- [ ] Schema tab → hiển thị bảng/cột thật của database đang dùng
-- [ ] Session expired/failed → có CTA để tạo session mới
-- [ ] Kết quả truncated → banner rõ ràng
-- [ ] Copy query và copy results hoạt động
-- [ ] Clear button hoạt động
-- [ ] Không còn mock data trong code
+- [ ] Run → results in table (not blank/null)
+- [ ] Explain → execution plan JSON visible
+- [ ] SQL error → correct message type (validation vs runtime)
+- [ ] Schema tab → real tables/columns for session DB
+- [ ] Session expired/failed → CTA to start a new session
+- [ ] Truncated results → clear banner
+- [ ] Copy query and copy results work
+- [ ] Clear button works
+- [ ] No mock data left in code
 
 ---
 
-## Không thuộc scope Feature #3
+## Out of scope for Feature #3
 
-Những thứ này thuộc các feature khác, **không** implement trong plan này:
+Handled by other features, **not** in this plan:
 
-- Schema-aware SQL autocompletion → phụ thuộc Feature #3 schema API xong, nhưng là enhancement riêng
-- Execution Plan tree visualizer → Feature #6
+- Schema-aware SQL autocompletion → depends on Feature #3 schema API but is a separate enhancement
+- Execution plan tree visualizer → Feature #6
 - Side-by-side query comparison → Feature #8
-- Schema diff view (indexes/partitions/procedures thêm vào sandbox) → Feature #8
+- Schema diff (indexes/partitions/procedures in sandbox) → Feature #8
 - Challenge submission → Feature #4
 - Lesson content panel → Feature #2

@@ -14,11 +14,11 @@ const TYPE_META: Record<
   PassCriterionDraft['type'],
   { label: string; Icon: typeof Timer }
 > = {
-  max_query_duration_ms: { label: 'Thời gian query tối đa', Icon: Timer },
-  max_explain_total_cost: { label: 'EXPLAIN total cost tối đa', Icon: Gauge },
-  requires_index_usage: { label: 'Plan phải dùng index', Icon: Check },
-  required_output_columns: { label: 'Cột output bắt buộc', Icon: Columns3 },
-  required_tables_in_query: { label: 'Bảng trong SQL', Icon: Table2 },
+  max_query_duration_ms: { label: 'Max query duration', Icon: Timer },
+  max_explain_total_cost: { label: 'Max EXPLAIN total cost', Icon: Gauge },
+  requires_index_usage: { label: 'Plan must use an index', Icon: Check },
+  required_output_columns: { label: 'Required output columns', Icon: Columns3 },
+  required_tables_in_query: { label: 'Tables in SQL', Icon: Table2 },
 };
 
 function Chip({ children, className }: { children: ReactNode; className?: string }) {
@@ -60,7 +60,7 @@ function CriterionValue({ row }: { row: PassCriterionDraft }) {
       return (
         <span className="flex items-center gap-1.5 text-sm text-on-surface">
           <Check className="size-4 shrink-0 text-primary" strokeWidth={2.5} aria-hidden />
-          Bật — plan thực thi phải thể hiện dùng index khi áp dụng
+          On — execution plan must show index usage when applicable
         </span>
       );
     case 'required_output_columns': {
@@ -110,7 +110,7 @@ function CriterionValue({ row }: { row: PassCriterionDraft }) {
                 : 'bg-primary-container/35 text-on-primary-container ring-primary/20',
             )}
           >
-            {row.matchMode === 'any' ? 'Chỉ cần một' : 'Tất cả'}
+            {row.matchMode === 'any' ? 'Any one' : 'All'}
           </span>
         </div>
       );
@@ -174,26 +174,26 @@ export function ChallengePassCriteriaDisplay({
           <div className="flex items-center gap-2 border-b border-outline-variant/10 px-3 py-2">
             <ListChecks className="size-4 text-on-surface-variant" strokeWidth={2} aria-hidden />
             <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-outline">
-              Điều kiện pass
+              Pass conditions
             </span>
           </div>
           {drafts.map((row) => (
             <CriterionRow key={row.key} row={row} />
           ))}
           <p className="border-t border-outline-variant/10 bg-surface-container/30 px-3 py-2 text-[11px] leading-snug text-on-surface-variant">
-            Tất cả điều kiện trên phải đạt (AND).
+            All of the above must pass (AND).
           </p>
         </div>
       ) : (
         <p className="rounded-lg bg-surface-container-high/30 px-3 py-2.5 text-sm text-on-surface-variant ring-1 ring-outline-variant/15">
-          Chưa cấu hình tiêu chí pass cụ thể trong phiên bản này.
+          No specific pass criteria are configured for this version.
         </p>
       )}
 
       {showExplainer && explainerLines.length > 0 ? (
         <div className="rounded-lg border border-outline-variant/15 bg-surface-container/50 px-3 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-outline">
-            Chi tiết chấm &amp; điểm
+            Grading &amp; scoring details
           </p>
           <ul className="mt-2 space-y-2.5 text-sm leading-relaxed text-on-surface-variant">
             {explainerLines.map((line, i) => (

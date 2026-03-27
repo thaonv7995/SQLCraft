@@ -1,89 +1,89 @@
 # SQLCraft Feature List
 
-Tài liệu này tổng hợp các tính năng chính của nền tảng **SQLCraft**, được phân loại thành các tính năng cơ bản bắt buộc phải có (Core / MVP) để hệ thống hoạt động, và các tính năng nâng cao làm nên giá trị cốt lõi của sản phẩm.
+This document summarizes the main features of the **SQLCraft** platform, grouped into core capabilities required for the system to run (Core / MVP) and advanced features that define the product’s value.
 
-## Ghi Chú Ngôn Ngữ Sản Phẩm
-- SQLCraft phải được mô tả là nền tảng SQL, không phải hệ thống learning.
-- Hệ thống chỉ có 2 role: **User** và **Admin**.
-- Contribution là workflow của User, không phải role riêng.
-- Một số tên entity cũ như `tracks`, `lessons`, `challenges`, `learning_sessions` vẫn còn trong code và schema cho đến khi có track rename riêng.
-
----
-
-## 📌 Các Tính Năng Cơ Bản Phải Có (Core / Must-Have)
-
-Đây là nền tảng tối thiểu để người dùng có thể truy cập, chạy SQL, và làm việc với nội dung của hệ thống.
-
-### 1. Quản lý Người Dùng & Phân Quyền (Identity)
-- [x] Đăng nhập, Đăng ký, Quản lý Session bằng JWT.
-- [x] Hệ thống Role cơ bản: **Admin** và **User**.
-  - [x] **User**: Có quyền truy cập hệ thống, chạy SQL, và đóng góp (contribute) Database, Schema, bài học (Lessons), và lộ trình (Tracks).
-  - [x] **Admin**: Quản lý hệ thống và phê duyệt (approve) các nội dung do User đóng góp trước khi xuất bản.
-- [x] Trang Hồ sơ người dùng (User Profile) cơ bản.
-
-### 2. Quản lý Nội Dung Bài Học (Lesson Engine)
-- [x] Hiển thị danh sách Lộ trình học (Tracks) và cấu trúc Bài học (Lessons).
-- [x] Render nội dung bài học bằng Markdown (hỗ trợ hiển thị code block, định dạng văn bản).
-- [x] Luồng học `lesson-first`: từ Track -> Lesson -> Start Lab, có thể nạp sẵn starter query của bài học.
-
-### 3. Phòng Lab SQL Cơ Bản (Basic SQL Editor)
-- [x] Trình soạn thảo SQL tích hợp (dùng CodeMirror) có syntax highlighting và tự động gợi ý mã (SQL autocompletion).
-- [x] Chạy lệnh SQL và nhận kết quả đồng bộ từ phía người dùng (frontend tự poll kết quả sau khi backend xử lý async qua job queue).
-- [x] Hiển thị kết quả dưới dạng bảng (Data Table) với row count, truncation indicator rõ ràng khi kết quả bị giới hạn, và nút copy kết quả/query ra clipboard.
-- [x] Hiển thị lỗi rõ ràng: phân biệt lỗi validation (SQL bị chặn) và lỗi runtime (lỗi PostgreSQL trả về).
-- [x] Giao diện xem Schema/Database lấy dữ liệu thực từ sandbox đang chạy (không dùng mock), hiển thị bảng, cột, kiểu dữ liệu, primary key, foreign key.
-- [x] Quản lý vòng đời phiên lab (Session Lifecycle): hiển thị rõ trạng thái provisioning / active / expired / failed, có nút "Start new session" khi phiên hết hạn hoặc lỗi.
-- [x] Nút Format SQL (làm đẹp code) và Clear Editor (xóa sạch editor về trạng thái ban đầu).
-
-### 4. Hệ thống Thử Thách & Đánh Giá (Challenge Engine)
-- [x] Là tính năng tùy chọn (không bắt buộc): Người dùng có thể tự do chọn các Thử thách (Challenge) để thực hành nâng cao và kiếm điểm.
-- [x] So khớp kết quả truy vấn (Result-set Validation) của người dùng với kết quả chuẩn để tự động chấm điểm đúng/sai. Hệ thống hiện chạy `referenceSolution` trên đúng sandbox của session và so sánh full result-set (columns, row count, row values) trước khi chấm điểm.
-- [x] Có trang Challenge nằm trong ngữ cảnh Lesson, hỗ trợ xem mô tả, lịch sử attempt, best score và leaderboard cơ bản.
-- [x] Hỗ trợ đóng góp nội dung: User đã đăng nhập có thể tự tạo Thử thách mới ở dạng draft. Sau khi được Admin duyệt (approve/publish), Thử thách sẽ lập tức hiển thị công khai (public) trong lesson context cho cộng đồng cùng tham gia giải.
-- [x] Các challenge có point và so sánh để đánh giá query tối ưu. Điểm hiện được tách theo correctness + performance baseline + index optimization; index score chỉ được cộng khi có cả lịch sử tạo index trong session và `EXPLAIN ANALYZE` chứng minh plan thật sự dùng index. Baseline hiệu năng được tác giả challenge cấu hình từ base database ban đầu qua `validatorConfig.baselineDurationMs`.
-
-### 5. Quản trị Sandbox An Toàn (Sandbox Isolation)
-- [x] Cấp phát một Database độc lập (PostgreSQL Container) cho từng người học trong một phiên thực hành (Session) để cô lập dữ liệu. Worker hiện tạo container PostgreSQL riêng cho từng sandbox/session, gắn vào Docker network nội bộ và dùng `container_ref` làm host kết nối nội bộ.
-- [x] Worker tự động dọn dẹp Sandbox khi người dùng kết thúc phiên học hoặc quá thời gian (Timeout/Cleanup).
+## Product language notes
+- SQLCraft should be described as a SQL platform, not a generic “learning system.”
+- The system has two roles: **User** and **Admin**.
+- Contribution is a User workflow, not a separate role.
+- Some legacy entity names such as `tracks`, `lessons`, `challenges`, and `learning_sessions` may still appear in code and schema until a dedicated rename pass.
 
 ---
 
-## 🚀 Các Tính Năng Nâng Cao & Tối Ưu (Advanced / Key Differentiators)
+## Core / must-have features
 
-Đây là cụm tính năng đặc thù giúp SQLCraft vượt trội, tập trung vào mảng tối ưu hóa hiệu năng (Query Optimization).
+Minimum foundation for users to access the product, run SQL, and work with content.
 
-### 6. Trình Vẽ Cây Execution Plan (Execution Plan Visualizer)
-- [x] Chạy lệnh `EXPLAIN` và `EXPLAIN ANALYZE` ngầm. Luồng `Run` giờ tự chọn plan mode phù hợp: `EXPLAIN ANALYZE` cho query đọc an toàn (`SELECT`, `WITH ... SELECT`) và `EXPLAIN` cho các câu lệnh hỗ trợ nhưng có khả năng ghi (`INSERT` / `UPDATE` / `DELETE` / `WITH` chứa DML), tránh side-effect ngoài ý muốn.
-- [x] Dịch kết quả từ Database engine thành một biểu đồ cây (Tree Visualizer) trực quan hiển thị Cost, Scanned Rows, Actual Time, Index Hit/Miss, buffer hits/reads và highlight bottleneck/hot path thay cho JSON thô trong tab Execution Plan.
+### 1. Identity (users & roles)
+- [x] Sign-in, sign-up, and JWT-based session management.
+- [x] Basic roles: **Admin** and **User**.
+  - [x] **User**: Access the app, run SQL, and contribute databases, schemas, lessons (Lessons), and tracks (Tracks).
+  - [x] **Admin**: Operate the system and approve user-contributed content before publication.
+- [x] Basic user profile page.
 
-### 7. Điều Chỉnh Quy Mô Dữ Ưiệu (Progressive Dataset Scaling)
-- [x] Khi Admin import metadata của một canonical dataset qua Admin API, hệ thống lưu schema definition, row count từng bảng, tổng số dòng toàn DB, phân loại source scale dựa trên tổng số dòng, và ghi `system_jobs` để theo dõi import/generation.
-- [x] Cho phép người dùng chuyển đổi workload chạy trên các kích cỡ dữ liệu khác nhau cho cùng một cấu trúc bảng (Schema):
-  - [x] **Tiny**: khoảng 100 dòng.
-  - [x] **Small**: khoảng 10,000 dòng.
-  - [x] **Medium**: khoảng 1-5 Triệu dòng.
-  - [x] **Large**: trên 10 Triệu dòng.
-  - [x] Chỉ cho phép chọn từ scale gốc xuống các scale nhỏ hơn; không upscale vượt quá database import ban đầu.
-  - [x] Khi đổi scale, worker reprovision sandbox từ dataset template tương ứng; nếu template có artifact thì restore từ artifact, nếu không thì seed deterministic từ rowCounts thay vì resize trực tiếp sandbox đang chạy.
-- [x] Hệ thống tự sinh các dataset template dẫn xuất cho cùng schema từ canonical rowCounts; worker provision/reprovision từ artifact nếu có, hoặc fallback sang deterministic synthetic load để giữ FK integrity, phân phối dữ liệu và coverage nghiệp vụ cơ bản.
+### 2. Lesson engine
+- [x] List learning tracks (Tracks) and lesson structure (Lessons).
+- [x] Render lesson content as Markdown (code blocks, text formatting).
+- [x] `lesson-first` flow: Track → Lesson → Start Lab, with optional starter query from the lesson.
 
-### 8. Thực Hành Tối Ưu Hóa & Đánh Giá Chi Phí (Optimization Labs)
-- [x] Hỗ trợ lưu lịch sử truy vấn (Query History) để dễ dàng nhìn lại quá trình làm bài.
-- [x] Tính năng chạy so sánh trực tiếp song song (Side-by-side) 2 câu truy vấn.
-- [x] Cấp quyền an toàn cho người dùng tự tạo (`CREATE INDEX`) và xóa (`DROP INDEX`) để đo lường mức độ cải thiện tốc độ trực tiếp trên dữ liệu lớn.
-- [x] **Schema Diff View**: Hiển thị những thay đổi người dùng đã thực hiện trong sandbox so với schema gốc (base schema từ template), bao gồm: indexes thêm/xóa, partitions, views, materialized views, stored procedures/functions. Kèm nút **"Reset sandbox về base"** để hoàn tác toàn bộ thay đổi và bắt đầu lại.
-- [x] Đánh giá bài làm bằng "Performance Score" thay vì chỉ đánh giá đúng/sai.
+### 3. Basic SQL lab (editor)
+- [x] Integrated SQL editor (CodeMirror) with syntax highlighting and SQL autocompletion.
+- [x] Execute SQL and surface results to the user (frontend polls after async backend processing via job queue).
+- [x] Result grid with row count, clear truncation when capped, and copy result/query actions.
+- [x] Clear errors: validation (blocked SQL) vs runtime (PostgreSQL errors).
+- [x] Schema/database view backed by the live sandbox (not mock): tables, columns, types, PK/FK.
+- [x] Session lifecycle UI: provisioning / active / expired / failed, with “Start new session” when expired or failed.
+- [x] Format SQL and Clear editor actions.
 
-### 9. Công Cụ Đóng Góp Nội Dung (Contribution Tools)
-- [x] Trình soạn thảo Markdown kết hợp SQL Validator cho User kiểm tra tính đúng đắn của đề bài trước khi gửi đóng góp. Contribution UI hiện có `Write / Preview / Preflight`, validate `referenceSolution` trước khi submit, và cho phép mở lại draft để gửi phiên bản mới.
-- [x] Giao diện Admin để duyệt (approve/reject) nội dung từ User. Admin hiện có moderation queue cho challenge draft với các trạng thái `pending / approved / changes_requested / rejected`, kèm review note và nút `Approve & Publish`, `Request Changes`, `Reject Draft`.
-- [x] Quản lý phiên bản bài học (Content Versioning) giúp cập nhật mà không làm hỏng dữ liệu học cũ. Admin có thể tạo, xem, nạp lại vào editor, và publish các lesson version riêng biệt.
+### 4. Challenge engine
+- [x] Optional: users pick challenges for advanced practice and points.
+- [x] Result-set validation vs reference answer for automatic scoring. The system runs `referenceSolution` on the session sandbox and compares full result sets (columns, row count, values).
+- [x] Challenge pages in lesson context: description, attempt history, best score, basic leaderboard.
+- [x] Contributions: signed-in users create challenge drafts; after admin approve/publish, challenges go public in lesson context.
+- [x] Points and comparison for query optimization. Scoring splits correctness, performance baseline, and index optimization; index credit requires index DDL in the session and `EXPLAIN ANALYZE` showing index use. Baseline comes from the author via `validatorConfig.baselineDurationMs` on the base database.
 
-### 10. Động Lực Học Tập (Gamification)
-- [ ] Leaderboard vinh danh những người giải quyết bài toán với thời gian và chi phí truy vấn (Cost) thấp nhất.
+### 5. Sandbox isolation
+- [x] Dedicated PostgreSQL container per learner session for data isolation. Worker creates a container per sandbox/session on the internal Docker network; `container_ref` is the internal host.
+- [x] Worker cleans up sandboxes on session end or timeout.
 
-### 11. Quản Trị Hệ Thống Toàn Diện (Super Admin Console)
-- [ ] **Quản Lý Database & Schema (Database Management)**: Quản lý các mẫu Schema gốc (Schema Templates) và mẫu Dữ liệu gốc (Dataset Templates). **Hỗ trợ tính năng Upload SQL Dump**: Khi Admin tải lên một file dump (ví dụ `.sql`), hệ thống tự động quét (auto-scan) và trích xuất cấu trúc (danh sách bảng, cột, khóa, số lượng dòng), tổng row count, metadata domain và phân loại scale gốc để review trước khi publish. Từ database gốc này, worker có thể sinh các dataset artifact nhỏ hơn dùng cho user sandbox.
-- [ ] **Quản Lý Hệ Thống Bài Học (Content Management)**: Công cụ cho phép Admin có toàn quyền tạo mới, chỉnh sửa, xóa Lộ trình học (Tracks), Bài học (Lessons), và cấu hình chi tiết cho các Thử thách (Challenges) nếu không đợi User đóng góp.
-- [ ] **Quản Lý Cộng Đồng (User & Contribution)**: Giao diện phân quyền tài khoản (User Management), ban/khóa User vi phạm, phê duyệt hoặc từ chối các nội dung (bài học/thử thách/db) do User gửi lên.
-- [ ] **Giám Sát Hệ Thống (System Monitoring)**: Theo dõi "sức khỏe" nền tảng (Health Dashboard), trạng thái hàng đợi cấp phát Container/Dataset của Worker, xem log lỗi và quản lý tài nguyên máy chủ.
+---
+
+## Advanced / differentiators
+
+Features focused on query optimization and depth beyond basics.
+
+### 6. Execution plan visualizer
+- [x] Implicit `EXPLAIN` / `EXPLAIN ANALYZE`. Run flow picks mode: `EXPLAIN ANALYZE` for safe read queries (`SELECT`, `WITH ... SELECT`), `EXPLAIN` for statements that may write (`INSERT` / `UPDATE` / `DELETE` / `WITH` with DML) to avoid unintended side effects.
+- [x] Tree visualizer for cost, scanned rows, actual time, index hit/miss, buffer hits/reads, bottleneck/hot-path highlights instead of raw JSON in the Execution Plan tab.
+
+### 7. Progressive dataset scaling
+- [x] When admins import canonical dataset metadata via Admin API, store schema definition, per-table row counts, total DB rows, source scale classification, and `system_jobs` for import/generation tracking.
+- [x] Users can switch workload scale for the same schema:
+  - [x] **Tiny**: ~100 rows.
+  - [x] **Small**: ~10,000 rows.
+  - [x] **Medium**: ~1–5M rows.
+  - [x] **Large**: 10M+ rows.
+  - [x] Only downscale from the imported source; no upscale beyond the original import.
+  - [x] On scale change, worker reprovisions from the matching dataset template: restore from artifact if present, else deterministic seed from row counts instead of resizing a live sandbox.
+- [x] System generates derived dataset templates from canonical row counts; worker provisions from artifacts or deterministic synthetic load preserving FK integrity and basic business coverage.
+
+### 8. Optimization labs & cost-aware scoring
+- [x] Query history for reviewing work.
+- [x] Side-by-side comparison of two queries.
+- [x] Safe `CREATE INDEX` / `DROP INDEX` to measure speedups on large data.
+- [x] **Schema diff view**: changes vs base template schema (indexes, partitions, views, MVs, routines) with **“Reset sandbox to base”** to undo all changes.
+- [x] Performance-oriented scoring beyond binary correctness.
+
+### 9. Contribution tools
+- [x] Markdown editor with SQL validator for preflight before submit. UI supports Write / Preview / Preflight, validates `referenceSolution`, and allows reopening drafts for new versions.
+- [x] Admin moderation for user content. Challenge drafts: `pending / approved / changes_requested / rejected`, review notes, `Approve & Publish`, `Request Changes`, `Reject Draft`.
+- [x] Lesson content versioning for safe updates. Admins can create, inspect, reload into editor, and publish versions.
+
+### 10. Gamification
+- [ ] Leaderboard highlighting fastest solves with lowest query cost.
+
+### 11. Super admin console (planned)
+- [ ] **Database & schema management**: schema templates and dataset templates. **SQL dump upload**: admin uploads `.sql`, system scans structure (tables, columns, keys, row counts), total rows, domain metadata, and source scale for review before publish; worker can generate smaller dataset artifacts for sandboxes.
+- [ ] **Content management**: full CRUD for tracks, lessons, and challenge configuration without waiting on user contributions.
+- [ ] **Community management**: account admin, ban abusive users, approve or reject contributed lessons/challenges/databases.
+- [ ] **System monitoring**: platform health, worker provisioning queues, error logs, server resources.

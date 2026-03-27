@@ -282,8 +282,8 @@ describe('LeaderboardPage', () => {
     expect(within(hubSection as HTMLElement).getByText('7')).toBeInTheDocument();
     expect(within(hubSection as HTMLElement).getByText('12d')).toBeInTheDocument();
 
-    // Tab mặc định là "Chưa làm", nên challenge đã pass sẽ chưa hiển thị.
-    await user.click(screen.getByRole('button', { name: /đã làm/i }));
+    // Default tab is "Not started", so passed challenges are hidden until switching.
+    await user.click(screen.getByRole('button', { name: /done/i }));
     expect(await screen.findByText('Filter active users')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /monthly/i }));
@@ -305,25 +305,25 @@ describe('LeaderboardPage', () => {
     await renderLeaderboardPage();
 
     const createBtn = await screen.findByRole('button', {
-      name: /tạo submission cho filter active users/i,
+      name: /create submission for filter active users/i,
     });
     await act(async () => {
       createBtn.click();
     });
 
     const dialogTitle = await waitFor(
-      () => screen.getByText(/Chọn database/i),
+      () => screen.getByText(/choose database/i),
       { timeout: 5000 },
     );
     const dialogRoot = dialogTitle.closest('[role="dialog"]') ?? dialogTitle.parentElement;
     expect(dialogRoot).toBeTruthy();
-    expect(within(dialogRoot as HTMLElement).getByRole('heading', { name: /chọn database/i })).toBeInTheDocument();
+    expect(within(dialogRoot as HTMLElement).getByRole('heading', { name: /choose database/i })).toBeInTheDocument();
 
-    // Chọn scale khác để đảm bảo payload truyền đúng.
+    // Pick a different scale to exercise the payload.
     const tinyBtn = within(dialogRoot as HTMLElement).getByRole('button', { name: 'Tiny' });
     await user.click(tinyBtn);
 
-    const confirmBtn = within(dialogRoot as HTMLElement).getByRole('button', { name: /^Tạo submission$/i });
+    const confirmBtn = within(dialogRoot as HTMLElement).getByRole('button', { name: /^Create submission$/i });
     await user.click(confirmBtn);
 
     await waitFor(() =>

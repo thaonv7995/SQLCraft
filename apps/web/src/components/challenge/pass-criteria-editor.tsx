@@ -111,7 +111,7 @@ function ChipTokenField({
             type="button"
             onClick={() => removeAt(i)}
             className="shrink-0 rounded px-0.5 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-            aria-label={`Xóa ${tok}`}
+            aria-label={`Remove ${tok}`}
           >
             ×
           </button>
@@ -149,7 +149,7 @@ const removeIconButtonClass = cn(
   'disabled:pointer-events-none disabled:opacity-30',
 );
 
-/** Một hàng duy nhất: dropdown loại | giá trị, chung viền. */
+/** Single merged row: criterion type | value, shared border. */
 const mergedCriterionRowClass =
   'relative flex w-full min-h-10 items-stretch overflow-visible rounded-lg bg-surface-container-high/80 ring-1 ring-outline-variant/20 focus-within:ring-primary/40';
 
@@ -172,13 +172,13 @@ export function PassCriteriaEditor({
 }) {
   const columnsIdleHint =
     schemaState === 'no-database'
-      ? 'Chọn database trước.'
+      ? 'Select a database first.'
       : schemaState === 'loading'
-        ? 'Đang tải…'
+        ? 'Loading…'
         : schemaState === 'error'
-          ? 'Lỗi tải schema.'
+          ? 'Failed to load schema.'
           : schemaTables.length === 0
-            ? 'Không có bảng.'
+            ? 'No tables.'
             : '';
 
   const columnsPickerTables = schemaState === 'ready' ? schemaTables : [];
@@ -204,7 +204,7 @@ export function PassCriteriaEditor({
     <div className="rounded-lg border border-outline-variant/20 bg-surface-container-low/40 p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-medium text-on-surface">Tiêu chí đạt (pass)</p>
+          <p className="text-sm font-medium text-on-surface">Pass criteria</p>
         </div>
         <Button
           type="button"
@@ -224,20 +224,20 @@ export function PassCriteriaEditor({
               onClick={() => removeRow(row.key)}
               disabled={rows.length <= 1}
               className={removeIconButtonClass}
-              aria-label="Xóa tiêu chí"
-              title="Xóa"
+              aria-label="Remove criterion"
+              title="Remove"
             >
               <Minus className="size-2.5" strokeWidth={1.75} aria-hidden />
             </button>
 
             <div className="flex min-w-0 flex-1 items-stretch">
-              {/* Cột trái: loại tiêu chí — cùng khung, vách dọc */}
+              {/* Left: criterion type */}
               <div className="relative flex w-[min(240px,42%)] max-w-[260px] shrink-0 flex-col justify-center border-r border-outline-variant/25">
                 <SelectWithChevron
                   className="min-w-0 flex-1"
                   value={row.type}
                   onChange={(e) => changeType(row.key, e.target.value as PassCriterionDraft['type'])}
-                  aria-label="Loại tiêu chí"
+                  aria-label="Criterion type"
                 >
                   {CRITERION_TYPE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -247,7 +247,7 @@ export function PassCriteriaEditor({
                 </SelectWithChevron>
               </div>
 
-              {/* Cột phải: giá trị — full width phần còn lại */}
+              {/* Right: value */}
               <div
                 className={cn(
                   'flex min-w-0 flex-1 gap-2 px-2 py-1.5 pr-8 pt-1',
@@ -261,8 +261,8 @@ export function PassCriteriaEditor({
                     className={valueInputClass}
                     value={row.maxMs}
                     onChange={(e) => updateRow(row.key, { maxMs: Number(e.target.value) || 0 })}
-                    aria-label="Tối đa thời gian chạy (ms)"
-                    title="Thời gian thực thi trên sandbox ≤ giá trị này (ms)"
+                    aria-label="Max runtime (ms)"
+                    title="Sandbox execution time must be ≤ this value (ms)"
                   />
                 ) : null}
 
@@ -276,17 +276,17 @@ export function PassCriteriaEditor({
                     onChange={(e) =>
                       updateRow(row.key, { maxTotalCost: Number(e.target.value) || 0 })
                     }
-                    aria-label="Tối đa total cost (EXPLAIN)"
-                    title="PostgreSQL planner total cost từ EXPLAIN"
+                    aria-label="Max total cost (EXPLAIN)"
+                    title="PostgreSQL planner total cost from EXPLAIN"
                   />
                 ) : null}
 
                 {row.type === 'requires_index_usage' ? (
                   <span
                     className="flex min-h-9 w-full items-center text-xs text-on-surface-variant"
-                    title="Plan phải có index"
+                    title="Plan must use an index"
                   >
-                    Plan có dùng index
+                    Plan uses index
                   </span>
                 ) : null}
 
@@ -308,7 +308,7 @@ export function PassCriteriaEditor({
                       value={row.tablesRaw}
                       onChange={(next) => updateRow(row.key, { tablesRaw: next })}
                       placeholder="orders"
-                      aria-label="Thêm tên bảng, Enter để thêm chip"
+                      aria-label="Add table name, Enter to add chip"
                     />
                     <div className="h-8 w-px shrink-0 bg-outline-variant/25" aria-hidden />
                     <SelectWithChevron
@@ -318,11 +318,11 @@ export function PassCriteriaEditor({
                       onChange={(e) =>
                         updateRow(row.key, { matchMode: e.target.value as 'all' | 'any' })
                       }
-                      aria-label="Chế độ khớp bảng"
-                      title="all = mọi bảng phải có trong FROM/JOIN; any = ít nhất một"
+                      aria-label="Table match mode"
+                      title="all = every table must appear in FROM/JOIN; any = at least one"
                     >
-                      <option value="all">Tất cả bảng</option>
-                      <option value="any">Một bảng</option>
+                      <option value="all">All tables</option>
+                      <option value="any">Any table</option>
                     </SelectWithChevron>
                   </>
                 ) : null}

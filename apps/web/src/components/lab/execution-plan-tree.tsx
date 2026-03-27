@@ -136,7 +136,7 @@ function getNodeHighlight(node: PgPlanNode, rootActualTime?: number): {
   if (timeShare >= 0.35) {
     return {
       label: 'Bottleneck',
-      reason: `Chiếm ${(timeShare * 100).toFixed(0)}% thời gian EXPLAIN ANALYZE`,
+      reason: `Accounts for ${(timeShare * 100).toFixed(0)}% of EXPLAIN ANALYZE time`,
       tone: 'danger',
     };
   }

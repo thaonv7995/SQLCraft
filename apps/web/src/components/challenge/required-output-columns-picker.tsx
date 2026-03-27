@@ -139,9 +139,9 @@ export function RequiredOutputColumnsPicker({
               value={g.table}
               disabled={disabled}
               onChange={(e) => setTable(g.key, e.target.value)}
-              aria-label="Bảng"
+              aria-label="Table"
             >
-              <option value="">Bảng…</option>
+              <option value="">Table…</option>
               {tables.map((t) => (
                 <option key={t.name} value={t.name}>
                   {t.name}
@@ -173,7 +173,7 @@ export function RequiredOutputColumnsPicker({
                 )}
               >
                 {g.columns.length === 0 ? (
-                  <span className="px-0.5 text-xs text-on-surface-variant">Cột…</span>
+                  <span className="px-0.5 text-xs text-on-surface-variant">Columns…</span>
                 ) : (
                   g.columns.map((col) => (
                     <span
@@ -189,7 +189,7 @@ export function RequiredOutputColumnsPicker({
                           removeColumn(g.key, col);
                         }}
                         className="shrink-0 rounded px-0.5 text-on-surface-variant hover:text-on-surface"
-                        aria-label={`Xóa ${col}`}
+                        aria-label={`Remove ${col}`}
                       >
                         ×
                       </button>
@@ -220,18 +220,18 @@ export function RequiredOutputColumnsPicker({
                       type="search"
                       value={filter}
                       onChange={(e) => setFilter(e.target.value)}
-                      placeholder="Lọc…"
+                      placeholder="Filter…"
                       className={cn(
                         'h-8 w-full rounded border-0 bg-surface-container-highest/50 px-2 text-xs text-on-surface',
                         'outline-none ring-1 ring-outline-variant/20 focus:ring-primary/40',
                       )}
                       autoFocus
-                      aria-label="Lọc cột"
+                      aria-label="Filter columns"
                     />
                   </div>
                   <div className="max-h-40 overflow-y-auto py-1">
                     {filteredColumns.length === 0 ? (
-                      <p className="px-2 py-2 text-xs text-on-surface-variant">Không khớp.</p>
+                      <p className="px-2 py-2 text-xs text-on-surface-variant">No matches.</p>
                     ) : (
                       filteredColumns.map((col) => {
                         const selected = g.columns.some(
@@ -270,8 +270,8 @@ export function RequiredOutputColumnsPicker({
                   'ring-1 ring-outline-variant/20 hover:bg-surface-container-highest hover:text-on-surface',
                   disabled && 'opacity-40',
                 )}
-                aria-label="Xóa dòng bảng"
-                title="Xóa dòng"
+                aria-label="Remove table row"
+                title="Remove row"
               >
                 <Minus className="size-4" strokeWidth={2} />
               </button>
@@ -287,8 +287,8 @@ export function RequiredOutputColumnsPicker({
                   'ring-1 ring-outline-variant/20 hover:bg-surface-container-highest hover:text-primary',
                   disabled && 'opacity-40',
                 )}
-                aria-label="Thêm bảng"
-                title="Thêm bảng"
+                aria-label="Add table"
+                title="Add table"
               >
                 <Plus className="size-4" strokeWidth={2} />
               </button>

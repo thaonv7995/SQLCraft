@@ -289,7 +289,7 @@ export default function AdminChallengeDetailPage({ params }: ClientPageProps) {
 
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-outline">
-              Tiêu chí đạt (pass)
+              Pass criteria
             </h2>
             <ChallengePassCriteriaDisplay
               className="mt-4"
@@ -299,7 +299,7 @@ export default function AdminChallengeDetailPage({ params }: ClientPageProps) {
                 validatorConfig: v.validatorConfig,
                 points: d.points,
               }}
-              adminNote="Khớp với logic chấm trên server (evaluateAttempt); không hiển thị reference SQL cho learner."
+              adminNote="Matches server grading logic (evaluateAttempt); reference SQL is not shown to learners."
             />
           </section>
 

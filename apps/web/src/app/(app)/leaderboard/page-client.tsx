@@ -152,7 +152,7 @@ export default function LeaderboardPage(_props: ClientPageProps) {
 
         <div className="inline-flex max-w-full items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low px-3 py-2 text-xs">
           <span className="text-on-surface-variant">
-            Điểm{' '}
+            Points{' '}
             <span className="font-semibold text-on-surface">
               {hubEntry ? formatPoints(hubEntry.points) : '—'}
             </span>
@@ -198,8 +198,8 @@ export default function LeaderboardPage(_props: ClientPageProps) {
             ))}
             {(
               [
-                { id: 'not_done', label: 'Chưa làm' },
-                { id: 'done', label: 'Đã làm' },
+                { id: 'not_done', label: 'Not started' },
+                { id: 'done', label: 'Done' },
               ] as const
             ).map((t) => (
               <button
@@ -242,13 +242,13 @@ export default function LeaderboardPage(_props: ClientPageProps) {
           <div className="bg-surface-container-low rounded-xl p-16 flex flex-col items-center text-center">
             <span className="material-symbols-outlined text-4xl text-outline mb-3">error</span>
             <p className="text-sm font-medium text-on-surface mb-1">Challenge catalog unavailable</p>
-            <p className="text-xs text-on-surface-variant">Không thể tải danh sách challenge.</p>
+            <p className="text-xs text-on-surface-variant">Could not load the challenge list.</p>
           </div>
         ) : completionChallengesForList.length === 0 ? (
           <div className="bg-surface-container-low rounded-xl p-16 flex flex-col items-center text-center">
             <span className="material-symbols-outlined text-4xl text-outline mb-3">search_off</span>
             <p className="text-sm font-medium text-on-surface mb-1">No challenges found</p>
-            <p className="text-xs text-on-surface-variant">Thử đổi filter trạng thái hoặc kỳ leaderboard.</p>
+            <p className="text-xs text-on-surface-variant">Try changing the status filter or leaderboard period.</p>
           </div>
         ) : (
           <>
@@ -269,7 +269,7 @@ export default function LeaderboardPage(_props: ClientPageProps) {
                         openChallengeDetailPage(challenge.id);
                       }
                     }}
-                    aria-label={`Xem chi tiết ${challenge.title}`}
+                    aria-label={`View details for ${challenge.title}`}
                     className="group bg-surface-container-low rounded-xl p-6 relative overflow-hidden border border-transparent hover:border-outline-variant/20 transition-all duration-200 hover:bg-surface-container cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <div className="flex items-start justify-between mb-4">
@@ -325,7 +325,7 @@ export default function LeaderboardPage(_props: ClientPageProps) {
 
             <div className="mt-6 flex items-center justify-between gap-3">
               <p className="text-xs text-on-surface-variant">
-                Trang {completionSafePage + 1}/{completionTotalPages}
+                Page {completionSafePage + 1}/{completionTotalPages}
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -339,7 +339,7 @@ export default function LeaderboardPage(_props: ClientPageProps) {
                       : 'border-outline-variant/20 bg-surface-container-high text-on-surface hover:bg-surface-container-highest',
                   )}
                 >
-                  Trước
+                  Previous
                 </button>
                 <button
                   type="button"
@@ -352,7 +352,7 @@ export default function LeaderboardPage(_props: ClientPageProps) {
                       : 'border-outline-variant/20 bg-surface-container-high text-on-surface hover:bg-surface-container-highest',
                   )}
                 >
-                  Sau
+                  Next
                 </button>
               </div>
             </div>

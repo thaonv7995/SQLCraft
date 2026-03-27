@@ -58,6 +58,6 @@ describe('ExecutionPlanTree', () => {
     expect(markup).toContain('Seq scan');
     expect(markup).toContain('Bottleneck');
     expect(markup).toContain('12.0K');
-    expect(markup).toMatch(/Chiếm 76% thời gian EXPLAIN ANALYZE|Accounts for 76% of EXPLAIN time/);
+    expect(markup).toMatch(/Accounts for 76% of EXPLAIN ANALYZE time/);
   });
 });

@@ -67,7 +67,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
 
   const startSubmission = async () => {
     if (!challenge?.publishedVersionId) {
-      toast.error('Challenge chưa sẵn sàng để tạo submission.');
+      toast.error('Challenge is not ready to create a submission.');
       return;
     }
 
@@ -89,7 +89,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
 
       router.push(`/lab/${session.id}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Không thể tạo submission.');
+      toast.error(err instanceof Error ? err.message : 'Could not create submission.');
     } finally {
       setIsStartingSubmission(false);
     }
@@ -98,7 +98,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
   if (!challengeId) {
     return (
       <div className="page-shell page-stack">
-        <p className="text-sm text-on-surface-variant">Challenge không hợp lệ.</p>
+        <p className="text-sm text-on-surface-variant">Invalid challenge.</p>
       </div>
     );
   }
@@ -115,7 +115,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
   if (!challenge) {
     return (
       <div className="page-shell page-stack">
-        <p className="text-sm text-on-surface-variant">Không tìm thấy challenge.</p>
+        <p className="text-sm text-on-surface-variant">Challenge not found.</p>
       </div>
     );
   }
@@ -152,7 +152,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
         <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6 space-y-4">
           <h2 className="font-headline text-lg font-semibold text-on-surface">Problem Statement</h2>
           <p className="text-sm leading-7 text-on-surface-variant whitespace-pre-wrap">
-            {versionQuery.data?.problemStatement ?? 'Đang tải nội dung challenge...'}
+            {versionQuery.data?.problemStatement ?? 'Loading challenge content...'}
           </p>
 
           {versionQuery.data?.hintText ? (
@@ -165,7 +165,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
           {versionQuery.data ? (
             <div className="rounded-lg border border-outline-variant/10 bg-surface-container p-4">
               <p className="mb-3 text-xs uppercase tracking-[0.18em] text-outline">
-                Tiêu chí đạt (pass)
+                Pass criteria
               </p>
               <ChallengePassCriteriaDisplay
                 validatorConfig={versionQuery.data.validatorConfig}
@@ -177,7 +177,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
 
         <div className="space-y-6">
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6 space-y-4">
-            <h2 className="font-headline text-lg font-semibold text-on-surface">Tạo Submission</h2>
+            <h2 className="font-headline text-lg font-semibold text-on-surface">Create submission</h2>
             <p className="text-xs text-on-surface-variant">
               <span className="uppercase tracking-[0.18em] text-outline">Dataset scale</span>
               :{' '}
@@ -193,15 +193,15 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
               disabled={!challenge.publishedVersionId}
               fullWidth
             >
-              Tạo submission
+              Create submission
             </Button>
           </section>
 
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6">
             <h2 className="font-headline text-lg font-semibold text-on-surface">Top Leaderboard</h2>
             <p className="mt-1 text-xs text-on-surface-variant">
-              Chỉ các submission đã pass; xếp theo thời gian chạy (ngắn hơn trên), tie-break theo cost
-              thấp hơn.
+              Pass-only submissions; ranked by fastest runtime (shorter first), then lower cost as
+              tie-breaker.
             </p>
             <div className="mt-3 space-y-2">
               {leaderboardQuery.data?.length ? (
@@ -228,7 +228,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-on-surface-variant">Chưa có dữ liệu leaderboard.</p>
+                <p className="text-sm text-on-surface-variant">No leaderboard data yet.</p>
               )}
             </div>
           </section>

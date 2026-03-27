@@ -34,7 +34,7 @@ Generate realistic datasets across multiple size tiers from a canonical imported
 - support precomputed artifacts for medium/large datasets when available
 
 ## 6. Downscale Strategy
-To avoid data becoming "thừa/thiếu" when scaling down:
+To avoid data becoming inconsistent (too much / too little) when scaling down:
 - identify anchor/root tables from schema configuration or infer them from the FK graph
 - sample anchor entities deterministically using a stable seed
 - use stratified sampling over important dimensions such as status, category, and time bucket so rare but meaningful cases still exist

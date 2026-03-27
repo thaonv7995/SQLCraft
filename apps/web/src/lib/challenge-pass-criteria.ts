@@ -266,15 +266,15 @@ export function getChallengePassCriteriaExplainerLines(source: ChallengePassCrit
   const lines: string[] = [];
 
   lines.push(
-    'Truy vấn phải chạy thành công (không lỗi) và có trả về kết quả khi challenge yêu cầu tập dòng.',
+    'The query must run successfully (no error) and return rows when the challenge requires a result set.',
   );
 
   if (source.validatorType === 'result_set') {
     lines.push(
-      'Kết quả được so với đáp án chuẩn: cùng số cột, cùng thứ tự và tên cột (so khớp không phân biệt hoa thường từng vị trí), cùng số dòng, và tập giá trị các dòng trùng khớp (thứ tự dòng không quan trọng).',
+      'Results are compared to the reference answer: same number of columns, same order and column names (case-insensitive per position), same row count, and the multiset of row values must match (row order does not matter).',
     );
   } else {
-    lines.push(`Loại chấm: ${source.validatorType} (chi tiết theo cấu hình nội bộ).`);
+    lines.push(`Grading type: ${source.validatorType} (details per internal configuration).`);
   }
 
   const drafts = passCriteriaDraftsFromConfigReadOnly(source.validatorConfig);
@@ -284,23 +284,23 @@ export function getChallengePassCriteriaExplainerLines(source: ChallengePassCrit
 
     if (baselineDurationMs != null) {
       lines.push(
-        `Thời gian thực thi truy vấn phải ≤ ${baselineDurationMs.toLocaleString()} ms mới pass (đo trên sandbox).`,
+        `Query execution time must be ≤ ${baselineDurationMs.toLocaleString()} ms to pass (measured on sandbox).`,
       );
     } else {
-      lines.push('Không có ngưỡng thời gian cụ thể trong phiên bản này.');
+      lines.push('No specific duration threshold in this version.');
     }
 
     if (maxTotalCost != null) {
       lines.push(
-        `Tổng cost kế hoạch (PostgreSQL EXPLAIN, total cost) phải ≤ ${maxTotalCost.toLocaleString()} mới pass.`,
+        `Planner total cost (PostgreSQL EXPLAIN, total cost) must be ≤ ${maxTotalCost.toLocaleString()} to pass.`,
       );
     } else {
-      lines.push('Không có ngưỡng cost EXPLAIN cụ thể trong phiên bản này.');
+      lines.push('No specific EXPLAIN cost threshold in this version.');
     }
 
     if (requiresIndexOptimization) {
       lines.push(
-        'Plan thực thi phải cho thấy sử dụng index; có thể cần chạy CREATE INDEX trong phiên làm việc trước câu truy vấn cuối.',
+        'The execution plan must show index usage; you may need to run CREATE INDEX in the session before the final query.',
       );
     }
   }
@@ -311,12 +311,12 @@ export function getChallengePassCriteriaExplainerLines(source: ChallengePassCrit
     source.points > 0
   ) {
     lines.push(
-      `Đạt đủ mọi điều kiện trên thì nhận trọn ${source.points.toLocaleString()} điểm; thiếu một điều kiện thì 0 điểm cho lần chấm đó.`,
+      `Meet all of the above to earn the full ${source.points.toLocaleString()} points; missing any condition scores 0 for that attempt.`,
     );
   }
 
   lines.push(
-    'Bảng xếp hạng challenge chỉ liệt kê người đã pass; trong đó thứ hạng ưu tiên thời gian chạy query ngắn hơn, nếu trùng thì cost (ước lượng PostgreSQL từ EXPLAIN) thấp hơn xếp trên.',
+    'The challenge leaderboard only lists users who passed; ranking prefers shorter query runtime, then lower estimated cost (PostgreSQL EXPLAIN) as a tie-breaker.',
   );
 
   return lines;
@@ -325,7 +325,7 @@ export function getChallengePassCriteriaExplainerLines(source: ChallengePassCrit
 /** Build API payload; throws if validation fails. */
 export function passCriteriaDraftsToPayload(rows: PassCriterionDraft[]): { passCriteria: PassCriterionPayload[] } {
   if (rows.length === 0) {
-    throw new Error('Cần ít nhất một tiêu chí pass.');
+    throw new Error('At least one pass criterion is required.');
   }
 
   const passCriteria: PassCriterionPayload[] = [];
@@ -334,13 +334,13 @@ export function passCriteriaDraftsToPayload(rows: PassCriterionDraft[]): { passC
     switch (row.type) {
       case 'max_query_duration_ms':
         if (!Number.isFinite(row.maxMs) || row.maxMs <= 0) {
-          throw new Error('Max query duration phải là số dương (ms).');
+          throw new Error('Max query duration must be a positive number (ms).');
         }
         passCriteria.push({ type: row.type, maxMs: row.maxMs });
         break;
       case 'max_explain_total_cost':
         if (!Number.isFinite(row.maxTotalCost) || row.maxTotalCost <= 0) {
-          throw new Error('Max EXPLAIN total cost phải là số dương.');
+          throw new Error('Max EXPLAIN total cost must be a positive number.');
         }
         passCriteria.push({ type: row.type, maxTotalCost: row.maxTotalCost });
         break;
@@ -351,7 +351,7 @@ export function passCriteriaDraftsToPayload(rows: PassCriterionDraft[]): { passC
         const selections = selectionsFromGroups(row.groups);
         const columns = columnNamesFromSelections(selections);
         if (columns.length === 0) {
-          throw new Error('Tiêu chí “required columns” cần ít nhất một cột (chọn bảng rồi chọn cột).');
+          throw new Error('The “required columns” criterion needs at least one column (pick a table, then columns).');
         }
         passCriteria.push({
           type: row.type,
@@ -365,7 +365,7 @@ export function passCriteriaDraftsToPayload(rows: PassCriterionDraft[]): { passC
       case 'required_tables_in_query': {
         const tables = splitList(row.tablesRaw);
         if (tables.length === 0) {
-          throw new Error('Tiêu chí “required tables” cần ít nhất một tên bảng.');
+          throw new Error('The “required tables” criterion needs at least one table name.');
         }
         passCriteria.push({
           type: row.type,
@@ -406,7 +406,7 @@ function pushCriterionLabel(items: ParsedPassCriterion[], raw: Record<string, un
   if (t === 'max_query_duration_ms' && typeof raw.maxMs === 'number' && raw.maxMs > 0) {
     items.push({
       type: t,
-      label: `Thời gian chạy query ≤ ${raw.maxMs.toLocaleString()} ms`,
+      label: `Query runtime ≤ ${raw.maxMs.toLocaleString()} ms`,
     });
     return;
   }
@@ -420,7 +420,7 @@ function pushCriterionLabel(items: ParsedPassCriterion[], raw: Record<string, un
   if (t === 'requires_index_usage') {
     items.push({
       type: t,
-      label: 'Plan phải thể hiện dùng index (và có CREATE INDEX trong phiên nếu cần)',
+      label: 'Plan must show index usage (CREATE INDEX in session if needed)',
     });
     return;
   }
@@ -439,11 +439,11 @@ function pushCriterionLabel(items: ParsedPassCriterion[], raw: Record<string, un
           })
           .filter(Boolean);
         if (parts.length > 0) {
-          items.push({ type: t, label: `Kết quả phải có các cột: ${parts.join(', ')}` });
+          items.push({ type: t, label: `Result must include columns: ${parts.join(', ')}` });
           return;
         }
       }
-      items.push({ type: t, label: `Kết quả phải có các cột: ${columns.join(', ')}` });
+      items.push({ type: t, label: `Result must include columns: ${columns.join(', ')}` });
     }
     return;
   }
@@ -455,8 +455,8 @@ function pushCriterionLabel(items: ParsedPassCriterion[], raw: Record<string, un
         type: t,
         label:
           mode === 'any'
-            ? `SQL phải tham chiếu ít nhất một bảng: ${tables.join(', ')}`
-            : `SQL phải tham chiếu tất cả bảng: ${tables.join(', ')}`,
+            ? `SQL must reference at least one table: ${tables.join(', ')}`
+            : `SQL must reference all tables: ${tables.join(', ')}`,
       });
     }
   }
@@ -538,42 +538,44 @@ export function getChallengePassCriteriaLines(source: ChallengePassCriteriaSourc
 
   const lines: string[] = [];
 
-  lines.push('Truy vấn phải chạy thành công (không lỗi) và có trả về kết quả khi challenge yêu cầu tập dòng.');
+  lines.push(
+    'The query must run successfully (no error) and return rows when the challenge requires a result set.',
+  );
 
   if (source.validatorType === 'result_set') {
     lines.push(
-      'Kết quả được so với đáp án chuẩn: cùng số cột, cùng thứ tự và tên cột (so khớp không phân biệt hoa thường từng vị trí), cùng số dòng, và tập giá trị các dòng trùng khớp (thứ tự dòng không quan trọng).',
+      'Results are compared to the reference answer: same number of columns, same order and column names (case-insensitive per position), same row count, and the multiset of row values must match (row order does not matter).',
     );
   } else {
-    lines.push(`Loại chấm: ${source.validatorType} (chi tiết theo cấu hình nội bộ).`);
+    lines.push(`Grading type: ${source.validatorType} (details per internal configuration).`);
   }
 
   const listed = listPassCriteriaForDisplay(source.validatorConfig);
   if (listed.length > 0) {
-    lines.push('Tiêu chí pass (tất cả phải đạt):');
+    lines.push('Pass criteria (all must be met):');
     for (const x of listed) {
       lines.push(`— ${x.label}`);
     }
   } else {
     if (baselineMs !== null) {
       lines.push(
-        `Thời gian thực thi truy vấn phải ≤ ${baselineMs.toLocaleString()} ms mới pass (đo trên sandbox).`,
+        `Query execution time must be ≤ ${baselineMs.toLocaleString()} ms to pass (measured on sandbox).`,
       );
     } else {
-      lines.push('(Dữ liệu cũ) Không có ngưỡng thời gian — pass không kiểm tra runtime.');
+      lines.push('(Legacy data) No duration threshold — pass does not check runtime.');
     }
 
     if (maxTotalCost !== null) {
       lines.push(
-        `Tổng cost kế hoạch (PostgreSQL EXPLAIN, total cost) phải ≤ ${maxTotalCost.toLocaleString()} mới pass.`,
+        `Planner total cost (PostgreSQL EXPLAIN, total cost) must be ≤ ${maxTotalCost.toLocaleString()} to pass.`,
       );
     } else {
-      lines.push('(Dữ liệu cũ) Không có ngưỡng cost — pass không kiểm tra EXPLAIN total cost.');
+      lines.push('(Legacy data) No cost threshold — pass does not check EXPLAIN total cost.');
     }
 
     if (requiresIndexOptimization) {
       lines.push(
-        'Plan thực thi phải cho thấy sử dụng index; có thể cần chạy CREATE INDEX trong phiên làm việc trước câu truy vấn cuối.',
+        'The execution plan must show index usage; you may need to run CREATE INDEX in the session before the final query.',
       );
     }
   }
@@ -584,12 +586,12 @@ export function getChallengePassCriteriaLines(source: ChallengePassCriteriaSourc
     source.points > 0
   ) {
     lines.push(
-      `Đạt đủ mọi điều kiện trên thì nhận trọn ${source.points.toLocaleString()} điểm; thiếu một điều kiện thì 0 điểm cho lần chấm đó.`,
+      `Meet all of the above to earn the full ${source.points.toLocaleString()} points; missing any condition scores 0 for that attempt.`,
     );
   }
 
   lines.push(
-    'Bảng xếp hạng challenge chỉ liệt kê người đã pass; trong đó thứ hạng ưu tiên thời gian chạy query ngắn hơn, nếu trùng thì cost (ước lượng PostgreSQL từ EXPLAIN) thấp hơn xếp trên.',
+    'The challenge leaderboard only lists users who passed; ranking prefers shorter query runtime, then lower estimated cost (PostgreSQL EXPLAIN) as a tie-breaker.',
   );
 
   return lines;

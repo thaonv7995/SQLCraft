@@ -257,7 +257,7 @@
     @apply rounded-xl border border-outline-variant/10 bg-surface-container-low;
   }
 
-  /* Typography scale — dùng chung cho page headers */
+  /* Typography scale — shared for page headers */
   .page-title {
     @apply font-headline text-2xl font-bold tracking-tight text-on-surface sm:text-3xl;
   }
@@ -279,7 +279,7 @@
     @apply p-4 sm:p-5 lg:p-6;
   }
 
-  /* Ẩn scrollbar nhưng vẫn cuộn (toolbar mobile) */
+  /* Hide scrollbar but keep scroll (mobile toolbar) */
   .scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;

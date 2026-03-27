@@ -137,7 +137,7 @@ export function Navbar() {
       className="fixed top-0 left-0 right-0 z-50 flex h-14 w-full items-center justify-between gap-4 border-b border-outline-variant/20 bg-surface-container-low px-3 sm:px-4 lg:px-6"
       aria-label="Primary"
     >
-      {/* Brand — điều hướng chi tiết ở sidebar / bottom nav */}
+      {/* Brand — detailed nav lives in sidebar / bottom nav */}
       <Link
         href={homeHref}
         className="flex min-w-0 shrink-0 items-center gap-2.5"
