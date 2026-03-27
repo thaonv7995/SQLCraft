@@ -40,6 +40,7 @@ export const MESSAGES = {
   SESSION_CREATED: 'Learning session created',
   SESSION_RETRIEVED: 'Session retrieved successfully',
   SESSION_ENDED: 'Session ended successfully',
+  SESSION_HEARTBEAT: 'Session activity refreshed',
   SESSION_NOT_READY: 'Session is not ready yet',
 
   // Query

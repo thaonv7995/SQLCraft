@@ -10,6 +10,7 @@ const sessionServiceMocks = vi.hoisted(() => ({
   listUserSessions: vi.fn(),
   createSession: vi.fn(),
   getSession: vi.fn(),
+  heartbeatSession: vi.fn(),
   endSession: vi.fn(),
   getSessionSchema: vi.fn(),
   getSessionSchemaDiff: vi.fn(),
@@ -32,6 +33,10 @@ describe('sessions router HTTP contracts', () => {
     sessionServiceMocks.getSession.mockResolvedValue({
       id: '11111111-1111-4111-8111-111111111111',
       status: 'active',
+    });
+    sessionServiceMocks.heartbeatSession.mockResolvedValue({
+      expiresAt: '2026-01-01T00:00:00.000Z',
+      lastActivityAt: '2026-01-01T00:00:00.000Z',
     });
     sessionServiceMocks.endSession.mockResolvedValue({
       id: '11111111-1111-4111-8111-111111111111',
@@ -134,6 +139,32 @@ describe('sessions router HTTP contracts', () => {
       success: false,
       code: ApiCode.VALIDATION_ERROR,
       message: 'Validation failed',
+    });
+  });
+
+  it('accepts heartbeat for authenticated users', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/learning-sessions/11111111-1111-4111-8111-111111111111/heartbeat',
+      headers: {
+        authorization: `Bearer ${signToken()}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(sessionServiceMocks.heartbeatSession).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+      'user-123',
+      false,
+    );
+    expect(response.json()).toEqual({
+      success: true,
+      code: ApiCode.SUCCESS,
+      message: 'Session activity refreshed',
+      data: {
+        expiresAt: '2026-01-01T00:00:00.000Z',
+        lastActivityAt: '2026-01-01T00:00:00.000Z',
+      },
     });
   });
 

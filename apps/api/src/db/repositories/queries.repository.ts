@@ -107,13 +107,6 @@ export class QueriesRepository {
       .offset(offset);
   }
 
-  async updateSessionActivity(sessionId: string): Promise<void> {
-    await this.db
-      .update(schema.learningSessions)
-      .set({ lastActivityAt: new Date() })
-      .where(eq(schema.learningSessions.id, sessionId));
-  }
-
 }
 
 export const queriesRepository = new QueriesRepository();

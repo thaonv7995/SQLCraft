@@ -120,6 +120,29 @@ export class SessionsRepository {
       .where(eq(schema.learningSessions.id, id));
   }
 
+  /**
+   * Sliding TTL: bump session activity and extend sandbox `expires_at` (ready sandboxes only).
+   */
+  async touchActivityAndExtendSandboxExpiry(sessionId: string, expiresAt: Date): Promise<void> {
+    const now = new Date();
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(schema.learningSessions)
+        .set({ lastActivityAt: now })
+        .where(eq(schema.learningSessions.id, sessionId));
+
+      await tx
+        .update(schema.sandboxInstances)
+        .set({ expiresAt, updatedAt: now })
+        .where(
+          and(
+            eq(schema.sandboxInstances.learningSessionId, sessionId),
+            eq(schema.sandboxInstances.status, 'ready'),
+          ),
+        );
+    });
+  }
+
   async createSandbox(data: Omit<InsertSandbox, 'id' | 'createdAt' | 'updatedAt'>): Promise<SandboxRow> {
     const [row] = await this.db.insert(schema.sandboxInstances).values(data).returning();
     return row;

@@ -528,6 +528,11 @@ export interface LearningSession {
   createdAt: string;
 }
 
+export interface LabSessionHeartbeatResponse {
+  expiresAt: string | null;
+  lastActivityAt: string;
+}
+
 // ─── Query Execution ──────────────────────────────────────────────────────────
 
 export interface QueryExecutionRequest {
@@ -1543,6 +1548,11 @@ export const sessionsApi = {
 
   get: (id: string) =>
     api.get<LearningSession>(`/learning-sessions/${id}`).then((r) => normalizeLearningSession(r.data)),
+
+  heartbeat: (id: string) =>
+    api
+      .post<ApiResponse<LabSessionHeartbeatResponse>>(`/learning-sessions/${id}/heartbeat`)
+      .then((r) => r.data.data),
 
   getSchema: (id: string) =>
     api.get<SessionSchemaResponse>(`/learning-sessions/${id}/schema`).then((r) => r.data),

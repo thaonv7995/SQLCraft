@@ -158,6 +158,14 @@ export async function updateSessionStatus(
   );
 }
 
+/** Align `last_activity_at` with sandbox `expires_at` baseline when sandbox becomes ready. */
+export async function touchLearningSessionActivity(sessionId: string): Promise<void> {
+  await mainDb.query(
+    'UPDATE learning_sessions SET last_activity_at = now() WHERE id = $1',
+    [sessionId],
+  );
+}
+
 // ─── Query execution ──────────────────────────────────────────────────────────
 
 export async function fetchQueryExecution(

@@ -6,6 +6,7 @@ import type {
   SchemaTemplateRow,
 } from '../../db/repositories/sessions.repository';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
+import { LAB_SESSION_TTL_MS, labSessionExpiresAtFromNow } from '../../lib/lab-session-ttl';
 import { config } from '../../lib/config';
 import {
   diffSandboxSchema,
@@ -30,7 +31,6 @@ import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue'
 import type { CreateSessionBody } from './sessions.schema';
 import type { RevertSchemaDiffChangeBody } from './sessions.schema';
 
-const SESSION_INACTIVITY_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 const AUTO_EXPIRE_SESSION_STATUSES: SessionRow['status'][] = ['provisioning', 'active', 'paused'];
 
 // ─── Schema types ─────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ function shouldAutoExpireSession(session: SessionRow, now = new Date()): boolean
     return false;
   }
 
-  return now.getTime() - getSessionActivityTimestamp(session).getTime() >= SESSION_INACTIVITY_TIMEOUT_MS;
+  return now.getTime() - getSessionActivityTimestamp(session).getTime() >= LAB_SESSION_TTL_MS;
 }
 
 async function expireSessionForTimeout<T extends SessionRow>(
@@ -492,6 +492,50 @@ export async function createSession(
       id: sandbox.id,
       status: sandbox.status,
     },
+  };
+}
+
+export interface HeartbeatSessionResult {
+  expiresAt: string | null;
+  lastActivityAt: string;
+}
+
+export async function heartbeatSession(
+  sessionId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<HeartbeatSessionResult> {
+  const session = await sessionsRepository.findById(sessionId);
+  if (!session) {
+    throw new NotFoundError('Session not found');
+  }
+  if (session.userId !== userId && !isAdmin) {
+    throw new ForbiddenError('Access denied to this session');
+  }
+  if (session.status !== 'active') {
+    throw new ValidationError('Session is not active');
+  }
+  const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
+  if (!sandbox || sandbox.status !== 'ready') {
+    throw new ValidationError('Sandbox is not ready');
+  }
+
+  await sessionsRepository.touchActivityAndExtendSandboxExpiry(
+    sessionId,
+    labSessionExpiresAtFromNow(),
+  );
+
+  const updatedSandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
+  const refreshed = await sessionsRepository.findById(sessionId);
+  const lastAt = refreshed?.lastActivityAt ?? new Date();
+
+  return {
+    expiresAt: updatedSandbox?.expiresAt
+      ? updatedSandbox.expiresAt instanceof Date
+        ? updatedSandbox.expiresAt.toISOString()
+        : String(updatedSandbox.expiresAt)
+      : null,
+    lastActivityAt: lastAt instanceof Date ? lastAt.toISOString() : String(lastAt),
   };
 }
 

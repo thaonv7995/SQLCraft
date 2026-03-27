@@ -11,6 +11,7 @@ import {
   updateSandboxReady,
   updateSandboxStatus,
   updateSessionStatus,
+  touchLearningSessionActivity,
   updateQueryExecutionRunning,
   updateQueryExecutionSuccess,
   updateQueryExecutionFailed,
@@ -249,6 +250,7 @@ const sandboxProvisioningWorker = new Worker(
       const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
       await updateSandboxReady(sandboxInstanceId, dbName, containerRef, expiresAt);
       await updateSessionStatus(learningSessionId, 'active');
+      await touchLearningSessionActivity(learningSessionId);
 
       logger.info({ sandboxInstanceId, containerRef, dbName, expiresAt }, 'Sandbox ready');
     } catch (err) {
@@ -362,6 +364,7 @@ const sandboxResetWorker = new Worker(
 
       const newExpiresAt = new Date(Date.now() + SESSION_TTL_MS);
       await updateSandboxReady(sandboxInstanceId, dbName, containerRef, newExpiresAt);
+      await touchLearningSessionActivity(sandbox.learningSessionId);
 
       logger.info({ sandboxInstanceId, containerRef }, 'Sandbox reset complete');
     } catch (err) {

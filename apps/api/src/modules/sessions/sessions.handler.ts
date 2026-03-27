@@ -14,6 +14,7 @@ import {
   getSessionSchema,
   getSessionSchemaDiff,
   revertSessionSchemaDiffChange,
+  heartbeatSession,
 } from './sessions.service';
 
 export async function listSessionsHandler(
@@ -42,6 +43,16 @@ export async function getSessionHandler(
   const user = request.user as JwtPayload;
   const result = await getSession(sessionId, user.sub, user.roles?.includes('admin') ?? false);
   reply.send(success(result, MESSAGES.SESSION_RETRIEVED));
+}
+
+export async function heartbeatSessionHandler(
+  request: FastifyRequest<{ Params: SessionParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { sessionId } = request.params;
+  const user = request.user as JwtPayload;
+  const result = await heartbeatSession(sessionId, user.sub, user.roles?.includes('admin') ?? false);
+  reply.send(success(result, MESSAGES.SESSION_HEARTBEAT));
 }
 
 export async function getSessionSchemaHandler(

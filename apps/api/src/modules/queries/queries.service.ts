@@ -1,5 +1,6 @@
 import type { QueryExecutionRow } from '../../db/repositories';
-import { queriesRepository } from '../../db/repositories';
+import { queriesRepository, sessionsRepository } from '../../db/repositories';
+import { labSessionExpiresAtFromNow } from '../../lib/lab-session-ttl';
 import { NotFoundError, ForbiddenError, SessionNotReadyError } from '../../lib/errors';
 import { validateSql } from '../../services/query-executor';
 import { enqueueExecuteQuery } from '../../lib/queue';
@@ -29,6 +30,13 @@ export interface BlockedQueryServiceResult {
 }
 
 export type SubmitQueryOutcome = SubmitQueryServiceResult | BlockedQueryServiceResult;
+
+async function touchLabSessionAndExtendSandbox(sessionId: string): Promise<void> {
+  await sessionsRepository.touchActivityAndExtendSandboxExpiry(
+    sessionId,
+    labSessionExpiresAtFromNow(),
+  );
+}
 
 function mapDbStatusToUi(
   s: QueryExecutionRow['status'],
@@ -248,6 +256,8 @@ export async function submitQuery(
       errorMessage: validation.reason,
     });
 
+    await touchLabSessionAndExtendSandbox(body.learningSessionId);
+
     return {
       blocked: true,
       code: ApiCode.QUERY_BLOCKED,
@@ -264,7 +274,7 @@ export async function submitQuery(
     status: 'accepted',
   });
 
-  await queriesRepository.updateSessionActivity(body.learningSessionId);
+  await touchLabSessionAndExtendSandbox(body.learningSessionId);
 
   await enqueueExecuteQuery({
     queryExecutionId: execution.id,

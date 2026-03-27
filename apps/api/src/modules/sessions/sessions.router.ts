@@ -4,6 +4,7 @@ import {
   listSessionsHandler,
   createSessionHandler,
   getSessionHandler,
+  heartbeatSessionHandler,
   endSessionHandler,
   getSessionSchemaHandler,
   getSessionSchemaDiffHandler,
@@ -68,6 +69,27 @@ export default async function sessionsRouter(fastify: FastifyInstance): Promise<
       },
     },
     getSessionHandler,
+  );
+
+  // POST /v1/learning-sessions/:sessionId/heartbeat
+  fastify.post<{ Params: SessionParams }>(
+    '/v1/learning-sessions/:sessionId/heartbeat',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Refresh lab session activity and extend sandbox TTL',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    heartbeatSessionHandler,
   );
 
   // GET /v1/learning-sessions/:sessionId/schema

@@ -152,8 +152,11 @@ export function useSessionSchemaDiff(sessionId: string) {
 
 // ─── Session Polling ──────────────────────────────────────────────────────────
 
+const LAB_HEARTBEAT_INTERVAL_MS = 90_000;
+
 export function useSessionStatus(sessionId: string, enabled = true) {
   const setSession = useLabStore((s) => s.setSession);
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ['session-status', sessionId],
@@ -175,6 +178,23 @@ export function useSessionStatus(sessionId: string, enabled = true) {
       setSession(null);
     }
   }, [query.data, query.isError, setSession]);
+
+  useEffect(() => {
+    if (!sessionId || query.data?.status !== 'active') return;
+
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      void sessionsApi
+        .heartbeat(sessionId)
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ['session-status', sessionId] });
+        })
+        .catch(() => {});
+    };
+
+    const id = setInterval(tick, LAB_HEARTBEAT_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [sessionId, query.data?.status, queryClient]);
 
   return query;
 }
