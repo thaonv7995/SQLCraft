@@ -55,6 +55,7 @@ export default function RegisterPage() {
     resolver: zodResolver(registerSchema),
   });
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- RHF watch() drives password strength UI; not safely memoizable
   const password = watch('password', '');
   const passwordStrength = getPasswordStrength(password);
 

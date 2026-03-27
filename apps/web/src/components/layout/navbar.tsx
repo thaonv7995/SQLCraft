@@ -50,6 +50,7 @@ function UserAvatar({
         aria-label="User menu"
       >
         {avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- user avatar from API; arbitrary host
           <img
             src={avatarUrl}
             alt={displayName}

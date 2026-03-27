@@ -527,14 +527,15 @@ function ExecutionPlanPanel() {
 function QueryHistoryPanel({ sessionId }: { sessionId: string }) {
   const setQuery = useLabStore((s) => s.setQuery);
   const [page, setPage] = useState(1);
+  const [sessionSnapshot, setSessionSnapshot] = useState(sessionId);
+  if (sessionId !== sessionSnapshot) {
+    setSessionSnapshot(sessionId);
+    setPage(1);
+  }
   const limit = 20;
   const historyQuery = useQueryHistory(sessionId, page, limit);
   const historyItems = historyQuery.data?.items ?? [];
   const totalPages = Math.max(1, historyQuery.data?.totalPages ?? 1);
-
-  useEffect(() => {
-    setPage(1);
-  }, [sessionId]);
 
   if (historyQuery.isLoading && historyItems.length === 0) {
     return (
@@ -1211,9 +1212,12 @@ function SideBySideComparePanel({
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }, [queryHistory]);
 
-  useEffect(() => {
-    const available = executions.map((e) => e.id);
+  const executionsSig = useMemo(() => executions.map((e) => e.id).join('\0'), [executions]);
+  const [picksSig, setPicksSig] = useState(executionsSig);
+  if (executionsSig !== picksSig) {
+    setPicksSig(executionsSig);
     setPicks((prev) => {
+      const available = executions.map((e) => e.id);
       const next = [...prev];
       const used = new Set<string>();
       for (let i = 0; i < compareLabels.length; i += 1) {
@@ -1226,27 +1230,29 @@ function SideBySideComparePanel({
         next[i] = fallback;
         if (fallback) used.add(fallback);
       }
-      return next;
+      let unchanged = next.length === prev.length;
+      if (unchanged) {
+        for (let i = 0; i < next.length; i += 1) {
+          if (next[i] !== prev[i]) {
+            unchanged = false;
+            break;
+          }
+        }
+      }
+      return unchanged ? prev : next;
     });
-  }, [executions]);
+  }
 
-  useEffect(() => {
-    setActiveSlotCount((prev) => Math.min(Math.max(2, prev), compareLabels.length));
-  }, []);
-
-  const selectedItems = useMemo(() => {
-    return compareLabels.reduce<CompareSlot[]>((acc, label, index) => {
-        if (index >= activeSlotCount) {
-          return acc;
-        }
-        const id = picks[index];
-        const execution = executions.find((e) => e.id === id);
-        if (execution) {
-          acc.push({ label, execution });
-        }
-        return acc;
-      }, []);
-  }, [activeSlotCount, executions, picks]);
+  const selectedItems: CompareSlot[] = [];
+  for (let index = 0; index < compareLabels.length; index += 1) {
+    if (index >= activeSlotCount) break;
+    const label = compareLabels[index]!;
+    const id = picks[index];
+    const execution = executions.find((e) => e.id === id);
+    if (execution) {
+      selectedItems.push({ label, execution });
+    }
+  }
 
   const introHint = 'Plan / timing · History';
 
@@ -2103,13 +2109,11 @@ export default function LabPage() {
     error,
     editorTabs,
     activeEditorTabId,
-    currentEditorTabName,
     currentQuery,
     hydrateEditorTabs,
     setQuery,
     selectedScale,
     sourceScale,
-    availableScales,
     sourceRowCount,
     setSelectedScale,
   } = useLabStore();
@@ -2318,6 +2322,7 @@ export default function LabPage() {
   const hydratedEditorSessionIdRef = useRef<string | null>(null);
   const [isEndSessionModalOpen, setIsEndSessionModalOpen] = useState(false);
   const [editorNotice, setEditorNotice] = useState<'success' | 'error' | 'info' | null>(null);
+  const [appliedNoticeKey, setAppliedNoticeKey] = useState('');
   const editorNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistedEditorState = useMemo(
     () => (sessionId ? readLabEditorState(sessionId) : null),
@@ -2489,7 +2494,7 @@ export default function LabPage() {
     try {
       setQuery(formatSqlInBrowser(currentQuery));
       setEditorNotice('success');
-    } catch (e) {
+    } catch {
       setEditorNotice('error');
     }
   }, [currentQuery, setQuery]);
@@ -2541,12 +2546,13 @@ export default function LabPage() {
     };
   }, [editorNotice]);
 
-  useEffect(() => {
-    if (!lastExecution) {
-      return;
-    }
-    setEditorNotice(lastExecution.status === 'success' ? 'success' : 'error');
-  }, [lastExecution]);
+  const lastExecNoticeKey = lastExecution
+    ? `${lastExecution.id}:${lastExecution.status}`
+    : '';
+  if (lastExecNoticeKey && lastExecNoticeKey !== appliedNoticeKey) {
+    setAppliedNoticeKey(lastExecNoticeKey);
+    setEditorNotice(lastExecution!.status === 'success' ? 'success' : 'error');
+  }
 
   if (!sessionId) {
     return (

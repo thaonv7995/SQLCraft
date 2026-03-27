@@ -1,15 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import toast from 'react-hot-toast';
 import { DifficultyBadge } from '@/components/ui/badge';
-import {
-  challengesApi,
-  leaderboardApi,
-  type ChallengeCatalogItem,
-} from '@/lib/api';
+import { challengesApi, leaderboardApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
 
@@ -32,16 +27,11 @@ export default function LeaderboardPage() {
   const { user } = useAuthStore();
   const userId = user?.id ?? null;
 
-  const [completionScanLimit, setCompletionScanLimit] = useState(8);
   const [completionFilter, setCompletionFilter] = useState<ChallengeCompletionFilter>('not_done');
   const [completionPage, setCompletionPage] = useState(0);
   const completionPageSize = 6;
 
   const router = useRouter();
-
-  useEffect(() => {
-    setCompletionPage(0);
-  }, [completionFilter]);
 
   const challengesQuery = useQuery({
     queryKey: ['published-challenges'],
@@ -58,14 +48,23 @@ export default function LeaderboardPage() {
   const publishedChallenges = useMemo(() => challengesQuery.data ?? [], [challengesQuery.data]);
   const globalLeaders = useMemo(() => leaderboardQuery.data ?? [], [leaderboardQuery.data]);
 
-  useEffect(() => {
-    if (publishedChallenges.length === 0) return;
-    const desired = Math.min(
+  const desiredCompletionScanLimit = useMemo(() => {
+    if (publishedChallenges.length === 0) {
+      return 8;
+    }
+    return Math.min(
       publishedChallenges.length,
       Math.max(8, (completionPage + 1) * completionPageSize),
     );
-    setCompletionScanLimit((prev) => (prev < desired ? desired : prev));
   }, [publishedChallenges.length, completionPage, completionPageSize]);
+
+  const [completionScanLimit, setCompletionScanLimit] = useState(8);
+  if (publishedChallenges.length > 0) {
+    const nextLimit = Math.max(completionScanLimit, desiredCompletionScanLimit);
+    if (nextLimit !== completionScanLimit) {
+      setCompletionScanLimit(nextLimit);
+    }
+  }
 
   const meEntry = useMemo(() => {
     if (!userId) return null;
@@ -114,20 +113,6 @@ export default function LeaderboardPage() {
     () => new Set(completionScanChallenges.map((ch) => ch.id)),
     [completionScanChallenges],
   );
-
-  const completedChallenges = useMemo(
-    () => completionScanChallenges.filter((ch) => passedChallengeIdsSet.has(ch.id)),
-    [completionScanChallenges, passedChallengeIdsSet],
-  );
-
-  const scanProgressLabel = useMemo(() => {
-    const scanned = completionScanChallenges.length;
-    const total = publishedChallenges.filter((ch) => Boolean(ch.publishedVersionId)).length;
-    return `${scanned}/${total}`;
-  }, [completionScanChallenges.length, publishedChallenges]);
-
-  const canScanMore =
-    publishedChallenges.length > 0 && completionScanLimit < publishedChallenges.length;
 
   const completionChallengesForList = useMemo(() => {
     const sorted = publishedChallenges

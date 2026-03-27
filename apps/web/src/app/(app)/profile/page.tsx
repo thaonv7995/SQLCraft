@@ -52,6 +52,8 @@ export default function ProfilePage() {
       <section className="section-card card-padding">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           {user.avatarUrl ? (
+            // External avatar URLs; next/image would require remotePatterns for arbitrary hosts
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={user.avatarUrl}
               alt=""

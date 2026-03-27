@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { queryApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { formatDuration, formatRelativeTime, formatRows, classifyQueryType } from '@/lib/utils';
 import type { QueryExecution } from '@/lib/api';

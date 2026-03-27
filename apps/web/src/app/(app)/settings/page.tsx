@@ -151,6 +151,7 @@ function ProfileSection({
         {/* Avatar */}
         <div className="relative group shrink-0">
           {user.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- user-provided URL; arbitrary remote host
             <img
               src={user.avatarUrl}
               alt=""
