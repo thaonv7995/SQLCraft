@@ -251,7 +251,15 @@ is_port_in_use() {
     return $?
   fi
   if command -v ss >/dev/null 2>&1; then
-    ss -ltn "( sport = :${port} )" | awk 'NR>1{found=1} END{exit(found?0:1)}'
+    ss -ltnH | awk '{print $4}' | grep -Eq "(^|[:.])${port}$"
+    return $?
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|[:.])${port}$"
+    return $?
+  fi
+  if command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
     return $?
   fi
   (echo >"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1
@@ -305,6 +313,23 @@ run_compose() {
 
 bootstrap_stack() {
   headline "Bootstrapping infrastructure"
+  # Re-check critical published ports right before compose up
+  ensure_port "WEB_PORT" 13029
+  ensure_port "API_PORT" 4000
+  ensure_port "POSTGRES_PORT" 5432
+  ensure_port "REDIS_PORT" 6379
+  ensure_port "MINIO_API_PORT" 9000
+  ensure_port "MINIO_CONSOLE_PORT" 9001
+
+  local web_port api_port pg_port redis_port minio_api_port minio_console_port
+  web_port="$(get_env_value "WEB_PORT" "$ENV_FILE")"
+  api_port="$(get_env_value "API_PORT" "$ENV_FILE")"
+  pg_port="$(get_env_value "POSTGRES_PORT" "$ENV_FILE")"
+  redis_port="$(get_env_value "REDIS_PORT" "$ENV_FILE")"
+  minio_api_port="$(get_env_value "MINIO_API_PORT" "$ENV_FILE")"
+  minio_console_port="$(get_env_value "MINIO_CONSOLE_PORT" "$ENV_FILE")"
+  log "Using ports -> web:${web_port}, api:${api_port}, postgres:${pg_port}, redis:${redis_port}, minio:${minio_api_port}/${minio_console_port}"
+
   run_compose up -d --build postgres redis minio
 
   headline "Running migrations + seed"
