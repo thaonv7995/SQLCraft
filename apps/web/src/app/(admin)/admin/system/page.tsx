@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useAppPageProps, searchParamFirst } from '@/lib/next-app-page';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,6 +8,7 @@ import { adminApi } from '@/lib/api';
 import { AdminConfigPanel } from '@/components/admin/admin-config-panel';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -20,6 +20,16 @@ import {
   TableSkeleton,
 } from '@/components/ui/table';
 import { formatRelativeTime } from '@/lib/utils';
+
+function formatAuditPayloadPreview(payload: unknown): string {
+  if (payload == null) return '—';
+  try {
+    const s = JSON.stringify(payload);
+    return s.length > 140 ? `${s.slice(0, 137)}…` : s;
+  } catch {
+    return String(payload);
+  }
+}
 
 type SystemTab = 'health' | 'queues' | 'logs' | 'resources' | 'config';
 type QueueFilter = 'all' | 'pending' | 'running' | 'completed' | 'failed' | 'retrying';
@@ -55,6 +65,13 @@ export default function AdminSystemPage(props: PageProps<'/admin/system'>) {
     isSystemTab(requestedTab) ? requestedTab : 'health',
   );
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditActionDraft, setAuditActionDraft] = useState('');
+  const [auditResourceDraft, setAuditResourceDraft] = useState('');
+  const [auditFilters, setAuditFilters] = useState<{ action: string; resourceType: string }>({
+    action: '',
+    resourceType: '',
+  });
 
   const healthQuery = useQuery({
     queryKey: ['admin-system-health-page'],
@@ -66,6 +83,21 @@ export default function AdminSystemPage(props: PageProps<'/admin/system'>) {
   const jobsQuery = useQuery({
     queryKey: ['admin-system-jobs-page'],
     queryFn: () => adminApi.systemJobs({ limit: 50 }),
+    staleTime: 15_000,
+  });
+
+  const auditLogsQuery = useQuery({
+    queryKey: ['admin-system-audit-logs', auditPage, auditFilters.action, auditFilters.resourceType],
+    queryFn: () =>
+      adminApi.auditLogs({
+        page: auditPage,
+        limit: 25,
+        ...(auditFilters.action.trim() ? { action: auditFilters.action.trim() } : {}),
+        ...(auditFilters.resourceType.trim()
+          ? { resourceType: auditFilters.resourceType.trim() }
+          : {}),
+      }),
+    enabled: activeTab === 'logs',
     staleTime: 15_000,
   });
 
@@ -324,24 +356,157 @@ export default function AdminSystemPage(props: PageProps<'/admin/system'>) {
 
       {activeTab === 'logs' ? (
         <section className="section-card p-5">
-          <h2 className="page-section-title">Logs</h2>
-          <p className="mt-1 text-sm text-on-surface-variant">
-            Full log ingestion for this tab is staged. Legacy routes such as `/admin/health/logs`
-            now land on this tab so the navigation model stays consistent while audit-log APIs are
-            still being wired.
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Link
-              href="/docs"
-              className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-sm text-on-surface hover:bg-surface-container"
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="page-section-title">Audit log</h2>
+              <p className="mt-1 max-w-3xl text-sm text-on-surface-variant">
+                Immutable-style trail of sensitive admin actions (config changes, session cleanup,
+                database deletes). Filter by exact <span className="font-mono text-xs">action</span>{' '}
+                or <span className="font-mono text-xs">resourceType</span> when you need to narrow
+                results.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => auditLogsQuery.refetch()}
+              loading={auditLogsQuery.isFetching}
+              leftIcon={<span className="material-symbols-outlined text-base">refresh</span>}
             >
-              <span className="material-symbols-outlined text-sm">menu_book</span>
-              Open Admin Docs
-            </Link>
-            <span className="rounded-full bg-surface px-2 py-1 text-xs text-on-surface-variant">
-              audit API staged
-            </span>
+              Refresh
+            </Button>
           </div>
+
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+            <Input
+              label="Action (exact)"
+              className="lg:max-w-xs"
+              placeholder="e.g. admin.config.update"
+              value={auditActionDraft}
+              onChange={(e) => setAuditActionDraft(e.target.value)}
+            />
+            <Input
+              label="Resource type (exact)"
+              className="lg:max-w-xs"
+              placeholder="e.g. admin_config"
+              value={auditResourceDraft}
+              onChange={(e) => setAuditResourceDraft(e.target.value)}
+            />
+            <Button
+              type="button"
+              onClick={() => {
+                setAuditPage(1);
+                setAuditFilters({
+                  action: auditActionDraft.trim(),
+                  resourceType: auditResourceDraft.trim(),
+                });
+              }}
+            >
+              Apply filters
+            </Button>
+          </div>
+
+          <div className="mt-4 overflow-x-auto rounded-xl border border-outline-variant/10">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Actor</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Resource</TableHead>
+                  <TableHead>IP</TableHead>
+                  <TableHead>Payload</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {auditLogsQuery.isLoading ? (
+                  <TableSkeleton rows={6} cols={6} />
+                ) : auditLogsQuery.isError ? (
+                  <TableEmpty
+                    message="Could not load audit logs. Check that the API is running and you are signed in as admin."
+                    colSpan={6}
+                  />
+                ) : !auditLogsQuery.data?.items.length ? (
+                  <TableEmpty
+                    message="No audit entries yet. Actions such as saving admin config, clearing stale sessions, or deleting a catalog database will appear here."
+                    colSpan={6}
+                  />
+                ) : (
+                  auditLogsQuery.data.items.map((row) => {
+                    const actor =
+                      row.actorUsername?.trim() ||
+                      row.actorEmail?.trim() ||
+                      (row.userId ? `${row.userId.slice(0, 8)}…` : null);
+                    const resource =
+                      row.resourceType || row.resourceId
+                        ? [row.resourceType, row.resourceId].filter(Boolean).join(' · ')
+                        : '—';
+                    const preview = formatAuditPayloadPreview(row.payload);
+                    const fullPayload =
+                      row.payload == null ? '' : JSON.stringify(row.payload, null, 2);
+
+                    return (
+                      <TableRow key={row.id}>
+                        <TableCell className="whitespace-nowrap text-xs text-on-surface-variant">
+                          {formatRelativeTime(row.createdAt)}
+                        </TableCell>
+                        <TableCell className="text-xs text-on-surface">{actor ?? '—'}</TableCell>
+                        <TableCell>
+                          <span className="rounded bg-surface-container-high px-2 py-0.5 font-mono text-[11px] text-on-surface-variant">
+                            {row.action}
+                          </span>
+                        </TableCell>
+                        <TableCell className="max-w-[12rem] truncate text-xs text-on-surface-variant">
+                          {resource}
+                        </TableCell>
+                        <TableCell className="font-mono text-[11px] text-on-surface-variant">
+                          {row.ipAddress ?? '—'}
+                        </TableCell>
+                        <TableCell
+                          className="max-w-[20rem] truncate text-xs text-on-surface-variant"
+                          title={fullPayload || undefined}
+                        >
+                          {preview}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {auditLogsQuery.data && auditLogsQuery.data.total > 0 ? (
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-on-surface-variant">
+                Page {auditLogsQuery.data.page} of {auditLogsQuery.data.totalPages} ·{' '}
+                {auditLogsQuery.data.total} total
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={auditPage <= 1 || auditLogsQuery.isFetching}
+                  onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    auditPage >= auditLogsQuery.data.totalPages || auditLogsQuery.isFetching
+                  }
+                  onClick={() => setAuditPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

@@ -33,6 +33,7 @@ import type {
   DirectCanonicalDatabaseImportBody,
   SqlDumpScanImportBody,
   ListSystemJobsQuery,
+  ListAuditLogsQuery,
 } from './admin.schema';
 import type {
   AdminConfigResult,
@@ -49,6 +50,7 @@ import type {
   SystemHealthResult,
   ImportCanonicalDatabaseResult,
   ListSystemJobsResult,
+  ListAuditLogsResult,
   SqlDumpScanResult,
 } from './admin.types';
 import {
@@ -410,6 +412,59 @@ export async function clearStaleSessions(
 }
 
 // ─── System ───────────────────────────────────────────────────────────────────
+
+export async function recordAuditLog(input: {
+  userId: string;
+  action: string;
+  resourceType?: string | null;
+  resourceId?: string | null;
+  payload?: unknown;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}): Promise<void> {
+  try {
+    await adminRepository.insertAuditLog({
+      userId: input.userId,
+      action: input.action,
+      resourceType: input.resourceType ?? null,
+      resourceId: input.resourceId ?? null,
+      payload: input.payload ?? null,
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+    });
+  } catch (err) {
+    console.error('[audit] failed to insert audit log', err);
+  }
+}
+
+export async function listAuditLogs(query: ListAuditLogsQuery): Promise<ListAuditLogsResult> {
+  const { rows, total } = await adminRepository.listAuditLogsPaginated({
+    page: query.page,
+    limit: query.limit,
+    action: query.action,
+    resourceType: query.resourceType,
+  });
+  const totalPages = Math.max(1, Math.ceil(total / query.limit));
+
+  return {
+    items: rows.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      actorUsername: r.actorUsername,
+      actorEmail: r.actorEmail,
+      action: r.action,
+      resourceType: r.resourceType,
+      resourceId: r.resourceId,
+      payload: r.payload ?? null,
+      ipAddress: r.ipAddress,
+      createdAt: r.createdAt.toISOString(),
+    })),
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages,
+  };
+}
 
 export async function getSystemHealth(): Promise<SystemHealthResult> {
   const stats = await adminRepository.getSystemHealthStats();

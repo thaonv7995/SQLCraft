@@ -111,6 +111,27 @@ export interface ImportCanonicalDatabaseResult {
   };
 }
 
+export interface AuditLogListItem {
+  id: string;
+  userId: string | null;
+  actorUsername: string | null;
+  actorEmail: string | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  payload: unknown;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+export interface ListAuditLogsResult {
+  items: AuditLogListItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export interface ListSystemJobsResult {
   items: AdminSystemJobRow[];
 }

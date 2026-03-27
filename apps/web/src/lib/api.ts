@@ -730,6 +730,27 @@ export interface AdminSystemHealth {
   };
 }
 
+export interface AdminAuditLogEntry {
+  id: string;
+  userId: string | null;
+  actorUsername: string | null;
+  actorEmail: string | null;
+  action: string;
+  resourceType: string | null;
+  resourceId: string | null;
+  payload: unknown;
+  ipAddress: string | null;
+  createdAt: string;
+}
+
+export interface AdminAuditLogsPage {
+  items: AdminAuditLogEntry[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 export interface ClearStaleSessionsResult {
   clearedCount: number;
   sessionIds: string[];
@@ -1879,6 +1900,14 @@ export const adminApi = {
     api
       .get<RawSystemJob[]>('/admin/system/jobs', { params })
       .then((r) => r.data.map(normalizeSystemJob)),
+
+  auditLogs: (params?: {
+    page?: number;
+    limit?: number;
+    action?: string;
+    resourceType?: string;
+  }) =>
+    api.get<AdminAuditLogsPage>('/admin/system/audit-logs', { params }).then((r) => r.data),
 
   metrics: async () => {
     const health = await adminApi.systemHealth();

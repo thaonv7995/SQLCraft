@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
 import { ValidationError } from '../../lib/errors';
+import { clientIpForAudit, clientUserAgentForAudit } from '../../lib/request-audit';
 import type { JwtPayload } from '../../plugins/auth';
 import type {
   AdminConfigBody,
@@ -12,6 +13,7 @@ import type {
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
   ListSystemJobsQuery,
+  ListAuditLogsQuery,
   AdminIdParams,
 } from './admin.schema';
 import {
@@ -20,6 +22,7 @@ import {
   CreateChallengeSchema,
   ImportCanonicalDatabaseSchema,
   ListSystemJobsQuerySchema,
+  ListAuditLogsQuerySchema,
   UpdateAdminUserSchema,
 } from './admin.schema';
 import {
@@ -39,6 +42,8 @@ import {
   getAdminConfig,
   importCanonicalDatabase,
   listSystemJobs,
+  listAuditLogs,
+  recordAuditLog,
   resetAdminConfig,
   scanSqlDump,
   updateAdminConfig,
@@ -137,15 +142,41 @@ export async function deleteDatabaseHandler(
   request: FastifyRequest<{ Params: AdminIdParams }>,
   reply: FastifyReply,
 ): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
   const result = await deleteDatabase(request.params.id);
+  await recordAuditLog({
+    userId,
+    action: 'admin.database.delete',
+    resourceType: 'schema_template',
+    resourceId: result.id,
+    payload: {
+      name: result.name,
+      deletedDatasetTemplates: result.deletedDatasetTemplates,
+    },
+    ipAddress: clientIpForAudit(request),
+    userAgent: clientUserAgentForAudit(request),
+  });
   reply.send(success(result, 'Database deleted successfully'));
 }
 
 export async function clearStaleSessionsHandler(
-  _request: FastifyRequest,
+  request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
   const result = await clearStaleSessions();
+  await recordAuditLog({
+    userId,
+    action: 'admin.sessions.clear_stale',
+    resourceType: 'platform',
+    payload: {
+      clearedCount: result.clearedCount,
+      sessionIds: result.sessionIds.slice(0, 100),
+      thresholdMinutes: result.thresholdMinutes,
+    },
+    ipAddress: clientIpForAudit(request),
+    userAgent: clientUserAgentForAudit(request),
+  });
   reply.send(success(result, 'Stale sessions cleared successfully'));
 }
 
@@ -174,6 +205,17 @@ export async function updateAdminConfigHandler(
   const userId = (request.user as JwtPayload).sub;
   const body = AdminConfigSchema.parse(request.body);
   const result = await updateAdminConfig(userId, body);
+  await recordAuditLog({
+    userId,
+    action: 'admin.config.update',
+    resourceType: 'admin_config',
+    payload: {
+      scope: 'global',
+      sections: Object.keys(body) as string[],
+    },
+    ipAddress: clientIpForAudit(request),
+    userAgent: clientUserAgentForAudit(request),
+  });
   reply.send(success(result, 'Admin config updated successfully'));
 }
 
@@ -183,6 +225,14 @@ export async function resetAdminConfigHandler(
 ): Promise<void> {
   const userId = (request.user as JwtPayload).sub;
   const result = await resetAdminConfig(userId);
+  await recordAuditLog({
+    userId,
+    action: 'admin.config.reset',
+    resourceType: 'admin_config',
+    payload: { scope: 'global', toDefault: true },
+    ipAddress: clientIpForAudit(request),
+    userAgent: clientUserAgentForAudit(request),
+  });
   reply.send(success(result, 'Admin config reset successfully'));
 }
 
@@ -226,4 +276,13 @@ export async function listSystemJobsHandler(
   const query = ListSystemJobsQuerySchema.parse(request.query);
   const result = await listSystemJobs(query);
   reply.send(success(result, 'System jobs retrieved successfully'));
+}
+
+export async function listAuditLogsHandler(
+  request: FastifyRequest<{ Querystring: ListAuditLogsQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = ListAuditLogsQuerySchema.parse(request.query);
+  const result = await listAuditLogs(query);
+  reply.send(success(result, 'Audit logs retrieved successfully'));
 }

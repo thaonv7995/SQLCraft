@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, or, type SQL } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -23,6 +23,7 @@ export type InsertSchemaTemplate = InferInsertModel<typeof schema.schemaTemplate
 export type InsertDatasetTemplate = InferInsertModel<typeof schema.datasetTemplates>;
 export type InsertSystemJob = InferInsertModel<typeof schema.systemJobs>;
 export type InsertAdminConfig = InferInsertModel<typeof schema.adminConfigs>;
+export type InsertAuditLog = InferInsertModel<typeof schema.auditLogs>;
 
 export class AdminRepository {
   private get db() {
@@ -238,6 +239,73 @@ export class AdminRepository {
         : baseQuery.where(filters.length === 1 ? filters[0] : and(...filters));
 
     return filteredQuery.orderBy(desc(schema.systemJobs.createdAt)).limit(options.limit);
+  }
+
+  async insertAuditLog(
+    data: Omit<InsertAuditLog, 'id' | 'createdAt'>,
+  ): Promise<void> {
+    await this.db.insert(schema.auditLogs).values(data);
+  }
+
+  async listAuditLogsPaginated(options: {
+    page: number;
+    limit: number;
+    action?: string;
+    resourceType?: string;
+  }): Promise<{
+    rows: Array<{
+      id: string;
+      userId: string | null;
+      action: string;
+      resourceType: string | null;
+      resourceId: string | null;
+      payload: unknown;
+      ipAddress: string | null;
+      userAgent: string | null;
+      createdAt: Date;
+      actorUsername: string | null;
+      actorEmail: string | null;
+    }>;
+    total: number;
+  }> {
+    const filters: SQL[] = [];
+    if (options.action) {
+      filters.push(eq(schema.auditLogs.action, options.action));
+    }
+    if (options.resourceType) {
+      filters.push(eq(schema.auditLogs.resourceType, options.resourceType));
+    }
+    const whereClause: SQL | undefined =
+      filters.length === 0 ? undefined : filters.length === 1 ? filters[0]! : and(...filters);
+
+    const countBase = this.db.select({ total: count() }).from(schema.auditLogs);
+    const [countRow] = whereClause ? await countBase.where(whereClause) : await countBase;
+    const total = Number(countRow?.total ?? 0);
+
+    const offset = (options.page - 1) * options.limit;
+    const listBase = this.db
+      .select({
+        id: schema.auditLogs.id,
+        userId: schema.auditLogs.userId,
+        action: schema.auditLogs.action,
+        resourceType: schema.auditLogs.resourceType,
+        resourceId: schema.auditLogs.resourceId,
+        payload: schema.auditLogs.payload,
+        ipAddress: schema.auditLogs.ipAddress,
+        userAgent: schema.auditLogs.userAgent,
+        createdAt: schema.auditLogs.createdAt,
+        actorUsername: schema.users.username,
+        actorEmail: schema.users.email,
+      })
+      .from(schema.auditLogs)
+      .leftJoin(schema.users, eq(schema.auditLogs.userId, schema.users.id))
+      .orderBy(desc(schema.auditLogs.createdAt))
+      .limit(options.limit)
+      .offset(offset);
+
+    const rows = whereClause ? await listBase.where(whereClause) : await listBase;
+
+    return { rows, total };
   }
 }
 

@@ -127,6 +127,13 @@ export const ListSystemJobsQuerySchema = z.object({
   type: z.string().min(1).max(100).optional(),
 });
 
+export const ListAuditLogsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  action: z.string().min(1).max(100).optional(),
+  resourceType: z.string().min(1).max(50).optional(),
+});
+
 // ─── Admin Config ────────────────────────────────────────────────────────────
 
 const AdminPlatformConfigSchema = z.object({
@@ -254,5 +261,6 @@ export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabase
 export type DirectCanonicalDatabaseImportBody = z.infer<typeof DirectCanonicalDatabaseImportSchema>;
 export type SqlDumpScanImportBody = z.infer<typeof SqlDumpScanImportSchema>;
 export type ListSystemJobsQuery = z.infer<typeof ListSystemJobsQuerySchema>;
+export type ListAuditLogsQuery = z.infer<typeof ListAuditLogsQuerySchema>;
 export type AdminConfigBody = z.infer<typeof AdminConfigSchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;

@@ -9,6 +9,7 @@ import type {
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
   ListSystemJobsQuery,
+  ListAuditLogsQuery,
   AdminIdParams,
 } from './admin.schema';
 import {
@@ -28,6 +29,7 @@ import {
   getAdminConfigHandler,
   importCanonicalDatabaseHandler,
   listSystemJobsHandler,
+  listAuditLogsHandler,
   resetAdminConfigHandler,
   scanSqlDumpHandler,
   updateAdminConfigHandler,
@@ -501,5 +503,27 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     systemHealthHandler,
+  );
+
+  fastify.get<{ Querystring: ListAuditLogsQuery }>(
+    '/v1/admin/system/audit-logs',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List platform audit log entries (admin actions)',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
+            action: { type: 'string', maxLength: 100 },
+            resourceType: { type: 'string', maxLength: 50 },
+          },
+        },
+      },
+    },
+    listAuditLogsHandler,
   );
 }
