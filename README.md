@@ -77,6 +77,7 @@ make prod-stop    # Stop production stack
 make prod-logs    # Tail production logs
 make prod-clean   # Stop + remove production volumes
 make release-docker  # Build production images only
+./uninstall.sh    # Uninstall stack (containers/network/volumes)
 ```
 
 ### 3) Manual path (without installer)
