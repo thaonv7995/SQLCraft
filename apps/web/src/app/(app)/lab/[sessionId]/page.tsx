@@ -635,9 +635,72 @@ function SchemaPanelSkeleton() {
   );
 }
 
+function extractIndexFieldsFromDefinition(definition?: string | null): string[] {
+  if (!definition) return [];
+  const match = definition.match(/\(([^)]+)\)/);
+  if (!match?.[1]) return [];
+  return match[1]
+    .split(',')
+    .map((part) => part.trim())
+    .map((part) =>
+      part
+        .replace(/\s+(asc|desc)\b/gi, '')
+        .replace(/\s+nulls\s+(first|last)\b/gi, '')
+        .replace(/"/g, ''),
+    )
+    .filter(Boolean);
+}
+
 function SchemaPanel({ sessionId }: { sessionId: string }) {
   const { data: schema, isLoading, isError } = useSessionSchema(sessionId);
+  const { data: schemaDiff } = useSessionSchemaDiff(sessionId);
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
+
+  const baseIndexFieldsByTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const baseIndexes = schemaDiff?.indexes.base ?? [];
+    for (const index of baseIndexes) {
+      const fields = extractIndexFieldsFromDefinition(index.definition);
+      if (fields.length === 0) continue;
+      const existing = map.get(index.tableName) ?? [];
+      const merged = Array.from(new Set([...existing, ...fields]));
+      map.set(index.tableName, merged);
+    }
+    return map;
+  }, [schemaDiff]);
+
+  const addedIndexFieldsByTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const addedIndexes = schemaDiff?.indexes.added ?? [];
+    for (const index of addedIndexes) {
+      const fields = extractIndexFieldsFromDefinition(index.definition);
+      if (fields.length === 0) continue;
+      const existing = map.get(index.tableName) ?? [];
+      const merged = Array.from(new Set([...existing, ...fields]));
+      map.set(index.tableName, merged);
+    }
+    return map;
+  }, [schemaDiff]);
+
+  const basePartitionsByParentTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const basePartitions = schemaDiff?.partitions.base ?? [];
+    for (const partition of basePartitions) {
+      const existing = map.get(partition.parentTable) ?? [];
+      map.set(partition.parentTable, [...existing, partition.name]);
+    }
+    return map;
+  }, [schemaDiff]);
+
+  const addedPartitionsByParentTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const addedPartitions = schemaDiff?.partitions.added ?? [];
+    for (const partition of addedPartitions) {
+      const existing = map.get(partition.parentTable) ?? [];
+      map.set(partition.parentTable, [...existing, partition.name]);
+    }
+    return map;
+  }, [schemaDiff]);
 
   if (isLoading) return <SchemaPanelSkeleton />;
 
@@ -667,6 +730,12 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
       </p>
       {schema.tables.map((table) => {
         const isExpanded = expandedTable === table.name;
+        const indexedFields = baseIndexFieldsByTable.get(table.name) ?? [];
+        const addedIndexedFields = addedIndexFieldsByTable.get(table.name) ?? [];
+        const indexedFieldSet = new Set(indexedFields);
+        const addedIndexedFieldSet = new Set(addedIndexedFields);
+        const partitionNames = basePartitionsByParentTable.get(table.name) ?? [];
+        const addedPartitionNames = addedPartitionsByParentTable.get(table.name) ?? [];
         return (
           <div key={table.name} className="rounded-lg overflow-hidden">
             <button
@@ -704,6 +773,15 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                     <span className="text-xs font-mono text-on-surface-variant flex-1">
                       {col.name}
                     </span>
+                    {addedIndexedFieldSet.has(col.name) ? (
+                      <span className="inline-flex h-4 items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-blue-200">
+                        idx
+                      </span>
+                    ) : indexedFieldSet.has(col.name) ? (
+                      <span className="inline-flex h-4 items-center rounded-[10px] border border-outline-variant/10 bg-surface-container-high px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-on-surface-variant">
+                        idx
+                      </span>
+                    ) : null}
                     {col.references && (
                       <span className="text-[10px] text-outline font-mono truncate max-w-[80px]" title={col.references}>
                         → {col.references}
@@ -1389,21 +1467,6 @@ function SchemaDiffPanel({
   isResetting: boolean;
 }) {
   const { data: diff, isLoading, isError, error } = useSessionSchemaDiff(sessionId);
-  const extractIndexFields = (definition?: string | null): string[] => {
-    if (!definition) return [];
-    const match = definition.match(/\(([^)]+)\)/);
-    if (!match?.[1]) return [];
-    return match[1]
-      .split(',')
-      .map((part) => part.trim())
-      .map((part) =>
-        part
-          .replace(/\s+(asc|desc)\b/gi, '')
-          .replace(/\s+nulls\s+(first|last)\b/gi, '')
-          .replace(/"/g, ''),
-      )
-      .filter(Boolean);
-  };
   const totalChanges = diff
     ? diff.indexes.added.length +
       diff.indexes.removed.length +
@@ -1567,7 +1630,7 @@ function SchemaDiffPanel({
                 title: item.name,
                 subtitle: null,
                 tableName: item.tableName,
-                fields: extractIndexFields(item.definition),
+                fields: extractIndexFieldsFromDefinition(item.definition),
                 definition: null,
               }),
             )}
