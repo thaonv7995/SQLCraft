@@ -17,6 +17,25 @@ export const DATABASE_SCALE_LABELS: Record<DatabaseScale, string> = {
   large: '10M+ rows',
 };
 
+/**
+ * Maps total row count to a scale bucket for human-readable labels.
+ * Use this for subtitles and stats so copy matches `rowCount` (catalog `scale` is the
+ * largest published template tier and can read "10M+" while data is still ~1.3M).
+ */
+export function inferDatasetScaleFromRowCount(rowCount: number): DatabaseScale {
+  if (!Number.isFinite(rowCount) || rowCount <= 0) {
+    return 'tiny';
+  }
+  if (rowCount <= 1_000) return 'tiny';
+  if (rowCount <= 200_000) return 'small';
+  if (rowCount <= 5_000_000) return 'medium';
+  return 'large';
+}
+
+export function databaseScaleDisplayLabelFromRowCount(rowCount: number): string {
+  return DATABASE_SCALE_LABELS[inferDatasetScaleFromRowCount(rowCount)];
+}
+
 export const DATABASE_DOMAIN_OPTIONS = [
   { value: 'all', label: 'All Domains' },
   { value: 'ecommerce', label: 'E-Commerce' },

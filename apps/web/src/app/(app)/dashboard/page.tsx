@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth';
 import { StatCard } from '@/components/ui/card';
 import { StatusBadge, DifficultyBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { DATABASE_SCALE_LABELS } from '@/lib/database-catalog';
+import { databaseScaleDisplayLabelFromRowCount } from '@/lib/database-catalog';
 import { formatRelativeTime, formatRows, truncateSql } from '@/lib/utils';
 
 // ─── Fallback stats while user data loads ─────────────────────────────────────
@@ -204,7 +204,7 @@ export default function DashboardPage() {
                         {database.name}
                       </h3>
                       <p className="text-xs uppercase tracking-[0.18em] text-outline">
-                        {DATABASE_SCALE_LABELS[database.scale] ?? database.scale}
+                        {databaseScaleDisplayLabelFromRowCount(database.rowCount)}
                       </p>
                     </div>
                   </div>

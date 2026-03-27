@@ -9,6 +9,7 @@ import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
+  databaseScaleDisplayLabelFromRowCount,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 
@@ -68,7 +69,9 @@ function DatabaseCard({ db, onClick }: { db: Database; onClick: () => void }) {
         </div>
         <div>
           <p className="text-[9px] font-bold uppercase tracking-widest text-outline mb-1">Scale</p>
-          <p className="text-sm font-mono font-bold text-tertiary capitalize">{db.scale}</p>
+          <p className="text-sm font-mono font-bold text-tertiary">
+            {databaseScaleDisplayLabelFromRowCount(db.rowCount)}
+          </p>
         </div>
       </div>
     </div>

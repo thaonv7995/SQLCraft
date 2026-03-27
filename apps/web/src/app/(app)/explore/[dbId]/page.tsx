@@ -14,6 +14,7 @@ import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DOMAIN_LABELS,
   DATABASE_SCALE_LABELS,
+  inferDatasetScaleFromRowCount,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
@@ -31,17 +32,6 @@ const SCALE_RANK: Record<DatasetScale, number> = {
   medium: 2,
   large: 3,
 };
-
-function inferScaleFromRows(rowCount?: number | null): DatasetScale | null {
-  if (typeof rowCount !== 'number' || !Number.isFinite(rowCount) || rowCount <= 0) {
-    return null;
-  }
-
-  if (rowCount <= 1_000) return 'tiny';
-  if (rowCount <= 200_000) return 'small';
-  if (rowCount <= 5_000_000) return 'medium';
-  return 'large';
-}
 
 const ROLE_STYLES = {
   primary: 'border-primary/30 bg-primary/5 text-primary',
@@ -461,7 +451,12 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
   }, [database?.availableScales]);
 
   const sourceRows = database?.sourceRowCount ?? database?.rowCount;
-  const inferredSourceScale = useMemo(() => inferScaleFromRows(sourceRows), [sourceRows]);
+  const inferredSourceScale = useMemo((): DatasetScale | null => {
+    if (typeof sourceRows !== 'number' || !Number.isFinite(sourceRows) || sourceRows <= 0) {
+      return null;
+    }
+    return inferDatasetScaleFromRowCount(sourceRows);
+  }, [sourceRows]);
   const effectiveSourceScale: DatasetScale = inferredSourceScale ?? database?.sourceScale ?? 'large';
 
   // Business rule: only scale down from source dataset.
