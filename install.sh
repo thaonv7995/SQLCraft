@@ -207,6 +207,16 @@ ensure_core_env() {
   ensure_port "MINIO_API_PORT" 9000
   ensure_port "MINIO_CONSOLE_PORT" 9001
 
+  # MinIO API and console must never share the same host port.
+  local minio_api_port minio_console_port
+  minio_api_port="$(get_env_value "MINIO_API_PORT" "$ENV_FILE")"
+  minio_console_port="$(get_env_value "MINIO_CONSOLE_PORT" "$ENV_FILE")"
+  if [[ -n "$minio_api_port" && "$minio_api_port" == "$minio_console_port" ]]; then
+    minio_console_port="$(find_free_port "$((minio_api_port + 1))")"
+    set_env_value "MINIO_CONSOLE_PORT" "$minio_console_port" "$ENV_FILE"
+    warn "Adjusted MINIO_CONSOLE_PORT to ${minio_console_port} (must differ from MINIO_API_PORT)."
+  fi
+
   ensure_or_generate_secret "JWT_SECRET" 32
   ensure_or_generate_secret "POSTGRES_PASSWORD" 16
   ensure_or_generate_secret "MINIO_ROOT_PASSWORD" 16
@@ -414,11 +424,11 @@ infra_up_with_retry() {
       fi
     fi
 
-    err "$output"
+    error "$output"
     return 1
   done
 
-  err "Failed to start infrastructure after retries."
+  error "Failed to start infrastructure after retries."
   return 1
 }
 
