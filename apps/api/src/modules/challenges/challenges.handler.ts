@@ -11,6 +11,7 @@ import {
   listUserChallenges,
   listUserAttempts,
   getChallengeLeaderboard,
+  getChallengeLeaderboardContext,
   getGlobalLeaderboard,
   validateChallengeDraft,
   createChallenge,
@@ -111,6 +112,17 @@ export async function getChallengeLeaderboardHandler(
   const query = ChallengeLeaderboardQuerySchema.parse(request.query);
   const leaderboard = await getChallengeLeaderboard(id, query.limit);
   return reply.send(success(leaderboard, MESSAGES.LEADERBOARD_RETRIEVED));
+}
+
+export async function getChallengeLeaderboardContextHandler(
+  request: FastifyRequest<{ Params: ChallengeVersionParams; Querystring: ChallengeLeaderboardQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeVersionParamsSchema.parse(request.params);
+  const query = ChallengeLeaderboardQuerySchema.parse(request.query);
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? null;
+  const context = await getChallengeLeaderboardContext(id, query.limit, userId);
+  return reply.send(success(context, MESSAGES.LEADERBOARD_RETRIEVED));
 }
 
 export async function getGlobalLeaderboardHandler(

@@ -28,7 +28,6 @@ import {
 import { cn, formatDuration, formatRows, formatRelativeTime, getExplainPlanMode, truncateSql } from '@/lib/utils';
 import {
   challengesApi,
-  queryApi,
   sandboxesApi,
   sessionsApi,
   type DatasetScale,
@@ -37,6 +36,7 @@ import {
   type QueryResultColumn,
   type SessionSchemaTable,
 } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth';
 import { SqlEditor } from '@/components/ui/sql-editor';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
@@ -82,41 +82,6 @@ function getEffectiveSessionStatus(
   }
 
   return session.status;
-}
-
-const COMPARE_TERMINAL_STATUSES = new Set<QueryExecution['status']>(['success', 'error']);
-const COMPARE_POLL_INTERVAL_MS = 600;
-const COMPARE_POLL_TIMEOUT_MS = 35_000;
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
-async function runQueryUntilSettled(payload: {
-  sessionId: string;
-  sql: string;
-}): Promise<QueryExecution> {
-  const accepted = await queryApi.execute(payload);
-
-  if (COMPARE_TERMINAL_STATUSES.has(accepted.status)) {
-    return accepted;
-  }
-
-  const deadline = Date.now() + COMPARE_POLL_TIMEOUT_MS;
-
-  while (true) {
-    const execution = await queryApi.poll(accepted.id);
-
-    if (COMPARE_TERMINAL_STATUSES.has(execution.status)) {
-      return execution;
-    }
-
-    if (Date.now() > deadline) {
-      throw new Error(`Comparison timed out after ${COMPARE_POLL_TIMEOUT_MS / 1000}s`);
-    }
-
-    await sleep(COMPARE_POLL_INTERVAL_MS);
-  }
 }
 
 // ─── Dataset Scale Selector ───────────────────────────────────────────────────
@@ -703,107 +668,272 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
   );
 }
 
-function CompareExecutionCard({
-  label,
-  query,
-  execution,
+function formatCompareMetric(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) {
+    return '—';
+  }
+  return String(n);
+}
+
+function deltaAB(a: number | null, b: number | null): string {
+  if (a == null || b == null) {
+    return '—';
+  }
+  const d = a - b;
+  if (d === 0) {
+    return '0';
+  }
+  return d > 0 ? `+${d}` : String(d);
+}
+
+/** `lower`: thấp hơn = tốt hơn (run, plan, cost). `neutral`: chỉ so cao/thấp (rows). */
+function compareRelationLabel(
+  a: number | null,
+  b: number | null,
+  mode: 'lower' | 'neutral',
+): string {
+  if (a == null || b == null) {
+    return '—';
+  }
+  if (a === b) {
+    return 'Bằng nhau';
+  }
+  if (mode === 'neutral') {
+    return a > b ? 'A cao hơn' : 'B cao hơn';
+  }
+  return a > b ? 'B tốt hơn' : 'A tốt hơn';
+}
+
+function ComparePlanMetricsTable({ execA, execB }: { execA: QueryExecution; execB: QueryExecution }) {
+  const runA = execA.durationMs ?? null;
+  const runB = execB.durationMs ?? null;
+  const rowsA = execA.rowCount ?? null;
+  const rowsB = execB.rowCount ?? null;
+  const planA =
+    execA.executionPlan?.actualTime != null ? Math.round(execA.executionPlan.actualTime) : null;
+  const planB =
+    execB.executionPlan?.actualTime != null ? Math.round(execB.executionPlan.actualTime) : null;
+  const costA =
+    execA.executionPlan?.totalCost != null ? Math.round(execA.executionPlan.totalCost) : null;
+  const costB =
+    execB.executionPlan?.totalCost != null ? Math.round(execB.executionPlan.totalCost) : null;
+
+  const rows: Array<{
+    key: string;
+    label: string;
+    a: string;
+    b: string;
+    d: string;
+    note: string;
+    mode: 'lower' | 'neutral';
+  }> = [
+    {
+      key: 'run',
+      label: 'Run (ms)',
+      a: formatCompareMetric(runA),
+      b: formatCompareMetric(runB),
+      d: deltaAB(runA, runB),
+      note: compareRelationLabel(runA, runB, 'lower'),
+      mode: 'lower',
+    },
+    {
+      key: 'rows',
+      label: 'Rows',
+      a: formatCompareMetric(rowsA),
+      b: formatCompareMetric(rowsB),
+      d: deltaAB(rowsA, rowsB),
+      note: compareRelationLabel(rowsA, rowsB, 'neutral'),
+      mode: 'neutral',
+    },
+    {
+      key: 'plan',
+      label: 'Plan (ms)',
+      a: formatCompareMetric(planA),
+      b: formatCompareMetric(planB),
+      d: deltaAB(planA, planB),
+      note: compareRelationLabel(planA, planB, 'lower'),
+      mode: 'lower',
+    },
+    {
+      key: 'cost',
+      label: 'Cost',
+      a: formatCompareMetric(costA),
+      b: formatCompareMetric(costB),
+      d: deltaAB(costA, costB),
+      note: compareRelationLabel(costA, costB, 'lower'),
+      mode: 'lower',
+    },
+  ];
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-outline-variant/10">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[28%]">Metric</TableHead>
+            <TableHead className="tabular-nums">A</TableHead>
+            <TableHead className="tabular-nums">B</TableHead>
+            <TableHead className="tabular-nums text-on-surface-variant">Δ A−B</TableHead>
+            <TableHead className="min-w-[7rem]">So sánh</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.key}>
+              <TableCell className="text-xs font-medium text-on-surface">{row.label}</TableCell>
+              <TableCell className="font-mono text-xs tabular-nums text-on-surface">{row.a}</TableCell>
+              <TableCell className="font-mono text-xs tabular-nums text-on-surface">{row.b}</TableCell>
+              <TableCell className="font-mono text-xs tabular-nums text-on-surface-variant">{row.d}</TableCell>
+              <TableCell className="text-[11px] text-on-surface-variant">
+                {row.note === 'Bằng nhau' ? (
+                  row.note
+                ) : row.note === '—' ? (
+                  row.note
+                ) : row.mode === 'neutral' ? (
+                  <span>{row.note}</span>
+                ) : (
+                  <span
+                    className={cn(
+                      row.note === 'A tốt hơn' && 'font-medium text-green-400/90',
+                      row.note === 'B tốt hơn' && 'font-medium text-green-400/90',
+                    )}
+                  >
+                    {row.note}
+                  </span>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <div className="border-t border-outline-variant/10 bg-surface-container-low/80 px-3 py-1.5 text-[10px] text-outline">
+        Δ = A − B. Run / Plan / Cost: thấp hơn thường tốt hơn. Rows: chỉ so sánh độ lớn.
+      </div>
+    </div>
+  );
+}
+
+function ChallengeCompareLeaderboardCard({
+  challengeVersionId,
+  viewerUserId,
 }: {
-  label: string;
-  query: string;
-  execution: QueryExecution | null;
+  challengeVersionId: string;
+  viewerUserId?: string | null;
 }) {
-  const previewRows = execution?.result?.rows.slice(0, 5) ?? [];
-  const previewColumns = execution?.result?.columns ?? [];
+  const leaderboardContextQuery = useQuery({
+    queryKey: ['challenge-leaderboard-context', challengeVersionId],
+    queryFn: () => challengesApi.getLeaderboardContext(challengeVersionId, 25),
+    staleTime: 20_000,
+  });
+
+  const ctx = leaderboardContextQuery.data;
+  const entries = ctx?.entries ?? [];
+
+  const viewerState =
+    !viewerUserId
+      ? 'signed-out'
+      : ctx?.viewerRank != null && (ctx?.totalRankedUsers ?? 0) > 0
+        ? 'ranked'
+        : 'unranked';
 
   return (
     <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
-            {label}
-          </p>
-          <p className="mt-1 text-xs text-on-surface-variant">
-            {query.trim() ? truncateSql(query, 120) : 'No query yet'}
-          </p>
-        </div>
-        {execution ? <StatusBadge status={execution.status} /> : null}
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
-        {execution?.durationMs != null ? (
-          <span className="rounded-full bg-surface-container-high px-2 py-1">
-            {execution.durationMs} ms
-          </span>
-        ) : null}
-        {execution?.rowCount != null ? (
-          <span className="rounded-full bg-surface-container-high px-2 py-1">
-            {execution.rowCount} rows
-          </span>
-        ) : null}
-        {execution?.executionPlan?.actualTime != null ? (
-          <span className="rounded-full bg-surface-container-high px-2 py-1">
-            plan {Math.round(execution.executionPlan.actualTime)} ms
-          </span>
-        ) : null}
-        {execution?.executionPlan?.totalCost != null ? (
-          <span className="rounded-full bg-surface-container-high px-2 py-1">
-            cost {Math.round(execution.executionPlan.totalCost)}
-          </span>
-        ) : null}
-      </div>
-
-      {execution?.errorMessage ? (
-        <div className="mt-3 rounded-xl border border-error/20 bg-error/10 px-3 py-3 text-xs text-error">
-          {execution.errorMessage}
-        </div>
-      ) : null}
-
-      {!execution ? (
-        <div className="mt-3 rounded-xl border border-dashed border-outline-variant/20 px-3 py-4 text-xs text-on-surface-variant">
-          Run the comparison to capture duration, row count, and plan metrics for this variant.
-        </div>
-      ) : null}
-
-      {execution?.result ? (
-        <div className="mt-3 overflow-hidden rounded-xl border border-outline-variant/10">
-          <div className="overflow-auto">
-            <Table stickyHeader>
-              <TableHeader>
-                <TableRow>
-                  {previewColumns.map((column) => (
-                    <TableHead key={column.name}>{column.name}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {previewRows.length === 0 ? (
-                  <TableEmpty
-                    message="Query returned no rows"
-                    colSpan={Math.max(1, previewColumns.length)}
-                  />
-                ) : (
-                  previewRows.map((row, index) => (
-                    <TableRow key={`${label}-${index}`}>
-                      {previewColumns.map((column) => (
-                        <TableCell key={column.name} className="font-mono text-xs">
-                          {row[column.name] == null ? (
-                            <span className="text-outline italic">NULL</span>
-                          ) : (
-                            String(row[column.name])
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <p className="text-sm font-semibold text-on-surface self-center">Leaderboard</p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:min-w-[280px]">
+          <div className="rounded-xl border border-outline-variant/15 bg-surface-container-high/50 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-outline">Hạng bạn</p>
+            <p className="mt-1 text-sm font-semibold text-on-surface">
+              {viewerState === 'ranked'
+                ? `#${ctx?.viewerRank}`
+                : viewerState === 'signed-out'
+                  ? 'Chưa đăng nhập'
+                  : 'Chưa có hạng'}
+            </p>
           </div>
-          {execution.result.totalRows > previewRows.length ? (
-            <div className="border-t border-outline-variant/10 bg-surface-container-low px-3 py-2 text-[11px] text-outline">
-              Previewing {previewRows.length} of {execution.result.totalRows} rows
-            </div>
-          ) : null}
+          <div className="rounded-xl border border-outline-variant/15 bg-surface-container-high/50 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-outline">Đã pass</p>
+            <p className="mt-1 text-sm font-semibold text-on-surface">{ctx?.totalRankedUsers ?? '—'}</p>
+          </div>
+        </div>
+      </div>
+
+      {leaderboardContextQuery.isLoading ? (
+        <div className="mt-4 h-24 animate-pulse rounded-xl bg-surface-container-high/60" />
+      ) : leaderboardContextQuery.isError ? (
+        <p className="mt-4 text-xs text-error">Lỗi tải bảng.</p>
+      ) : entries.length === 0 ? (
+        <p className="mt-4 text-xs text-on-surface-variant">Chưa có bản pass.</p>
+      ) : (
+        <div className="mt-4 overflow-hidden rounded-xl border border-outline-variant/10">
+          <div className="grid grid-cols-[44px_minmax(120px,1fr)_72px_72px_72px] gap-x-2 border-b border-outline-variant/10 bg-surface-container-low px-3 py-2 text-[10px] uppercase tracking-[0.12em] text-outline">
+            <span>#</span>
+            <span>User</span>
+            <span>ms</span>
+            <span>Cost</span>
+            <span className="text-right"></span>
+          </div>
+          <ul className="max-h-72 divide-y divide-outline-variant/10 overflow-auto">
+            {entries.map((entry) => {
+              const isViewer = Boolean(viewerUserId && entry.userId === viewerUserId);
+              return (
+                <li
+                  key={entry.attemptId}
+                  className={cn(
+                    'grid grid-cols-[44px_minmax(120px,1fr)_72px_72px_72px] items-center gap-x-2 px-3 py-2',
+                    isViewer && 'bg-primary/8',
+                  )}
+                >
+                  <span className="text-xs font-semibold tabular-nums text-on-surface">#{entry.rank}</span>
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium text-on-surface">
+                      {entry.displayName}
+                      {isViewer ? <span className="ml-1 text-primary">(bạn)</span> : null}
+                    </p>
+                    <p className="truncate font-mono text-[10px] text-on-surface-variant" title={entry.sqlText}>
+                      {truncateSql(entry.sqlText, 68)}
+                    </p>
+                  </div>
+                  <span className="text-[11px] tabular-nums text-on-surface-variant">
+                    {entry.bestDurationMs != null ? `${entry.bestDurationMs} ms` : '—'}
+                  </span>
+                  <span className="text-[11px] tabular-nums text-on-surface-variant">
+                    {entry.bestTotalCost != null ? Math.round(entry.bestTotalCost) : '—'}
+                  </span>
+                  <div className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-1.5 text-[11px]"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(entry.sqlText).then(() => {
+                          toast.success('Đã copy');
+                        });
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {ctx?.viewerEntry?.sqlText ? (
+        <div className="mt-3">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              void navigator.clipboard.writeText(ctx.viewerEntry!.sqlText).then(() => {
+                toast.success('Đã copy');
+              });
+            }}
+          >
+            Copy SQL của tôi
+          </Button>
         </div>
       ) : null}
     </div>
@@ -811,135 +941,133 @@ function CompareExecutionCard({
 }
 
 function SideBySideComparePanel({
-  sessionId,
-  primaryQuery,
-  schemaTables,
+  queryHistory,
+  challengeVersionId,
 }: {
-  sessionId: string;
-  primaryQuery: string;
-  schemaTables?: SessionSchemaTable[];
+  queryHistory: QueryExecution[];
+  challengeVersionId?: string | null;
 }) {
-  const queryClient = useQueryClient();
-  const [secondaryQuery, setSecondaryQuery] = useState('');
-  const [primaryExecution, setPrimaryExecution] = useState<QueryExecution | null>(null);
-  const [secondaryExecution, setSecondaryExecution] = useState<QueryExecution | null>(null);
+  const viewerUserId = useAuthStore((s) => s.user?.id ?? null);
+  const [pickA, setPickA] = useState('');
+  const [pickB, setPickB] = useState('');
 
-  const compareMutation = useMutation({
-    mutationFn: async () => {
-      const [primary, secondary] = await Promise.all([
-        runQueryUntilSettled({ sessionId, sql: primaryQuery }),
-        runQueryUntilSettled({ sessionId, sql: secondaryQuery }),
-      ]);
+  const executions = useMemo(() => {
+    return [...queryHistory]
+      .filter((e) => e.status === 'success' || e.status === 'error')
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  }, [queryHistory]);
 
-      return { primary, secondary };
-    },
-    onSuccess: ({ primary, secondary }) => {
-      setPrimaryExecution(primary);
-      setSecondaryExecution(secondary);
-      useLabStore.setState((state) => ({
-        queryHistory: [secondary, primary, ...state.queryHistory].slice(0, 100),
-      }));
-      queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
+  useEffect(() => {
+    if (executions.length === 0) {
+      setPickA('');
+      setPickB('');
+      return;
+    }
 
-      if (primary.status === 'success' && secondary.status === 'success') {
-        const faster =
-          (primary.durationMs ?? Number.POSITIVE_INFINITY) <=
-          (secondary.durationMs ?? Number.POSITIVE_INFINITY)
-            ? 'Primary'
-            : 'Compare';
-        toast.success(`${faster} query finished faster in this run.`);
-      } else {
-        toast.error('At least one comparison query failed. Inspect both panes for details.');
+    setPickA((prev) => (executions.some((e) => e.id === prev) ? prev : executions[0].id));
+  }, [executions]);
+
+  useEffect(() => {
+    if (executions.length < 2) {
+      setPickB('');
+      return;
+    }
+
+    setPickB((prev) => {
+      if (!pickA) {
+        return executions[1]?.id ?? '';
       }
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to compare queries');
-    },
-  });
+      if (prev && prev !== pickA && executions.some((e) => e.id === prev)) {
+        return prev;
+      }
+      return executions.find((e) => e.id !== pickA)?.id ?? executions[1]?.id ?? '';
+    });
+  }, [executions, pickA]);
+
+  const execA = executions.find((e) => e.id === pickA) ?? null;
+  const execB = executions.find((e) => e.id === pickB) ?? null;
+
+  const introHint = 'Plan / timing · History';
+
+  const selectClass =
+    'mt-1 w-full rounded-lg border border-outline-variant/20 bg-surface-container-high px-2 py-2 text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30';
 
   return (
     <div className="flex-1 overflow-auto p-4">
       <div className="space-y-4">
+        {challengeVersionId ? (
+          <ChallengeCompareLeaderboardCard challengeVersionId={challengeVersionId} viewerUserId={viewerUserId} />
+        ) : null}
+
         <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-on-surface">
-                Run two variants against the same sandbox state
-              </p>
-              <p className="max-w-3xl text-sm leading-6 text-on-surface-variant">
-                The primary query comes from the main editor on the left. Add a second variant here,
-                then run both together to compare latency, row count, and plan metrics side-by-side.
-                Index changes such as <code>CREATE INDEX</code> or <code>DROP INDEX</code> will show up in
-                the Schema Diff tab and can be reverted by resetting the sandbox back to base.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!primaryQuery.trim()}
-                onClick={() => setSecondaryQuery(primaryQuery)}
-              >
-                Copy current query
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                loading={compareMutation.isPending}
-                disabled={!primaryQuery.trim() || !secondaryQuery.trim()}
-                onClick={() => compareMutation.mutate()}
-              >
-                Run Side-by-side
-              </Button>
-            </div>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-sm font-medium text-on-surface">So sánh</p>
+            <p className="text-[11px] text-on-surface-variant">{introHint}</p>
           </div>
+
+          {executions.length < 2 ? (
+            <div className="mt-3 rounded-lg border border-dashed border-outline-variant/25 bg-surface-container-high/30 px-3 py-2.5 text-[11px] text-on-surface-variant">
+              Cần thêm ít nhất 1 lần chạy trong History.
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block text-[11px] font-medium text-on-surface">
+                A
+                <select className={selectClass} value={pickA} onChange={(e) => setPickA(e.target.value)}>
+                  {executions.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {formatRelativeTime(e.createdAt)} · {e.durationMs ?? '—'}ms · {truncateSql(e.sql, 48)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-[11px] font-medium text-on-surface">
+                B
+                <select className={selectClass} value={pickB} onChange={(e) => setPickB(e.target.value)}>
+                  {executions
+                    .filter((e) => e.id !== pickA)
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {formatRelativeTime(e.createdAt)} · {e.durationMs ?? '—'}ms · {truncateSql(e.sql, 48)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-2">
-          <CompareExecutionCard
-            label="Primary · Main editor query"
-            query={primaryQuery}
-            execution={primaryExecution}
-          />
-
-          <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
-                  Compare · Secondary query
+        {execA && execB ? (
+          <div className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-outline">A</span>
+                  <StatusBadge status={execA.status} />
+                </div>
+                <p className="mt-1 font-mono text-[10px] text-on-surface-variant" title={execA.sql}>
+                  {truncateSql(execA.sql.trim(), 96) || '—'}
                 </p>
-                <p className="mt-1 text-xs text-on-surface-variant">
-                  Keep this variant isolated so you can test index-aware rewrites directly.
-                </p>
+                {execA.errorMessage ? (
+                  <p className="mt-1 text-[10px] text-error">{execA.errorMessage}</p>
+                ) : null}
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!secondaryQuery.trim()}
-                onClick={() => setSecondaryQuery('')}
-              >
-                Clear
-              </Button>
+              <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-outline">B</span>
+                  <StatusBadge status={execB.status} />
+                </div>
+                <p className="mt-1 font-mono text-[10px] text-on-surface-variant" title={execB.sql}>
+                  {truncateSql(execB.sql.trim(), 96) || '—'}
+                </p>
+                {execB.errorMessage ? (
+                  <p className="mt-1 text-[10px] text-error">{execB.errorMessage}</p>
+                ) : null}
+              </div>
             </div>
-
-            <div className="mt-3 h-56 overflow-hidden rounded-xl border border-outline-variant/10">
-              <SqlEditor
-                value={secondaryQuery}
-                onChange={setSecondaryQuery}
-                schema={schemaTables}
-                placeholder="-- Variant B: rewrite, add hints via indexes, or compare plan choices"
-              />
-            </div>
-
-            <div className="mt-4">
-              <CompareExecutionCard
-                label="Compare · Secondary result"
-                query={secondaryQuery}
-                execution={secondaryExecution}
-              />
-            </div>
+            <ComparePlanMetricsTable execA={execA} execB={execB} />
           </div>
-        </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1491,6 +1619,11 @@ export default function LabPage() {
       queryClient.invalidateQueries({
         queryKey: ['challenge-attempts', session?.challengeVersionId],
       });
+      if (session?.challengeVersionId) {
+        queryClient.invalidateQueries({
+          queryKey: ['challenge-leaderboard-context', session.challengeVersionId],
+        });
+      }
       const feedback = attempt.evaluation?.feedbackText;
       toast.success(
         attempt.status === 'passed'
@@ -2039,9 +2172,8 @@ export default function LabPage() {
             {activeTab === 'plan' && <ExecutionPlanPanel />}
             {activeTab === 'compare' && (
               <SideBySideComparePanel
-                sessionId={sessionId}
-                primaryQuery={currentQuery}
-                schemaTables={sessionSchema?.tables}
+                queryHistory={queryHistory}
+                challengeVersionId={session?.challengeVersionId ?? null}
               />
             )}
             {activeTab === 'history' && <QueryHistoryPanel />}

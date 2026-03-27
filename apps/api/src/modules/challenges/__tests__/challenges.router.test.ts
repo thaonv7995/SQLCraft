@@ -16,6 +16,7 @@ const challengeServiceMocks = vi.hoisted(() => ({
   listUserChallenges: vi.fn(),
   listUserAttempts: vi.fn(),
   getChallengeLeaderboard: vi.fn(),
+  getChallengeLeaderboardContext: vi.fn(),
   getGlobalLeaderboard: vi.fn(),
   validateChallengeDraft: vi.fn(),
   createChallenge: vi.fn(),
@@ -51,6 +52,12 @@ describe('challenges router HTTP contracts', () => {
     challengeServiceMocks.listUserChallenges.mockResolvedValue([]);
     challengeServiceMocks.listUserAttempts.mockResolvedValue([]);
     challengeServiceMocks.getChallengeLeaderboard.mockResolvedValue([]);
+    challengeServiceMocks.getChallengeLeaderboardContext.mockResolvedValue({
+      entries: [],
+      totalRankedUsers: 0,
+      viewerRank: null,
+      viewerEntry: null,
+    });
     challengeServiceMocks.getGlobalLeaderboard.mockResolvedValue([]);
     challengeServiceMocks.validateChallengeDraft.mockResolvedValue({
       valid: true,
@@ -143,6 +150,49 @@ describe('challenges router HTTP contracts', () => {
         status: 'accepted',
       },
     });
+  });
+
+  it('returns challenge leaderboard context with viewer rank from JWT sub', async () => {
+    challengeServiceMocks.getChallengeLeaderboardContext.mockResolvedValueOnce({
+      entries: [
+        {
+          rank: 1,
+          attemptId: 'a1',
+          queryExecutionId: 'q1',
+          userId: 'user-123',
+          username: 'u',
+          displayName: 'Me',
+          avatarUrl: null,
+          bestDurationMs: 12,
+          bestTotalCost: 1.2,
+          sqlText: 'select 1',
+          attemptsCount: 1,
+          passedAttempts: 1,
+          lastSubmittedAt: new Date('2025-01-01'),
+        },
+      ],
+      totalRankedUsers: 3,
+      viewerRank: 2,
+      viewerEntry: null,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/challenge-versions/22222222-2222-4222-8222-222222222222/leaderboard/context?limit=15',
+      headers: {
+        authorization: `Bearer ${signToken()}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(challengeServiceMocks.getChallengeLeaderboardContext).toHaveBeenCalledWith(
+      '22222222-2222-4222-8222-222222222222',
+      15,
+      'user-123',
+    );
+    const body = response.json() as { data: { totalRankedUsers: number; viewerRank: number } };
+    expect(body.data.totalRankedUsers).toBe(3);
+    expect(body.data.viewerRank).toBe(2);
   });
 
   it('coerces global leaderboard query parameters before calling the service', async () => {

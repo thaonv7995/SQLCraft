@@ -24,6 +24,7 @@ import {
   listUserChallengesHandler,
   listUserAttemptsHandler,
   getChallengeLeaderboardHandler,
+  getChallengeLeaderboardContextHandler,
   getGlobalLeaderboardHandler,
   reviewChallengeVersionHandler,
   validateChallengeDraftHandler,
@@ -269,6 +270,33 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
       },
     },
     getChallengeLeaderboardHandler,
+  );
+
+  fastify.get<{ Params: ChallengeVersionParams; Querystring: ChallengeLeaderboardQuery }>(
+    '/v1/challenge-versions/:id/leaderboard/context',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary:
+          'Challenge leaderboard top entries plus authenticated user rank (best pass), even if outside the top N',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 50, default: 25 },
+          },
+        },
+      },
+    },
+    getChallengeLeaderboardContextHandler,
   );
 
   fastify.get(

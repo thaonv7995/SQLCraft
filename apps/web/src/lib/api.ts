@@ -260,6 +260,14 @@ export interface ChallengeLeaderboardEntry {
   lastSubmittedAt: string;
 }
 
+/** Top-N entries plus the signed-in user's true rank (may be outside the top N). */
+export interface ChallengeLeaderboardContext {
+  entries: ChallengeLeaderboardEntry[];
+  totalRankedUsers: number;
+  viewerRank: number | null;
+  viewerEntry: ChallengeLeaderboardEntry | null;
+}
+
 export interface ChallengeCatalogItem {
   id: string;
   databaseId?: string;
@@ -1486,6 +1494,13 @@ export const challengesApi = {
   getLeaderboard: (challengeVersionId: string, limit = 10) =>
     api
       .get<ChallengeLeaderboardEntry[]>(`/challenge-versions/${challengeVersionId}/leaderboard`, {
+        params: { limit },
+      })
+      .then((r) => r.data),
+
+  getLeaderboardContext: (challengeVersionId: string, limit = 25) =>
+    api
+      .get<ChallengeLeaderboardContext>(`/challenge-versions/${challengeVersionId}/leaderboard/context`, {
         params: { limit },
       })
       .then((r) => r.data),

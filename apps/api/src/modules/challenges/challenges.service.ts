@@ -495,9 +495,15 @@ async function buildDraftValidation(
   };
 }
 
-function buildLeaderboard(
+export interface ChallengeLeaderboardContext {
+  entries: ChallengeLeaderboardEntry[];
+  totalRankedUsers: number;
+  viewerRank: number | null;
+  viewerEntry: ChallengeLeaderboardEntry | null;
+}
+
+function buildChallengeLeaderboardEntries(
   rows: ChallengeLeaderboardAttemptRow[],
-  limit: number,
 ): ChallengeLeaderboardEntry[] {
   const byUser = new Map<
     string,
@@ -614,7 +620,6 @@ function buildLeaderboard(
 
       return a.bestSubmittedAt.getTime() - b.bestSubmittedAt.getTime();
     })
-    .slice(0, limit)
     .map((entry, index) => ({
       rank: index + 1,
       attemptId: entry.attemptId,
@@ -630,6 +635,13 @@ function buildLeaderboard(
       passedAttempts: entry.passedAttempts,
       lastSubmittedAt: entry.lastSubmittedAt,
     }));
+}
+
+function buildLeaderboard(
+  rows: ChallengeLeaderboardAttemptRow[],
+  limit: number,
+): ChallengeLeaderboardEntry[] {
+  return buildChallengeLeaderboardEntries(rows).slice(0, limit);
 }
 
 function toUtcDayKey(value: Date): string {
@@ -1394,6 +1406,32 @@ export async function getChallengeLeaderboard(
 
   const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
   return buildLeaderboard(attempts, limit);
+}
+
+export async function getChallengeLeaderboardContext(
+  challengeVersionId: string,
+  limit = 25,
+  viewerUserId?: string | null,
+): Promise<ChallengeLeaderboardContext> {
+  const detail = await challengesRepository.findPublishedVersionDetailById(challengeVersionId);
+
+  if (!detail) {
+    throw new NotFoundError('Challenge version not found or not published');
+  }
+
+  const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
+  const all = buildChallengeLeaderboardEntries(attempts);
+  const viewerEntry =
+    viewerUserId && viewerUserId.length > 0
+      ? all.find((entry) => entry.userId === viewerUserId) ?? null
+      : null;
+
+  return {
+    entries: all.slice(0, limit),
+    totalRankedUsers: all.length,
+    viewerRank: viewerEntry?.rank ?? null,
+    viewerEntry,
+  };
 }
 
 export async function getGlobalLeaderboard(
