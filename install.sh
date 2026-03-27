@@ -188,8 +188,12 @@ configure_domain() {
 
 ensure_core_env() {
   local current_stack desired_stack
-  current_stack="$(get_env_value "STACK_NAME" "$ENV_FILE")"
-  desired_stack="$(pick_stack_name "${current_stack:-sqlcraft}")"
+  current_stack="$(normalize_stack_name "$(get_env_value "STACK_NAME" "$ENV_FILE")")"
+  if [[ -n "$current_stack" ]]; then
+    desired_stack="$current_stack"
+  else
+    desired_stack="$(pick_stack_name "sqlcraft")"
+  fi
   if [[ "$desired_stack" != "${current_stack:-}" ]]; then
     warn "Using stack name: ${desired_stack}"
   fi
@@ -246,6 +250,24 @@ wait_for_docker() {
 
 is_port_in_use() {
   local port="$1"
+
+  # Most reliable check when python3 exists: try binding host port directly.
+  if command -v python3 >/dev/null 2>&1; then
+    if ! python3 - "$port" <<'PY' >/dev/null 2>&1
+import socket, sys
+port = int(sys.argv[1])
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+try:
+    s.bind(("0.0.0.0", port))
+    s.close()
+    sys.exit(0)  # bind success => free
+except OSError:
+    sys.exit(1)  # bind failed => in use
+PY
+    then
+      return 0
+    fi
+  fi
 
   # Docker-published ports (works even when host tools miss docker-proxy/rootless binds)
   if docker ps --format '{{.Ports}}' | grep -Eq "(0\\.0\\.0\\.0:${port}->|\\[::\\]:${port}->|:::${port}->)"; then
@@ -313,8 +335,68 @@ pick_stack_name() {
   echo "${base}-$(date +%s)"
 }
 
+normalize_stack_name() {
+  local name="$1"
+  local suffix="${USER:-dev}"
+  if [[ -z "$name" ]]; then
+    echo ""
+    return
+  fi
+  while [[ "$name" == *"-${suffix}-${suffix}" ]]; do
+    name="${name/%-${suffix}/}"
+  done
+  echo "$name"
+}
+
 run_compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
+port_key_by_number() {
+  local port="$1"
+  local web_port api_port pg_port redis_port minio_api_port minio_console_port
+  web_port="$(get_env_value "WEB_PORT" "$ENV_FILE")"
+  api_port="$(get_env_value "API_PORT" "$ENV_FILE")"
+  pg_port="$(get_env_value "POSTGRES_PORT" "$ENV_FILE")"
+  redis_port="$(get_env_value "REDIS_PORT" "$ENV_FILE")"
+  minio_api_port="$(get_env_value "MINIO_API_PORT" "$ENV_FILE")"
+  minio_console_port="$(get_env_value "MINIO_CONSOLE_PORT" "$ENV_FILE")"
+
+  if [[ "$port" == "$web_port" ]]; then echo "WEB_PORT"; return; fi
+  if [[ "$port" == "$api_port" ]]; then echo "API_PORT"; return; fi
+  if [[ "$port" == "$pg_port" ]]; then echo "POSTGRES_PORT"; return; fi
+  if [[ "$port" == "$redis_port" ]]; then echo "REDIS_PORT"; return; fi
+  if [[ "$port" == "$minio_api_port" ]]; then echo "MINIO_API_PORT"; return; fi
+  if [[ "$port" == "$minio_console_port" ]]; then echo "MINIO_CONSOLE_PORT"; return; fi
+  echo ""
+}
+
+infra_up_with_retry() {
+  local attempt output port key next_port
+  for attempt in 1 2 3; do
+    if output="$(run_compose up -d --build postgres redis minio 2>&1)"; then
+      return 0
+    fi
+
+    if grep -q "port is already allocated" <<<"$output"; then
+      port="$(grep -Eo ':[0-9]+ failed: port is already allocated' <<<"$output" | head -n1 | grep -Eo '[0-9]+' || true)"
+      if [[ -n "$port" ]]; then
+        key="$(port_key_by_number "$port")"
+        if [[ -n "$key" ]]; then
+          next_port="$(find_free_port "$((port + 1))")"
+          warn "Docker reports port ${port} conflict. Retrying with ${key}=${next_port}."
+          set_env_value "$key" "$next_port" "$ENV_FILE"
+          continue
+        fi
+      fi
+    fi
+
+    err "$output"
+    return 1
+  done
+
+  err "Failed to start infrastructure after retries."
+  return 1
 }
 
 bootstrap_stack() {
@@ -336,7 +418,7 @@ bootstrap_stack() {
   minio_console_port="$(get_env_value "MINIO_CONSOLE_PORT" "$ENV_FILE")"
   log "Using ports -> web:${web_port}, api:${api_port}, postgres:${pg_port}, redis:${redis_port}, minio:${minio_api_port}/${minio_console_port}"
 
-  run_compose up -d --build postgres redis minio
+  infra_up_with_retry
 
   headline "Running migrations + seed"
   run_compose run --rm --entrypoint sh api -lc \
