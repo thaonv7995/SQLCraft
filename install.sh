@@ -301,6 +301,22 @@ find_free_port() {
   echo "$candidate"
 }
 
+is_port_reserved_by_env() {
+  local port="$1"
+  local current_key="$2"
+  local key value
+  for key in WEB_PORT API_PORT POSTGRES_PORT REDIS_PORT MINIO_API_PORT MINIO_CONSOLE_PORT; do
+    if [[ "$key" == "$current_key" ]]; then
+      continue
+    fi
+    value="$(get_env_value "$key" "$ENV_FILE")"
+    if [[ -n "$value" && "$value" == "$port" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 ensure_port() {
   local key="$1"
   local default_port="$2"
@@ -309,7 +325,14 @@ ensure_port() {
   if [[ -z "$value" ]]; then
     value="$default_port"
   fi
-  selected="$(find_free_port "$value")"
+  selected="$value"
+  while true; do
+    selected="$(find_free_port "$selected")"
+    if ! is_port_reserved_by_env "$selected" "$key"; then
+      break
+    fi
+    selected=$((selected + 1))
+  done
   if [[ "$selected" != "$value" ]]; then
     warn "Port ${value} is busy; using ${selected} for ${key}."
   fi
