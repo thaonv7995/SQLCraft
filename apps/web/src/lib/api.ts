@@ -95,6 +95,7 @@ export interface User {
 export interface UserStats {
   activeSessions: number;
   completedChallenges: number;
+  /** Count of query executions in the last 7 days (rolling window). */
   queriesRun: number;
   currentStreak: number;
   totalPoints: number;

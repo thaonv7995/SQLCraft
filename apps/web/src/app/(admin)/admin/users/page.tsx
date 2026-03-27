@@ -432,7 +432,7 @@ export default function AdminUsersPage() {
               <TableHead>User</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Queries</TableHead>
+              <TableHead>Queries (7d)</TableHead>
               <TableHead>Solved</TableHead>
               <TableHead>Points</TableHead>
               <TableHead>Last Active</TableHead>

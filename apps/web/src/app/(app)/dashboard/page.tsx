@@ -115,7 +115,7 @@ export default function DashboardPage() {
             icon={<span className="material-symbols-outlined">emoji_events</span>}
           />
           <StatCard
-            label="Queries"
+            label="Queries (last 7 days)"
             value={stats.queriesRun.toLocaleString()}
             accent="primary"
             icon={<span className="material-symbols-outlined">query_stats</span>}

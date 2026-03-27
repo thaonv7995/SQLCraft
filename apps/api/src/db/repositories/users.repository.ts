@@ -1,6 +1,7 @@
-import { eq, and, isNull, desc, ilike, or, sql, count } from 'drizzle-orm';
+import { eq, and, isNull, desc, ilike, or, sql, count, gte } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
+import { queriesSubmittedSince } from '../../lib/user-stats';
 
 export type UserRow = InferSelectModel<typeof schema.users>;
 export type InsertUser = InferInsertModel<typeof schema.users>;
@@ -244,13 +245,20 @@ export class UsersRepository {
   }> {
     const db = this.db;
 
+    const queriesSince = queriesSubmittedSince();
+
     const [queriesResult, challengesResult, activeSessionsResult] = await Promise.all([
-      // Count queries run via sessions owned by user
+      // Queries in rolling window (matches dashboard intent: recent activity, bounded scan via qe_user_idx)
       db
         .select({ total: count() })
         .from(schema.queryExecutions)
         .innerJoin(schema.learningSessions, eq(schema.queryExecutions.learningSessionId, schema.learningSessions.id))
-        .where(eq(schema.learningSessions.userId, userId)),
+        .where(
+          and(
+            eq(schema.learningSessions.userId, userId),
+            gte(schema.queryExecutions.submittedAt, queriesSince),
+          ),
+        ),
 
       // Count passed challenge attempts
       db
