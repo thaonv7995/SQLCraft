@@ -15,6 +15,7 @@ import {
   getGlobalQueryHistory,
   getSandboxStatus,
 } from './queries.service';
+import { logPlannerCostDiag, sqlPreview } from '../../lib/planner-cost-log';
 
 export async function submitQueryHandler(
   request: FastifyRequest<{ Body: SubmitQueryBody }>,
@@ -35,6 +36,15 @@ export async function submitQueryHandler(
   }
 
   const outcome = await submitQuery(userId, request.body);
+
+  if (!outcome.blocked && request.body.explainPlan) {
+    logPlannerCostDiag('POST /v1/query-executions explain requested (plan stored by worker)', {
+      queryExecutionId: outcome.data.id,
+      learningSessionId: request.body.learningSessionId,
+      planMode: request.body.planMode ?? 'explain',
+      sqlPreview: sqlPreview(request.body.sql),
+    });
+  }
 
   if (outcome.blocked) {
     reply.status(403).send({

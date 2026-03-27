@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import type { CreateSessionBody, SessionParams } from './sessions.schema';
+import type { CreateSessionBody, RevertSchemaDiffChangeBody, SessionParams } from './sessions.schema';
 import {
   listSessionsHandler,
   createSessionHandler,
@@ -132,7 +132,7 @@ export default async function sessionsRouter(fastify: FastifyInstance): Promise<
   );
 
   // POST /v1/learning-sessions/:sessionId/schema-diff/revert
-  fastify.post(
+  fastify.post<{ Params: SessionParams; Body: RevertSchemaDiffChangeBody }>(
     '/v1/learning-sessions/:sessionId/schema-diff/revert',
     {
       onRequest: [fastify.authenticate],

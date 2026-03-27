@@ -1,3 +1,5 @@
+import type { DatabaseDomain } from '../../lib/infer-database-domain';
+
 export type { DatabaseDomain } from '../../lib/infer-database-domain';
 
 export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';

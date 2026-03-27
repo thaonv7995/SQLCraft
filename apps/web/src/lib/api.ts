@@ -1019,6 +1019,12 @@ export interface LeaderboardEntry {
   streak: number;
 }
 
+/** GET /leaderboard — top N rows plus the signed-in user’s row (any rank), even when outside the top N. */
+export interface GlobalLeaderboardPayload {
+  entries: LeaderboardEntry[];
+  viewer: LeaderboardEntry | null;
+}
+
 export interface AuthResult {
   user: User;
   tokens: AuthTokens;
@@ -1571,10 +1577,14 @@ export const challengesApi = {
     domain?: DatabaseDomain;
     status?: 'draft' | 'published' | 'archived' | 'all';
   }) =>
-    api.get<AdminChallengesCatalogPage>('/admin/challenges/catalog', { params }).then((r) => ({
-      ...r.data,
-      items: r.data.items.map(normalizeAdminChallengeCatalogItem),
-    })),
+    api.get<AdminChallengesCatalogPage>('/admin/challenges/catalog', { params }).then((r) => {
+      const data = r.data as AdminChallengesCatalogPage | undefined;
+      const rawItems = Array.isArray(data?.items) ? data.items : [];
+      return {
+        ...(data ?? { total: 0, page: 1, limit: params?.limit ?? 20, totalPages: 0 }),
+        items: rawItems.map(normalizeAdminChallengeCatalogItem),
+      };
+    }),
 
   publishVersion: (versionId: string) =>
     api.post(`/admin/challenge-versions/${versionId}/publish`).then((r) => r.data),
@@ -1988,7 +1998,7 @@ export const databasesApi = {
 export const leaderboardApi = {
   get: (period: 'weekly' | 'monthly' | 'alltime' = 'alltime', limit = 50) =>
     api
-      .get<LeaderboardEntry[]>('/leaderboard', { params: { period, limit } })
+      .get<GlobalLeaderboardPayload>('/leaderboard', { params: { period, limit } })
       .then((r) => r.data),
 };
 

@@ -46,7 +46,13 @@ export default function LeaderboardPage() {
   });
 
   const publishedChallenges = useMemo(() => challengesQuery.data ?? [], [challengesQuery.data]);
-  const globalLeaders = useMemo(() => leaderboardQuery.data ?? [], [leaderboardQuery.data]);
+  const globalPayload = leaderboardQuery.data;
+  const globalLeaders = useMemo(() => globalPayload?.entries ?? [], [globalPayload?.entries]);
+
+  const hubEntry = useMemo(() => {
+    if (!userId) return null;
+    return globalPayload?.viewer ?? globalLeaders.find((entry) => entry.userId === userId) ?? null;
+  }, [globalPayload?.viewer, globalLeaders, userId]);
 
   const desiredCompletionScanLimit = useMemo(() => {
     if (publishedChallenges.length === 0) {
@@ -65,11 +71,6 @@ export default function LeaderboardPage() {
       setCompletionScanLimit(nextLimit);
     }
   }
-
-  const meEntry = useMemo(() => {
-    if (!userId) return null;
-    return globalLeaders.find((entry) => entry.userId === userId) ?? null;
-  }, [globalLeaders, userId]);
 
   const completionScanChallenges = useMemo(() => {
     const sliced = publishedChallenges.slice(0, completionScanLimit);
@@ -150,15 +151,22 @@ export default function LeaderboardPage() {
 
         <div className="inline-flex max-w-full items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low px-3 py-2 text-xs">
           <span className="text-on-surface-variant">
-            Điểm <span className="font-semibold text-on-surface">{meEntry ? formatPoints(meEntry.points) : '—'}</span>
+            Điểm{' '}
+            <span className="font-semibold text-on-surface">
+              {hubEntry ? formatPoints(hubEntry.points) : '—'}
+            </span>
           </span>
           <span className="text-outline">•</span>
           <span className="text-on-surface-variant">
-            Pass <span className="font-semibold text-on-surface">{meEntry ? meEntry.challengesCompleted : '—'}</span>
+            Pass{' '}
+            <span className="font-semibold text-on-surface">
+              {hubEntry ? hubEntry.challengesCompleted : '—'}
+            </span>
           </span>
           <span className="text-outline">•</span>
           <span className="text-on-surface-variant">
-            Streak <span className="font-semibold text-on-surface">{meEntry ? `${meEntry.streak}d` : '—'}</span>
+            Streak{' '}
+            <span className="font-semibold text-on-surface">{hubEntry ? `${hubEntry.streak}d` : '—'}</span>
           </span>
         </div>
       </section>

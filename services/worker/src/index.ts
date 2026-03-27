@@ -446,8 +446,24 @@ const queryExecutionWorker = new Worker(
         try {
           const plan = await getExplainPlan(connStr, sql, mode);
           await insertQueryExecutionPlan(queryExecutionId, mode, plan.rawPlan, plan.planSummary);
+          logger.info(
+            {
+              queryExecutionId,
+              planMode: mode,
+              planSummaryTotalCost: plan.planSummary?.totalCost ?? null,
+            },
+            'Stored query execution plan',
+          );
         } catch (planErr) {
-          logger.warn({ planErr, queryExecutionId }, 'Failed to get explain plan (non-fatal)');
+          logger.warn(
+            {
+              planErr,
+              queryExecutionId,
+              planMode: mode,
+              sqlPreview: sql.trim().slice(0, 200),
+            },
+            'Failed to get/store explain plan (non-fatal); challenge submit may miss planner cost',
+          );
         }
       }
 

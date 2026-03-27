@@ -133,7 +133,8 @@ export async function getGlobalLeaderboardHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const query = GlobalLeaderboardQuerySchema.parse(request.query);
-  const leaderboard = await getGlobalLeaderboard(query.period, query.limit);
+  const viewerUserId = (request.user as JwtPayload | undefined)?.sub ?? null;
+  const leaderboard = await getGlobalLeaderboard(query.period, query.limit, viewerUserId);
   return reply.send(success(leaderboard, 'Global leaderboard retrieved successfully'));
 }
 

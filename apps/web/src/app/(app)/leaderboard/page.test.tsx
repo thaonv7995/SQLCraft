@@ -180,7 +180,7 @@ describe('LeaderboardPage', () => {
     mocks.leaderboardApi.get.mockImplementation(
       async (period: 'weekly' | 'monthly' | 'alltime') => {
         if (period === 'monthly') {
-          return [
+          const entries = [
             {
               rank: 1,
               userId: 'user-2',
@@ -202,9 +202,10 @@ describe('LeaderboardPage', () => {
               streak: 9,
             },
           ];
+          return { entries, viewer: entries[1]! };
         }
 
-        return [
+        const entries = [
           {
             rank: 1,
             userId: 'user-1',
@@ -226,6 +227,7 @@ describe('LeaderboardPage', () => {
             streak: 8,
           },
         ];
+        return { entries, viewer: entries[0]! };
       },
     );
 
@@ -255,24 +257,25 @@ describe('LeaderboardPage', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: /^Challenges$/,
-        level: 1,
+        name: /Available Challenges/i,
+        level: 2,
       }),
     ).toBeInTheDocument();
-    expect(await screen.findByText(/điểm và tiến độ của bạn/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Challenge hub/i)).toBeInTheDocument();
 
     await waitFor(() => {
       expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('alltime', 100);
     });
 
-    expect(await screen.findByText('820 pts')).toBeInTheDocument();
-    expect(await screen.findByText('7')).toBeInTheDocument();
+    const hubSection = screen.getByText(/Challenge hub/i).closest('section');
+    expect(hubSection).toBeTruthy();
+    expect(within(hubSection as HTMLElement).getByText('820 pts')).toBeInTheDocument();
+    expect(within(hubSection as HTMLElement).getByText('7')).toBeInTheDocument();
+    expect(within(hubSection as HTMLElement).getByText('12d')).toBeInTheDocument();
 
     // Tab mặc định là "Chưa làm", nên challenge đã pass sẽ chưa hiển thị.
     await user.click(screen.getByRole('button', { name: /đã làm/i }));
-    expect(
-      await screen.findByRole('button', { name: /tạo submission cho filter active users/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Filter active users')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /monthly/i }));
 
@@ -280,8 +283,11 @@ describe('LeaderboardPage', () => {
       expect(mocks.leaderboardApi.get).toHaveBeenCalledWith('monthly', 100);
     });
 
-    expect(await screen.findByText('390 pts')).toBeInTheDocument();
-    expect(await screen.findByText('5')).toBeInTheDocument();
+    const hubAfterMonthly = screen.getByText(/Challenge hub/i).closest('section');
+    expect(hubAfterMonthly).toBeTruthy();
+    expect(within(hubAfterMonthly as HTMLElement).getByText('390 pts')).toBeInTheDocument();
+    expect(within(hubAfterMonthly as HTMLElement).getByText('5')).toBeInTheDocument();
+    expect(within(hubAfterMonthly as HTMLElement).getByText('9d')).toBeInTheDocument();
   });
 
   it.skip('creates submission via popup database selector', async () => {

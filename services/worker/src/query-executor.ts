@@ -153,23 +153,140 @@ export async function getExplainPlan(
         : `EXPLAIN (FORMAT JSON) ${sql}`;
 
     const result = await client.query(explainSql);
-    const rawPlan = result.rows[0]?.['QUERY PLAN']?.[0] ?? result.rows[0];
-    const p = (rawPlan as Record<string, unknown>) ?? {};
-    const planNode = (p['Plan'] as Record<string, unknown>) ?? p;
-
-    return {
-      rawPlan,
-      planSummary: {
-        nodeType: planNode['Node Type'] as string | undefined,
-        totalCost: planNode['Total Cost'] as number | undefined,
-        actualRows: planNode['Actual Rows'] as number | undefined,
-        actualTime: planNode['Actual Total Time'] as number | undefined,
-      },
-    };
+    return repairExplainPlanResult(buildExplainResultFromPgRow(result.rows[0]));
   } finally {
     client.release();
     await pool.end();
   }
+}
+
+function looksLikeExplainJsonPayload(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    return (t.startsWith('[') || t.startsWith('{')) && /"Plan"\s*:/.test(t);
+  }
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return (
+      first !== null &&
+      typeof first === 'object' &&
+      ('Plan' in (first as object) || 'Node Type' in (first as object))
+    );
+  }
+  if (typeof value === 'object') {
+    return 'Plan' in (value as object) || 'Node Type' in (value as object);
+  }
+  return false;
+}
+
+function pickExplainPayloadFromRow(r: Record<string, unknown>): unknown {
+  for (const [key, value] of Object.entries(r)) {
+    if (key.toLowerCase() === 'query plan') return value;
+  }
+  const keys = Object.keys(r);
+  if (keys.length === 1) return r[keys[0]!];
+  for (const value of Object.values(r)) {
+    if (looksLikeExplainJsonPayload(value)) return value;
+  }
+  return undefined;
+}
+
+/** Unwrap EXPLAIN (FORMAT JSON) row from node-pg (column name is often lowercase `query plan`). */
+function unwrapExplainRowPayload(row: unknown): unknown {
+  if (!row || typeof row !== 'object') return row;
+
+  const r = row as Record<string, unknown>;
+  let payload: unknown = pickExplainPayloadFromRow(r);
+  if (payload === undefined) {
+    return row;
+  }
+
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload) as unknown;
+    } catch {
+      return row;
+    }
+  }
+
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(payload)) {
+    try {
+      payload = JSON.parse(payload.toString('utf8')) as unknown;
+    } catch {
+      return row;
+    }
+  }
+
+  if (Array.isArray(payload) && payload.length > 0) {
+    return payload[0];
+  }
+
+  return payload;
+}
+
+function toFiniteMetric(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'bigint') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function extractPlanSummary(plan: unknown): ExplainResult['planSummary'] {
+  let root: unknown = plan;
+  if (Array.isArray(root) && root.length > 0) {
+    root = root[0];
+  }
+  if (!root || typeof root !== 'object') return {};
+
+  const p = root as Record<string, unknown>;
+  const planNode = (p['Plan'] as Record<string, unknown>) ?? p;
+
+  return {
+    nodeType:
+      (typeof planNode['Node Type'] === 'string'
+        ? planNode['Node Type']
+        : typeof planNode['node_type'] === 'string'
+          ? planNode['node_type']
+          : undefined) as string | undefined,
+    totalCost:
+      toFiniteMetric(planNode['Total Cost']) ??
+      toFiniteMetric(planNode['total_cost']) ??
+      toFiniteMetric(planNode['totalCost']),
+    actualRows:
+      toFiniteMetric(planNode['Actual Rows']) ??
+      toFiniteMetric(planNode['actual_rows']) ??
+      toFiniteMetric(planNode['actualRows']),
+    actualTime:
+      toFiniteMetric(planNode['Actual Total Time']) ??
+      toFiniteMetric(planNode['actual_total_time']) ??
+      toFiniteMetric(planNode['actualTotalTime']),
+  };
+}
+
+function buildExplainResultFromPgRow(row: unknown): ExplainResult {
+  const rawPlan = unwrapExplainRowPayload(row);
+  return { rawPlan, planSummary: extractPlanSummary(rawPlan) };
+}
+
+function repairExplainPlanResult(result: ExplainResult): ExplainResult {
+  const fromRaw = extractPlanSummary(result.rawPlan);
+  const ps = result.planSummary;
+  return {
+    rawPlan: result.rawPlan,
+    planSummary: {
+      nodeType: ps.nodeType ?? fromRaw.nodeType,
+      totalCost: toFiniteMetric(ps.totalCost) ?? fromRaw.totalCost,
+      actualRows: toFiniteMetric(ps.actualRows) ?? fromRaw.actualRows,
+      actualTime: toFiniteMetric(ps.actualTime) ?? fromRaw.actualTime,
+    },
+  };
 }
 
 export function shapeResults(rawResult: ExecuteSqlResult): QueryResultPreview {

@@ -324,8 +324,10 @@ async function seed() {
         referenceSolution: 'SELECT id, name, price FROM products ORDER BY price DESC LIMIT 10;',
         validatorType: 'result_set',
         validatorConfig: {
-          baselineDurationMs: 10_000,
-          maxTotalCost: 100_000,
+          passCriteria: [
+            { type: 'max_query_duration_ms', maxMs: 10_000 },
+            { type: 'max_explain_total_cost', maxTotalCost: 100_000 },
+          ],
         },
         isPublished: true,
         reviewStatus: 'approved',

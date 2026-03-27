@@ -4,6 +4,7 @@ import { labSessionExpiresAtFromNow } from '../../lib/lab-session-ttl';
 import { NotFoundError, ForbiddenError, SessionNotReadyError } from '../../lib/errors';
 import { validateSql } from '../../services/query-executor';
 import { enqueueExecuteQuery } from '../../lib/queue';
+import { logPlannerCostDiag, sqlPreview } from '../../lib/planner-cost-log';
 import { ApiCode } from '@sqlcraft/types';
 import type { SubmitQueryBody, QueryHistoryQuerystring } from './queries.schema';
 import type {
@@ -166,6 +167,38 @@ function selectExecutionPlan(plans: Array<{ planMode: string | null; createdAt: 
   }, -1);
 }
 
+function planSummaryCostFields(summary: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of [
+    'totalCost',
+    'Total Cost',
+    'total_cost',
+    'startupCost',
+    'Startup Cost',
+    'actualTime',
+    'Actual Total Time',
+    'nodeType',
+    'Node Type',
+  ]) {
+    if (k in summary) out[k] = summary[k];
+  }
+  return out;
+}
+
+function pickBestStoredPlan(
+  plans: Array<{
+    planMode: string | null;
+    rawPlan: unknown;
+    planSummary: unknown;
+    createdAt: Date | string | null;
+  }>,
+): { plan: (typeof plans)[number]; index: number } | null {
+  if (plans.length === 0) return null;
+  const index = selectExecutionPlan(plans);
+  if (index < 0) return null;
+  return { plan: plans[index], index };
+}
+
 function normalizeExecutionPlan(
   plans: Array<{
     planMode: string | null;
@@ -174,17 +207,12 @@ function normalizeExecutionPlan(
     createdAt: Date | string | null;
   }>,
 ): QueryExecutionPlanView | undefined {
-  if (plans.length === 0) {
+  const picked = pickBestStoredPlan(plans);
+  if (!picked) {
     return undefined;
   }
 
-  const selectedIndex = selectExecutionPlan(plans);
-  const selectedPlan = selectedIndex >= 0 ? plans[selectedIndex] : null;
-
-  if (!selectedPlan) {
-    return undefined;
-  }
-
+  const selectedPlan = picked.plan;
   const summary =
     selectedPlan.planSummary && typeof selectedPlan.planSummary === 'object'
       ? (selectedPlan.planSummary as Record<string, unknown>)
@@ -317,12 +345,29 @@ export async function getQueryExecution(
   }
 
   const plans = await queriesRepository.getExecutionPlans(id);
+  const executionPlan = normalizeExecutionPlan(plans);
+  const picked = pickBestStoredPlan(plans);
+  const rawSummary =
+    picked?.plan.planSummary && typeof picked.plan.planSummary === 'object'
+      ? (picked.plan.planSummary as Record<string, unknown>)
+      : null;
+
+  logPlannerCostDiag('GET /v1/query-executions/:id executionPlan (API response)', {
+    queryExecutionId: id,
+    planRowCount: plans.length,
+    selectedPlanIndex: picked?.index ?? null,
+    planMode: picked?.plan.planMode ?? null,
+    normalizedTotalCost: executionPlan?.totalCost ?? null,
+    normalizedActualTime: executionPlan?.actualTime ?? null,
+    rawPlanSummaryCostFields: rawSummary ? planSummaryCostFields(rawSummary) : null,
+    sqlPreview: sqlPreview(execution.sqlText),
+  });
 
   return {
     ...execution,
     plans,
     result: normalizeExecutionResultPreview(execution.resultPreview),
-    executionPlan: normalizeExecutionPlan(plans),
+    executionPlan,
   };
 }
 

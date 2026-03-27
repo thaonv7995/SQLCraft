@@ -40,6 +40,7 @@ import {
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { SqlEditor } from '@/components/ui/sql-editor';
+import { ChallengeAttemptCriteriaChecks } from '@/components/lab/challenge-attempt-criteria-checks';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
 import {
@@ -67,6 +68,14 @@ function compareNullableAscending(left: number | null, right: number | null) {
   if (left === null) return 1;
   if (right === null) return -1;
   return left - right;
+}
+
+/** API appends ` OK: [type] …` per criterion after the main verdict; cards already show those lines. */
+function extractPrimaryChallengeFeedback(text: string | undefined): string {
+  if (!text?.trim()) return '';
+  const idx = text.search(/\s+OK:\s*\[/);
+  if (idx === -1) return text.trim();
+  return text.slice(0, idx).trim();
 }
 
 function getEffectiveSessionStatus(
@@ -2149,6 +2158,10 @@ export default function LabPage() {
     enabled: Boolean(session?.challengeVersionId),
     staleTime: 15_000,
   });
+  const submittedQueryExecutionIds = useMemo(
+    () => new Set(challengeAttempts.map((a) => a.queryExecutionId)),
+    [challengeAttempts],
+  );
   const entryPath = lessonContext?.challengePath ?? lessonContext?.lessonPath ?? null;
   const entryLabel = lessonContext?.challengePath
     ? 'Back to challenge'
@@ -2165,6 +2178,9 @@ export default function LabPage() {
     'N/A';
   const latestSuccessfulExecution =
     queryHistory.find((execution) => execution.status === 'success') ?? null;
+  const isLatestExecutionAlreadySubmitted = Boolean(
+    latestSuccessfulExecution && submittedQueryExecutionIds.has(latestSuccessfulExecution.id),
+  );
   const bestChallengeAttempt = challengeAttempts
     .filter((attempt) => attempt.status === 'passed')
     .reduce<(typeof challengeAttempts)[number] | null>((best, attempt) => {
@@ -2197,6 +2213,13 @@ export default function LabPage() {
       return new Date(attempt.submittedAt) < new Date(best.submittedAt) ? attempt : best;
     }, null);
   const latestChallengeAttempt = challengeAttempts[0] ?? null;
+  const latestAttemptEvaluation = latestChallengeAttempt?.evaluation ?? null;
+  const latestAttemptPassChecks = latestAttemptEvaluation?.passCriterionChecks ?? [];
+  const hasChallengeAttemptFeedbackPanel =
+    session?.challengeVersionId != null &&
+    latestChallengeAttempt != null &&
+    latestAttemptEvaluation != null &&
+    (Boolean(latestAttemptEvaluation.feedbackText?.trim()) || latestAttemptPassChecks.length > 0);
   const explainPlanMode = getExplainPlanMode(currentQuery);
   const effectiveSessionStatus = getEffectiveSessionStatus(session);
   const isSessionReady = effectiveSessionStatus === 'active';
@@ -2218,6 +2241,28 @@ export default function LabPage() {
       });
     },
     onSuccess: (attempt) => {
+      if (process.env.NODE_ENV === 'development') {
+        const ev = attempt.evaluation;
+        // eslint-disable-next-line no-console -- intentional dev-only submit diagnostics
+        console.groupCollapsed('[SQLForge] Challenge submit (see API terminal/Docker for EXPLAIN logs)');
+        // eslint-disable-next-line no-console
+        console.log('queryExecutionId', attempt.queryExecutionId);
+        // eslint-disable-next-line no-console
+        console.log('evaluation snapshot', {
+          queryTotalCost: ev?.queryTotalCost ?? null,
+          queryActualTime: ev?.queryActualTime ?? null,
+          meetsCostTarget: ev?.meetsCostTarget ?? null,
+          maxTotalCost: ev?.maxTotalCost ?? null,
+          passCriterionChecks: ev?.passCriterionChecks ?? [],
+          feedbackPreview: ev?.feedbackText?.slice(0, 200) ?? null,
+        });
+        // eslint-disable-next-line no-console
+        console.info(
+          'EXPLAIN / planner-cost traces are logged on the API process (e.g. `docker compose logs -f api`), not in the browser. Set PLANNER_COST_DEBUG=1 in API .env for extra detail.',
+        );
+        // eslint-disable-next-line no-console
+        console.groupEnd();
+      }
       queryClient.invalidateQueries({
         queryKey: ['challenge-attempts', session?.challengeVersionId],
       });
@@ -2226,21 +2271,20 @@ export default function LabPage() {
           queryKey: ['challenge-leaderboard-context', session.challengeVersionId],
         });
       }
-      const feedback = attempt.evaluation?.feedbackText;
-      toast.success(
-        attempt.status === 'passed'
-          ? feedback
-            ? `Challenge passed. +${attempt.score ?? 0} pts. ${feedback}`
-            : `Challenge passed. +${attempt.score ?? 0} pts.`
-          : feedback
-            ? `Challenge requirements not met. ${feedback}`
-            : 'Challenge requirements not met.',
-        { duration: 4000 },
-      );
+      if (attempt.status === 'passed') {
+        toast.success(`Challenge passed. +${attempt.score ?? 0} pts.`, { duration: 4000 });
+      } else {
+        toast.error('Challenge requirements not met. See details below the toolbar.', { duration: 5000 });
+      }
       setActiveTab('history');
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to submit challenge attempt');
+      const msg = err instanceof Error ? err.message : 'Failed to submit challenge attempt';
+      if (/already been submitted/i.test(msg)) {
+        toast(msg, { duration: 4500, icon: 'ℹ️' });
+        return;
+      }
+      toast.error(msg);
     },
   });
   const scaleSwitchMutation = useMutation({
@@ -2336,6 +2380,8 @@ export default function LabPage() {
   const [editorNotice, setEditorNotice] = useState<'success' | 'error' | 'info' | null>(null);
   const [appliedNoticeKey, setAppliedNoticeKey] = useState('');
   const editorNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [challengeFeedbackExpanded, setChallengeFeedbackExpanded] = useState(false);
+  const lastChallengeAttemptIdRef = useRef<string | null>(null);
   const persistedEditorState = useMemo(
     () => (sessionId ? readLabEditorState(sessionId) : null),
     [sessionId],
@@ -2347,6 +2393,26 @@ export default function LabPage() {
       setActiveTab('schema');
     }
   }, [activeTab, setActiveTab]);
+
+  useEffect(() => {
+    const attempt = latestChallengeAttempt;
+    if (!attempt?.id) {
+      lastChallengeAttemptIdRef.current = null;
+      return;
+    }
+    const ev = attempt.evaluation;
+    if (!ev) {
+      return;
+    }
+    const checks = ev.passCriterionChecks ?? [];
+    const hasPanel = Boolean(ev.feedbackText?.trim()) || checks.length > 0;
+    if (!hasPanel) {
+      return;
+    }
+    if (attempt.id === lastChallengeAttemptIdRef.current) return;
+    lastChallengeAttemptIdRef.current = attempt.id;
+    setChallengeFeedbackExpanded(attempt.status !== 'passed');
+  }, [latestChallengeAttempt]);
 
   useEffect(() => {
     if (!sessionId || hydratedEditorSessionIdRef.current === sessionId) {
@@ -2651,14 +2717,17 @@ export default function LabPage() {
                     !isSessionReady ||
                     scaleSwitchMutation.isPending ||
                     resetSandboxMutation.isPending ||
-                    submitAttemptMutation.isPending
+                    submitAttemptMutation.isPending ||
+                    isLatestExecutionAlreadySubmitted
                   }
                   onClick={() => submitAttemptMutation.mutate()}
                   leftIcon={<span className="material-symbols-outlined text-[18px]">flag</span>}
                   title={
-                    latestSuccessfulExecution
-                      ? 'Submit the latest successful query execution for challenge scoring'
-                      : 'Run a successful query first'
+                    !latestSuccessfulExecution
+                      ? 'Run a successful query first'
+                      : isLatestExecutionAlreadySubmitted
+                        ? 'This run was already submitted. Run the query again to submit a new attempt.'
+                        : 'Submit the latest successful query execution for challenge scoring'
                   }
                 >
                   Submit Attempt
@@ -2691,11 +2760,6 @@ export default function LabPage() {
             {session?.challengeVersionId && bestChallengeAttempt ? (
               <span className="hidden rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1 text-[11px] font-medium text-on-surface-variant lg:inline-flex">
                 Best {bestChallengeAttempt.queryExecution.durationMs != null ? `${bestChallengeAttempt.queryExecution.durationMs} ms` : 'validated run'}
-              </span>
-            ) : null}
-            {session?.challengeVersionId && latestChallengeAttempt?.evaluation?.feedbackText ? (
-              <span className="hidden max-w-[18rem] truncate text-[11px] text-outline xl:block">
-                {latestChallengeAttempt.evaluation.feedbackText}
               </span>
             ) : null}
             <div className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2.5 py-1">
@@ -2736,6 +2800,81 @@ export default function LabPage() {
           </div>
         </div>
       </header>
+
+      {hasChallengeAttemptFeedbackPanel && latestChallengeAttempt && latestAttemptEvaluation ? (
+        <div
+          role="region"
+          aria-label="Challenge attempt feedback"
+          className={cn(
+            'shrink-0 border-b text-sm',
+            latestChallengeAttempt.status === 'passed'
+              ? 'border-green-500/25 bg-green-500/5'
+              : 'border-error/25 bg-error/5',
+          )}
+        >
+          <div className="w-full px-4 py-1.5">
+            {latestAttemptPassChecks.length > 0 ? (
+              <div className="flex w-full min-w-0 flex-col gap-2">
+                {latestChallengeAttempt.status !== 'passed' &&
+                latestAttemptEvaluation.passesChallenge === false &&
+                latestAttemptEvaluation.isCorrect === false ? (
+                  <div
+                    role="alert"
+                    className="rounded-lg border border-error/30 bg-error/10 px-2.5 py-2 text-xs leading-snug text-on-surface"
+                  >
+                    <p className="font-semibold text-error">Challenge chưa pass.</p>
+                    {extractPrimaryChallengeFeedback(latestAttemptEvaluation.feedbackText) ? (
+                      <p className="mt-2 whitespace-pre-wrap break-words text-on-surface">
+                        {extractPrimaryChallengeFeedback(latestAttemptEvaluation.feedbackText)}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div role="status" className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="shrink-0 text-xs font-medium text-on-surface-variant">Expected:</span>
+                  <div className="min-w-0 min-h-[28px] flex-1 basis-0">
+                    <ChallengeAttemptCriteriaChecks checks={latestAttemptPassChecks} />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  id="challenge-feedback-toggle"
+                  aria-expanded={challengeFeedbackExpanded}
+                  aria-controls="challenge-feedback-body"
+                  onClick={() => setChallengeFeedbackExpanded((v) => !v)}
+                  className="flex w-full items-center gap-2 rounded-lg py-1 text-left transition-colors hover:bg-surface-container-high/40"
+                >
+                  <span className="material-symbols-outlined shrink-0 text-lg text-on-surface-variant">
+                    {challengeFeedbackExpanded ? 'expand_less' : 'expand_more'}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {!challengeFeedbackExpanded ? (
+                      <p className="truncate text-xs text-on-surface-variant">Tap to expand full details</p>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 rounded-full border border-outline-variant/20 px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
+                    {challengeFeedbackExpanded ? 'Collapse' : 'Expand'}
+                  </span>
+                </button>
+                {challengeFeedbackExpanded && latestAttemptEvaluation.feedbackText?.trim() ? (
+                  <div
+                    id="challenge-feedback-body"
+                    role="status"
+                    className="mt-1.5 border-t border-outline-variant/10 pt-1.5"
+                  >
+                    <p className="whitespace-pre-wrap break-words text-xs leading-snug text-on-surface">
+                      {latestAttemptEvaluation.feedbackText}
+                    </p>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       <EndSessionModal
         open={isEndSessionModalOpen}

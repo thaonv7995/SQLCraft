@@ -8,6 +8,7 @@ import type {
   GlobalLeaderboardQuery,
   CreateChallengeBody,
   CreateChallengeVersionBody,
+  ListAdminChallengesCatalogQuery,
   ReviewChallengeVersionBody,
   SubmitAttemptBody,
   ValidateChallengeDraftBody,
@@ -44,7 +45,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
           type: 'object',
           properties: {
             period: { type: 'string', enum: ['weekly', 'monthly', 'alltime'], default: 'alltime' },
-            limit: { type: 'integer', minimum: 1, maximum: 50, default: 50 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
           },
         },
       },
@@ -88,7 +89,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['databaseId', 'slug', 'title', 'problemStatement'],
+          required: ['databaseId', 'slug', 'title', 'problemStatement', 'validatorConfig'],
           properties: {
             databaseId: { type: 'string', format: 'uuid' },
             slug: { type: 'string' },
@@ -300,7 +301,7 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
     getChallengeLeaderboardContextHandler,
   );
 
-  fastify.get(
+  fastify.get<{ Querystring: ListAdminChallengesCatalogQuery }>(
     '/v1/admin/challenges/catalog',
     {
       onRequest: [fastify.authenticate, fastify.authorize(['admin'])],

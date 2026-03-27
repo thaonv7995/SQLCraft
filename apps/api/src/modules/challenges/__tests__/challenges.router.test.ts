@@ -66,7 +66,7 @@ describe('challenges router HTTP contracts', () => {
       viewerRank: null,
       viewerEntry: null,
     });
-    challengeServiceMocks.getGlobalLeaderboard.mockResolvedValue([]);
+    challengeServiceMocks.getGlobalLeaderboard.mockResolvedValue({ entries: [], viewer: null });
     challengeServiceMocks.validateChallengeDraft.mockResolvedValue({
       valid: true,
     });
@@ -213,12 +213,12 @@ describe('challenges router HTTP contracts', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(challengeServiceMocks.getGlobalLeaderboard).toHaveBeenCalledWith('monthly', 5);
+    expect(challengeServiceMocks.getGlobalLeaderboard).toHaveBeenCalledWith('monthly', 5, 'user-123');
     expect(response.json()).toEqual({
       success: true,
       code: ApiCode.SUCCESS,
       message: 'Global leaderboard retrieved successfully',
-      data: [],
+      data: { entries: [], viewer: null },
     });
   });
 

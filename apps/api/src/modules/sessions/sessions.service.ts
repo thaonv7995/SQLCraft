@@ -668,11 +668,11 @@ export async function revertSessionSchemaDiffChange(
     containerRef: sandbox.containerRef ?? null,
   });
   const diff = diffSandboxSchema(baseSnapshot, currentSnapshot);
-  const section = diff[target.resourceType];
 
   let statements: string[] = [];
 
   if (target.resourceType === 'indexes') {
+    const section = diff.indexes;
     if (target.changeType === 'added') {
       const current = section.added.find((item) => matchesRevertTarget(item, target));
       if (!current) throw new NotFoundError('Target change was not found in schema diff');
@@ -692,6 +692,8 @@ export async function revertSessionSchemaDiffChange(
       ];
     }
   } else if (target.resourceType === 'views' || target.resourceType === 'materializedViews') {
+    const section =
+      target.resourceType === 'materializedViews' ? diff.materializedViews : diff.views;
     const isMaterialized = target.resourceType === 'materializedViews';
     const dropSql = (name: string) =>
       `DROP ${isMaterialized ? 'MATERIALIZED VIEW' : 'VIEW'} IF EXISTS public.${quoteIdent(name)};`;
@@ -710,6 +712,7 @@ export async function revertSessionSchemaDiffChange(
       statements = [dropSql(changed.current.name), toCreateViewSql(changed.base.name, changed.base.definition, isMaterialized)];
     }
   } else if (target.resourceType === 'functions') {
+    const section = diff.functions;
     const dropSql = (name: string, signature: string) =>
       `DROP FUNCTION IF EXISTS public.${quoteIdent(name)}(${signature});`;
     if (target.changeType === 'added') {
@@ -726,6 +729,7 @@ export async function revertSessionSchemaDiffChange(
       statements = [dropSql(changed.current.name, changed.current.signature), toCreateFunctionSql(changed.base.definition)];
     }
   } else if (target.resourceType === 'partitions') {
+    const section = diff.partitions;
     const dropSql = (name: string) => `DROP TABLE IF EXISTS public.${quoteIdent(name)};`;
     if (target.changeType === 'added') {
       const current = section.added.find((item) => matchesRevertTarget(item, target));

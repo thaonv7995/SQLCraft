@@ -28,7 +28,7 @@ export const ChallengeLeaderboardQuerySchema = z.object({
 
 export const GlobalLeaderboardQuerySchema = z.object({
   period: z.enum(['weekly', 'monthly', 'alltime']).default('alltime'),
-  limit: z.coerce.number().int().min(1).max(50).default(50),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export const ListAdminChallengesCatalogQuerySchema = z.object({

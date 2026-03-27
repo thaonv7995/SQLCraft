@@ -33,7 +33,10 @@ const PERIOD_OPTIONS: Array<{ id: LeaderboardPeriod; label: string }> = [
 ];
 
 const EMPTY_CHALLENGES: Awaited<ReturnType<typeof challengesApi.listPublished>> = [];
-const EMPTY_GLOBAL: Awaited<ReturnType<typeof adminApi.globalLeaderboard>> = [];
+const EMPTY_GLOBAL: Awaited<ReturnType<typeof adminApi.globalLeaderboard>> = {
+  entries: [],
+  viewer: null,
+};
 const EMPTY_CHALLENGE_LEADERS: Awaited<ReturnType<typeof challengesApi.getLeaderboard>> = [];
 
 export default function AdminRankingsPage() {
@@ -74,7 +77,7 @@ export default function AdminRankingsPage() {
     staleTime: 30_000,
   });
 
-  const globalLeaders = globalQuery.data ?? EMPTY_GLOBAL;
+  const globalLeaders = (globalQuery.data ?? EMPTY_GLOBAL).entries;
   const challengeLeaders = challengeLeaderboardQuery.data ?? EMPTY_CHALLENGE_LEADERS;
   const rankingConfig = configQuery.data?.config.rankings ?? null;
   const platformConfig = configQuery.data?.config.platform ?? null;

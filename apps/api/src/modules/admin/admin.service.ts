@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import {
   adminDeleteChallenge,
   adminUpdateChallenge,
+  publishChallengeVersion as publishChallengeVersionCore,
 } from '../challenges/challenges.service';
 import {
   challengesRepository,
@@ -133,13 +134,7 @@ export async function createChallenge(
 export async function publishChallengeVersion(
   versionId: string,
 ): Promise<PublishChallengeVersionResult> {
-  const version = await challengesRepository.findVersionById(versionId);
-  if (!version) throw new NotFoundError('Challenge version not found');
-
-  const published = await challengesRepository.publishVersion(versionId, version.challengeId);
-  if (!published) throw new NotFoundError('Challenge version not found');
-
-  return published;
+  return publishChallengeVersionCore(versionId);
 }
 
 export async function updateAdminChallenge(

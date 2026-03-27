@@ -1,4 +1,5 @@
 import { QueryBlockedError, QueryTimeoutError, QueryExecutionFailedError } from '../lib/errors';
+import { logPlannerCostDiag, sqlPreview } from '../lib/planner-cost-log';
 import type { QueryResultPreview } from '@sqlcraft/types';
 
 const MAX_ROWS = 500;
@@ -162,29 +163,174 @@ export async function getExplainPlan(
         ? `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`
         : `EXPLAIN (FORMAT JSON) ${sql}`;
 
-    const result = await client.query(explainSql);
-    const rawPlan = result.rows[0]?.['QUERY PLAN']?.[0] ?? result.rows[0];
-
-    const planSummary = extractPlanSummary(rawPlan);
-
-    return { rawPlan, planSummary };
+    try {
+      const result = await client.query(explainSql);
+      const row0 = result.rows[0];
+      logPlannerCostDiag('getExplainPlan pg response', {
+        explainMode: mode,
+        sqlPreview: sqlPreview(sql),
+        fieldNames: result.fields?.map((f) => f.name) ?? [],
+        rowKeys: row0 && typeof row0 === 'object' ? Object.keys(row0 as object) : [],
+        rowCount: result.rows?.length ?? 0,
+      });
+      const built = repairExplainPlanResult(buildExplainResultFromPgRow(row0));
+      logPlannerCostDiag('getExplainPlan parsed planSummary', {
+        totalCost: built.planSummary.totalCost ?? null,
+        nodeType: built.planSummary.nodeType ?? null,
+        actualTime: built.planSummary.actualTime ?? null,
+        actualRows: built.planSummary.actualRows ?? null,
+      });
+      return built;
+    } catch (err) {
+      logPlannerCostDiag('getExplainPlan query error', {
+        explainMode: mode,
+        sqlPreview: sqlPreview(sql),
+        message: err instanceof Error ? err.message : String(err),
+        pgCode:
+          err && typeof err === 'object' && 'code' in err
+            ? String((err as { code?: unknown }).code)
+            : undefined,
+      });
+      throw err;
+    }
   } finally {
     client.release();
     await pool.end();
   }
 }
 
-function extractPlanSummary(plan: unknown): ExplainResult['planSummary'] {
-  if (!plan || typeof plan !== 'object') return {};
+function looksLikeExplainJsonPayload(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    return (t.startsWith('[') || t.startsWith('{')) && /"Plan"\s*:/.test(t);
+  }
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return (
+      first !== null &&
+      typeof first === 'object' &&
+      ('Plan' in (first as object) || 'Node Type' in (first as object))
+    );
+  }
+  if (typeof value === 'object') {
+    return 'Plan' in (value as object) || 'Node Type' in (value as object);
+  }
+  return false;
+}
 
-  const p = plan as Record<string, unknown>;
+/** Pick EXPLAIN JSON from a node-pg row when the column is not named `QUERY PLAN`. */
+function pickExplainPayloadFromRow(r: Record<string, unknown>): unknown {
+  for (const [key, value] of Object.entries(r)) {
+    if (key.toLowerCase() === 'query plan') return value;
+  }
+  const keys = Object.keys(r);
+  if (keys.length === 1) return r[keys[0]!];
+  for (const value of Object.values(r)) {
+    if (looksLikeExplainJsonPayload(value)) return value;
+  }
+  return undefined;
+}
+
+/** Unwrap EXPLAIN (FORMAT JSON) row from node-pg (column name is often lowercase `query plan`). */
+function unwrapExplainRowPayloadImpl(row: unknown): unknown {
+  if (!row || typeof row !== 'object') return row;
+
+  const r = row as Record<string, unknown>;
+  let payload: unknown = pickExplainPayloadFromRow(r);
+  if (payload === undefined) {
+    return row;
+  }
+
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload) as unknown;
+    } catch {
+      return row;
+    }
+  }
+
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(payload)) {
+    try {
+      payload = JSON.parse(payload.toString('utf8')) as unknown;
+    } catch {
+      return row;
+    }
+  }
+
+  if (Array.isArray(payload) && payload.length > 0) {
+    return payload[0];
+  }
+
+  return payload;
+}
+
+function toFiniteMetric(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'bigint') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function extractPlanSummary(plan: unknown): ExplainResult['planSummary'] {
+  let root: unknown = plan;
+  if (Array.isArray(root) && root.length > 0) {
+    root = root[0];
+  }
+  if (!root || typeof root !== 'object') return {};
+
+  const p = root as Record<string, unknown>;
   const planNode = (p['Plan'] as Record<string, unknown>) ?? p;
 
   return {
-    nodeType: planNode['Node Type'] as string | undefined,
-    totalCost: planNode['Total Cost'] as number | undefined,
-    actualRows: planNode['Actual Rows'] as number | undefined,
-    actualTime: planNode['Actual Total Time'] as number | undefined,
+    nodeType:
+      (typeof planNode['Node Type'] === 'string'
+        ? planNode['Node Type']
+        : typeof planNode['node_type'] === 'string'
+          ? planNode['node_type']
+          : undefined) as string | undefined,
+    totalCost:
+      toFiniteMetric(planNode['Total Cost']) ??
+      toFiniteMetric(planNode['total_cost']) ??
+      toFiniteMetric(planNode['totalCost']),
+    actualRows:
+      toFiniteMetric(planNode['Actual Rows']) ??
+      toFiniteMetric(planNode['actual_rows']) ??
+      toFiniteMetric(planNode['actualRows']),
+    actualTime:
+      toFiniteMetric(planNode['Actual Total Time']) ??
+      toFiniteMetric(planNode['actual_total_time']) ??
+      toFiniteMetric(planNode['actualTotalTime']),
+  };
+}
+
+/** Used by getExplainPlan; exported for unit tests. */
+export function buildExplainResultFromPgRow(row: unknown): ExplainResult {
+  const rawPlan = unwrapExplainRowPayloadImpl(row);
+  return { rawPlan, planSummary: extractPlanSummary(rawPlan) };
+}
+
+/**
+ * Re-derive numeric metrics from rawPlan so grading never misses Total Cost when JSON is present
+ * but planSummary was empty or partially parsed.
+ */
+export function repairExplainPlanResult(result: ExplainResult): ExplainResult {
+  const fromRaw = extractPlanSummary(result.rawPlan);
+  const ps = result.planSummary;
+  return {
+    rawPlan: result.rawPlan,
+    planSummary: {
+      nodeType: ps.nodeType ?? fromRaw.nodeType,
+      totalCost: toFiniteMetric(ps.totalCost) ?? fromRaw.totalCost,
+      actualRows: toFiniteMetric(ps.actualRows) ?? fromRaw.actualRows,
+      actualTime: toFiniteMetric(ps.actualTime) ?? fromRaw.actualTime,
+    },
   };
 }
 

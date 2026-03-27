@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import {
   challengesRepository,
+  queriesRepository,
   sandboxesRepository,
   sessionsRepository,
 } from '../../db/repositories';
@@ -24,9 +25,16 @@ import {
   inferDatabaseDomain,
   type DatabaseDomain,
 } from '../../lib/infer-database-domain';
+import { logPlannerCostDiag, logPlannerCostWarn, sqlPreview } from '../../lib/planner-cost-log';
+import { stripLeadingSqlComments } from '../../lib/sql-comments';
 import { resolvePublicAvatarUrl } from '../../lib/storage';
-import type { ExplainResult } from '../../services/query-executor';
-import { executeSql, getExplainPlan, validateSql } from '../../services/query-executor';
+import type { ExplainResult, PlanMode } from '../../services/query-executor';
+import {
+  buildExplainResultFromPgRow,
+  getExplainPlan,
+  repairExplainPlanResult,
+  validateSql,
+} from '../../services/query-executor';
 import { getSessionSchemaDiff, type SessionSchemaDiffResult } from '../sessions/sessions.service';
 import type {
   CreateChallengeBody,
@@ -248,15 +256,7 @@ interface NormalizedResultPreview {
   truncated: boolean;
 }
 
-interface ResultSetReference {
-  columns: string[];
-  rows: unknown[][];
-  rowCount: number;
-  truncated: boolean;
-}
-
 interface AttemptEvaluationContext {
-  referenceResult?: ResultSetReference | null;
   explainPlan?: ExplainResult | null;
 }
 
@@ -310,7 +310,16 @@ function normalizeAttemptEvaluation(value: unknown): AttemptEvaluation | null {
 }
 
 function normalizeNullableMetric(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'bigint') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 function compareNullableAscending(left: number | null, right: number | null): number {
@@ -450,11 +459,7 @@ function normalizeChallengeDraftPayload(
     validatorType: data.validatorType,
     validatorConfig: (() => {
       const ok = ChallengeValidatorConfigSchema.safeParse(data.validatorConfig);
-      if (ok.success) {
-        return ok.data as unknown as Record<string, unknown>;
-      }
-      const migrated = parseValidatorConfigWithLegacy(data.validatorConfig);
-      return migrated ? (migrated as unknown as Record<string, unknown>) : null;
+      return ok.success ? (ok.data as unknown as Record<string, unknown>) : null;
     })(),
   };
 }
@@ -503,7 +508,7 @@ async function buildDraftValidation(
     : null;
   if (!cfg || cfg.passCriteria.length === 0) {
     errors.push(
-      'validatorConfig must include passCriteria with at least one rule (or valid legacy baseline/maxTotalCost).',
+      'validatorConfig must include passCriteria with at least one rule (e.g. max_query_duration_ms or max_explain_total_cost).',
     );
   }
 
@@ -704,10 +709,7 @@ function getGlobalLeaderboardSince(
   return now;
 }
 
-function buildGlobalLeaderboard(
-  rows: GlobalLeaderboardAttemptRow[],
-  limit: number,
-): GlobalLeaderboardEntry[] {
+function buildFullGlobalLeaderboard(rows: GlobalLeaderboardAttemptRow[]): GlobalLeaderboardEntry[] {
   const byUser = new Map<
     string,
     Omit<GlobalLeaderboardEntry, 'rank'> & {
@@ -750,7 +752,7 @@ function buildGlobalLeaderboard(
     }
   }
 
-  return Array.from(byUser.values())
+  const sorted = Array.from(byUser.values())
     .map((entry) => ({
       ...entry,
       streak: computeRecentStreak(entry.activityDays),
@@ -765,18 +767,18 @@ function buildGlobalLeaderboard(
         return right.lastSubmittedAt.getTime() - left.lastSubmittedAt.getTime();
       }
       return left.username.localeCompare(right.username);
-    })
-    .slice(0, limit)
-    .map((entry, index) => ({
-      rank: index + 1,
-      userId: entry.userId,
-      username: entry.username,
-      displayName: entry.displayName,
-      avatarUrl: entry.avatarUrl,
-      points: entry.points,
-      challengesCompleted: entry.challengesCompleted,
-      streak: entry.streak,
-    }));
+    });
+
+  return sorted.map((entry, index) => ({
+    rank: index + 1,
+    userId: entry.userId,
+    username: entry.username,
+    displayName: entry.displayName,
+    avatarUrl: entry.avatarUrl,
+    points: entry.points,
+    challengesCompleted: entry.challengesCompleted,
+    streak: entry.streak,
+  }));
 }
 
 function isCreateIndexStatement(sqlText: string): boolean {
@@ -829,95 +831,6 @@ function normalizeResultPreview(value: unknown): NormalizedResultPreview {
     rows: normalizeResultRows(preview.rows),
     truncated: preview.truncated === true,
   };
-}
-
-function normalizeComparableValue(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeComparableValue(item));
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, entryValue]) => [key, normalizeComparableValue(entryValue)]),
-    );
-  }
-
-  return value;
-}
-
-function serializeRow(row: unknown[]): string {
-  return JSON.stringify(normalizeComparableValue(row));
-}
-
-function compareColumnLists(actual: string[], expected: string[]): boolean {
-  if (actual.length !== expected.length) {
-    return false;
-  }
-
-  return actual.every(
-    (column, index) => column.trim().toLowerCase() === expected[index]?.trim().toLowerCase(),
-  );
-}
-
-function compareResultSets(
-  actualPreview: NormalizedResultPreview,
-  actualRowCount: number | null,
-  referenceResult: ResultSetReference,
-): { matches: boolean; feedbackText?: string } {
-  if (actualPreview.columns.length === 0) {
-    return {
-      matches: false,
-      feedbackText: 'No results returned.',
-    };
-  }
-
-  if (!compareColumnLists(actualPreview.columns, referenceResult.columns)) {
-    return {
-      matches: false,
-      feedbackText: 'Result set columns do not match the reference solution.',
-    };
-  }
-
-  if (actualPreview.truncated || referenceResult.truncated) {
-    return {
-      matches: false,
-      feedbackText: 'Result set is truncated and cannot be validated safely.',
-    };
-  }
-
-  const resolvedActualRowCount = actualRowCount ?? actualPreview.rows.length;
-  if (resolvedActualRowCount !== referenceResult.rowCount) {
-    return {
-      matches: false,
-      feedbackText: 'Result set row count does not match the reference solution.',
-    };
-  }
-
-  const actualRows = actualPreview.rows.map((row) => serializeRow(row)).sort();
-  const expectedRows = referenceResult.rows.map((row) => serializeRow(row)).sort();
-
-  if (actualRows.length !== expectedRows.length) {
-    return {
-      matches: false,
-      feedbackText: 'Result set row count does not match the reference solution.',
-    };
-  }
-
-  const hasMismatch = actualRows.some((row, index) => row !== expectedRows[index]);
-  if (hasMismatch) {
-    return {
-      matches: false,
-      feedbackText: 'Result set does not match the reference solution.',
-    };
-  }
-
-  return { matches: true };
 }
 
 function resultContainsAllColumnNames(actual: string[], required: string[]): boolean {
@@ -1079,8 +992,19 @@ function runPassCriteriaChecks(params: {
   });
 }
 
-function shouldExplainAnalyze(sqlText: string): boolean {
-  return /^(select|with)\b/i.test(sqlText.trim());
+/**
+ * Which EXPLAIN mode is safe/correct for grading (aligned with web `getExplainPlanMode`).
+ * DML must use FORMAT JSON EXPLAIN only — ANALYZE would execute the statement again.
+ */
+function explainGradingMode(sqlText: string): PlanMode | null {
+  const normalizedSql = stripLeadingSqlComments(sqlText).trimStart();
+  if (!normalizedSql || /^explain\b/i.test(normalizedSql)) return null;
+  if (/^select\b/i.test(normalizedSql)) return 'explain_analyze';
+  if (/^with\b/i.test(normalizedSql)) {
+    return /\b(insert|update|delete|merge)\b/i.test(normalizedSql) ? 'explain' : 'explain_analyze';
+  }
+  if (/^(insert|update|delete|merge)\b/i.test(normalizedSql)) return 'explain';
+  return null;
 }
 
 function getSandboxRuntimeConfig(): {
@@ -1187,7 +1111,7 @@ function buildAttemptEvaluationFromCriteria(params: {
   const passCriteria = parsed?.passCriteria ?? [];
   const sqlText = (params.queryExecution.sqlText ?? '').trim();
   const latestDurationMs = params.queryExecution.durationMs ?? null;
-  const latestTotalCost = normalizeNullableMetric(params.context.explainPlan?.planSummary?.totalCost);
+  const latestTotalCost = resolvePlannerTotalCost(params.context.explainPlan);
 
   const querySucceeded = params.queryExecution.status === 'succeeded';
   const resultPreview = querySucceeded
@@ -1214,8 +1138,9 @@ function buildAttemptEvaluationFromCriteria(params: {
     : passChecksWhenQueryFailed(passCriteria, sqlText);
 
   const leg = deriveLegacyMetricsFromCriteria(passCriteria, checks);
+  /** When pass criteria exist, grading is criteria-only (no reference / column-list gate). */
   const passesChallenge =
-    params.isCorrect && (passCriteria.length === 0 || checks.every((c) => c.passed));
+    passCriteria.length > 0 ? checks.every((c) => c.passed) : params.isCorrect;
 
   const evaluation: AttemptEvaluation = {
     isCorrect: params.isCorrect,
@@ -1252,7 +1177,6 @@ function buildFeedback(evaluation: AttemptEvaluation): string {
 
   const notes: string[] = [
     evaluation.passesChallenge ? 'Challenge passed.' : 'Challenge requirements not met.',
-    'Result set matches the validator.',
   ];
 
   if (evaluation.passCriterionChecks?.length) {
@@ -1261,6 +1185,8 @@ function buildFeedback(evaluation: AttemptEvaluation): string {
     }
     return notes.join(' ');
   }
+
+  notes.push('Result set matches the validator.');
 
   if (evaluation.baselineDurationMs !== null) {
     if (evaluation.meetsPerformanceTarget === true) {
@@ -1330,49 +1256,18 @@ export function evaluateAttempt(
     });
   }
 
-  const expectedColumns = normalizeExpectedResultColumns(challengeVersion.expectedResultColumns);
-  const resultPreview = normalizeResultPreview(queryExecution.resultPreview);
-
-  if (challengeVersion.validatorType === 'result_set') {
-    if (resultPreview.columns.length === 0) {
-      return buildAttemptEvaluationFromCriteria({
-        challengeVersion,
-        queryExecution,
-        sessionExecutions,
-        context,
-        isCorrect: false,
-        incorrectFeedbackText: 'No results returned',
-      });
-    }
-
-    if (context.referenceResult) {
-      const comparison = compareResultSets(
-        resultPreview,
-        queryExecution.rowsReturned ?? null,
-        context.referenceResult,
-      );
-
-      if (!comparison.matches) {
-        return buildAttemptEvaluationFromCriteria({
-          challengeVersion,
-          queryExecution,
-          sessionExecutions,
-          context,
-          isCorrect: false,
-          incorrectFeedbackText:
-            comparison.feedbackText ?? 'Result set does not match the reference solution.',
-        });
-      }
-    } else if (expectedColumns.length > 0 && !compareColumnLists(resultPreview.columns, expectedColumns)) {
-      return buildAttemptEvaluationFromCriteria({
-        challengeVersion,
-        queryExecution,
-        sessionExecutions,
-        context,
-        isCorrect: false,
-        incorrectFeedbackText: `Expected columns: ${expectedColumns.join(', ')}. Got: ${resultPreview.columns.join(', ')}`,
-      });
-    }
+  const parsedForGrading = parseValidatorConfigWithLegacy(challengeVersion.validatorConfig);
+  const passCriteriaForGrading = parsedForGrading?.passCriteria ?? [];
+  if (passCriteriaForGrading.length === 0) {
+    return buildAttemptEvaluationFromCriteria({
+      challengeVersion,
+      queryExecution,
+      sessionExecutions,
+      context,
+      isCorrect: false,
+      incorrectFeedbackText:
+        'This challenge has no pass criteria configured. Submissions cannot be graded until pass criteria are added.',
+    });
   }
 
   return buildAttemptEvaluationFromCriteria({
@@ -1398,17 +1293,110 @@ function buildSandboxConnectionString(params: {
   return `postgresql://${user}:${password}@${host}:${port}/${params.dbName}`;
 }
 
+function metricFromDbJson(value: unknown): number | undefined {
+  const n = normalizeNullableMetric(value);
+  return n === null ? undefined : n;
+}
+
+/** Plan row saved by the worker when the lab request included EXPLAIN (often has cost even if live EXPLAIN at submit fails). */
+async function loadStoredExplainPlan(queryExecutionId: string): Promise<ExplainResult | null> {
+  const plans = await queriesRepository.getExecutionPlans(queryExecutionId);
+  if (plans.length === 0) {
+    logPlannerCostDiag('loadStoredExplainPlan: no plan rows in DB', { queryExecutionId });
+    return null;
+  }
+
+  const pick =
+    [...plans].reverse().find((p) => p.planMode === 'explain_analyze') ?? plans[plans.length - 1];
+  const rawPlan = pick.rawPlan as unknown;
+  const fromRaw = buildExplainResultFromPgRow({ 'query plan': rawPlan }).planSummary;
+
+  if (!pick.planSummary || typeof pick.planSummary !== 'object') {
+    const out: ExplainResult = { rawPlan, planSummary: fromRaw };
+    logPlannerCostDiag('loadStoredExplainPlan: using parsed raw_plan only', {
+      queryExecutionId,
+      planRowCount: plans.length,
+      pickedPlanMode: pick.planMode,
+      fromRawTotalCost: fromRaw.totalCost ?? null,
+      resultTotalCost: out.planSummary.totalCost ?? null,
+    });
+    return out;
+  }
+
+  const ps = pick.planSummary as Record<string, unknown>;
+  const out: ExplainResult = {
+    rawPlan,
+    planSummary: {
+      nodeType: typeof ps.nodeType === 'string' ? ps.nodeType : fromRaw.nodeType,
+      totalCost: metricFromDbJson(ps.totalCost) ?? fromRaw.totalCost,
+      actualRows: metricFromDbJson(ps.actualRows) ?? fromRaw.actualRows,
+      actualTime: metricFromDbJson(ps.actualTime) ?? fromRaw.actualTime,
+    },
+  };
+  logPlannerCostDiag('loadStoredExplainPlan: merged DB plan_summary + raw', {
+    queryExecutionId,
+    planRowCount: plans.length,
+    pickedPlanMode: pick.planMode,
+    dbPlanSummaryKeys: Object.keys(ps),
+    dbTotalCost: ps.totalCost,
+    fromRawTotalCost: fromRaw.totalCost ?? null,
+    resultTotalCost: out.planSummary.totalCost ?? null,
+  });
+  return out;
+}
+
+/** Normalize cost from explain result (repair + bigint/string coercion). */
+function resolvePlannerTotalCost(explainPlan: ExplainResult | null | undefined): number | null {
+  if (!explainPlan) return null;
+  const repaired = repairExplainPlanResult(explainPlan);
+  return normalizeNullableMetric(repaired.planSummary?.totalCost);
+}
+
+function coalesceExplainPlans(live: ExplainResult | null, stored: ExplainResult | null): ExplainResult | null {
+  if (!live && !stored) return null;
+  if (!stored) return repairExplainPlanResult(live as ExplainResult);
+  if (!live) return repairExplainPlanResult(stored as ExplainResult);
+
+  const liveCost = normalizeNullableMetric(live.planSummary?.totalCost);
+  const merged: ExplainResult = {
+    rawPlan: live.rawPlan ?? stored.rawPlan,
+    planSummary: {
+      nodeType: live.planSummary.nodeType ?? stored.planSummary.nodeType,
+      totalCost: liveCost !== null ? live.planSummary.totalCost : stored.planSummary.totalCost,
+      actualRows: live.planSummary.actualRows ?? stored.planSummary.actualRows,
+      actualTime: live.planSummary.actualTime ?? stored.planSummary.actualTime,
+    },
+  };
+  return repairExplainPlanResult(merged);
+}
+
 async function buildEvaluationContext(
   challengeVersion: Pick<
     PublishedChallengeVersionRow,
     'validatorType' | 'validatorConfig' | 'referenceSolution'
   >,
   queryExecution: {
+    id: string;
     sandboxInstanceId: string | null;
     sqlText: string;
   },
 ): Promise<AttemptEvaluationContext> {
+  const parsedValidator = parseValidatorConfigWithLegacy(challengeVersion.validatorConfig);
+  const passCriteria = parsedValidator?.passCriteria ?? [];
+  const needsPlannerCost = passCriteria.some((c) => c.type === 'max_explain_total_cost');
+  const needsIndexRule = passCriteria.some((c) => c.type === 'requires_index_usage');
+
   if (!queryExecution.sandboxInstanceId) {
+    if (needsPlannerCost || needsIndexRule) {
+      logPlannerCostWarn('query execution has no sandboxInstanceId; cannot run EXPLAIN for grading', {
+        queryExecutionId: queryExecution.id,
+        needsPlannerCost,
+        needsIndexRule,
+      });
+    }
+    logPlannerCostDiag('buildEvaluationContext: missing sandboxInstanceId (no live EXPLAIN)', {
+      queryExecutionId: queryExecution.id,
+    });
     return {};
   }
 
@@ -1422,44 +1410,89 @@ async function buildEvaluationContext(
     dbName: sandbox.dbName,
     containerRef: sandbox.containerRef ?? null,
   });
-  const runtime = getSandboxRuntimeConfig();
-  const parsedValidator = parseValidatorConfigWithLegacy(challengeVersion.validatorConfig);
-  const passCriteria = parsedValidator?.passCriteria ?? [];
-  const needsPlannerCost = passCriteria.some((c) => c.type === 'max_explain_total_cost');
-  const needsIndexRule = passCriteria.some((c) => c.type === 'requires_index_usage');
   const context: AttemptEvaluationContext = {};
 
-  if (
-    challengeVersion.validatorType === 'result_set' &&
-    typeof challengeVersion.referenceSolution === 'string' &&
-    challengeVersion.referenceSolution.trim().length > 0
-  ) {
-    const referenceResult = await executeSql(connectionString, challengeVersion.referenceSolution, {
-      timeoutMs: runtime.maxQueryTimeMs,
-      maxRows: runtime.maxRowsPreview,
-    });
+  const gradingExplainMode = explainGradingMode(queryExecution.sqlText);
+  const willRunExplain =
+    gradingExplainMode !== null &&
+    (needsIndexRule || challengeVersion.validatorType === 'result_set' || needsPlannerCost);
 
-    context.referenceResult = {
-      columns: referenceResult.columns,
-      rows: referenceResult.rows,
-      rowCount: referenceResult.rowCount,
-      truncated: referenceResult.truncated,
-    };
+  logPlannerCostDiag('buildEvaluationContext: flags', {
+    queryExecutionId: queryExecution.id,
+    sandboxId: queryExecution.sandboxInstanceId,
+    sandboxDbName: sandbox.dbName ?? null,
+    sandboxStatus: sandbox.status ?? null,
+    needsPlannerCost,
+    needsIndexRule,
+    validatorType: challengeVersion.validatorType,
+    willRunExplain,
+    sqlPreview: sqlPreview(queryExecution.sqlText),
+  });
+
+  let livePlan: ExplainResult | null = null;
+  let storedPlan: ExplainResult | null = null;
+
+  if (willRunExplain) {
+    try {
+      livePlan = await getExplainPlan(connectionString, queryExecution.sqlText, gradingExplainMode);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const pgCode =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : undefined;
+      logPlannerCostDiag('buildEvaluationContext: getExplainPlan failed at submit', {
+        queryExecutionId: queryExecution.id,
+        message,
+        pgCode,
+      });
+      if (needsPlannerCost || needsIndexRule) {
+        logPlannerCostWarn('getExplainPlan failed during challenge submit (using stored plan if any)', {
+          queryExecutionId: queryExecution.id,
+          message,
+          pgCode,
+        });
+      }
+      livePlan = null;
+    }
+
+    storedPlan =
+      needsPlannerCost || needsIndexRule ? await loadStoredExplainPlan(queryExecution.id) : null;
+    context.explainPlan = coalesceExplainPlans(livePlan, storedPlan);
+
+    logPlannerCostDiag('buildEvaluationContext: coalesced explain plan', {
+      queryExecutionId: queryExecution.id,
+      liveTotalCost: normalizeNullableMetric(livePlan?.planSummary?.totalCost),
+      storedTotalCost: normalizeNullableMetric(storedPlan?.planSummary?.totalCost),
+      mergedTotalCost: normalizeNullableMetric(context.explainPlan?.planSummary?.totalCost),
+      usedStoredOnly: !livePlan && Boolean(storedPlan),
+      usedLiveOnly: Boolean(livePlan) && !storedPlan,
+    });
+  } else if (needsPlannerCost || needsIndexRule) {
+    storedPlan = await loadStoredExplainPlan(queryExecution.id);
+    context.explainPlan = storedPlan ? repairExplainPlanResult(storedPlan) : null;
+    logPlannerCostDiag('buildEvaluationContext: explain skipped at submit; using stored plan only', {
+      queryExecutionId: queryExecution.id,
+      needsPlannerCost,
+      needsIndexRule,
+      storedTotalCost: normalizeNullableMetric(storedPlan?.planSummary?.totalCost),
+    });
   }
 
-  if (
-    shouldExplainAnalyze(queryExecution.sqlText) &&
-    (needsIndexRule || challengeVersion.validatorType === 'result_set' || needsPlannerCost)
-  ) {
-    try {
-      context.explainPlan = await getExplainPlan(
-        connectionString,
-        queryExecution.sqlText,
-        'explain_analyze',
-      );
-    } catch {
-      context.explainPlan = null;
-    }
+  if (needsPlannerCost && normalizeNullableMetric(context.explainPlan?.planSummary?.totalCost) === null) {
+    logPlannerCostWarn('planner total cost still unknown after explain + stored merge', {
+      queryExecutionId: queryExecution.id,
+      willRunExplain,
+      sqlPreview: sqlPreview(queryExecution.sqlText),
+      hadLivePlan: livePlan !== null,
+      hadStoredPlan: storedPlan !== null,
+      liveTotalCost: normalizeNullableMetric(livePlan?.planSummary?.totalCost),
+      storedTotalCost: normalizeNullableMetric(storedPlan?.planSummary?.totalCost),
+      mergedHasExplainResult: Boolean(context.explainPlan),
+      mergedNodeType: context.explainPlan?.planSummary?.nodeType ?? null,
+      detailHint:
+        'If willRunExplain=false, use SELECT/WITH/INSERT/UPDATE/DELETE (after comments). Set PLANNER_COST_DEBUG=1 for Postgres rowKeys. Ensure worker ran with explainPlan when query executed.',
+    });
   }
 
   return context;
@@ -1582,7 +1615,11 @@ export async function submitAttempt(
     data.learningSessionId,
     userId,
   );
-  const evaluationContext = await buildEvaluationContext(challengeVersion, queryExecution);
+  const evaluationContext = await buildEvaluationContext(challengeVersion, {
+    id: queryExecution.id,
+    sandboxInstanceId: queryExecution.sandboxInstanceId,
+    sqlText: queryExecution.sqlText,
+  });
   const baseEvaluation = evaluateAttempt(
     challengeVersion,
     queryExecution,
@@ -1592,8 +1629,13 @@ export async function submitAttempt(
   const schemaDiff = await buildChallengeAttemptSchemaDiffSnapshot(data.learningSessionId, userId);
   const evaluation: AttemptEvaluation = {
     ...baseEvaluation,
-    queryTotalCost: normalizeNullableMetric(evaluationContext.explainPlan?.planSummary?.totalCost),
-    queryActualTime: normalizeNullableMetric(evaluationContext.explainPlan?.planSummary?.actualTime),
+    queryTotalCost: resolvePlannerTotalCost(evaluationContext.explainPlan),
+    queryActualTime:
+      evaluationContext.explainPlan == null
+        ? null
+        : normalizeNullableMetric(
+            repairExplainPlanResult(evaluationContext.explainPlan).planSummary?.actualTime,
+          ),
     schemaDiff,
   };
 
@@ -1695,12 +1737,27 @@ export async function getChallengeLeaderboardContext(
 export async function getGlobalLeaderboard(
   period: 'weekly' | 'monthly' | 'alltime' = 'alltime',
   limit = 50,
-): Promise<GlobalLeaderboardEntry[]> {
+  viewerUserId?: string | null,
+): Promise<{ entries: GlobalLeaderboardEntry[]; viewer: GlobalLeaderboardEntry | null }> {
   const attempts = await challengesRepository.listPassedAttemptsForGlobalLeaderboard(
     getGlobalLeaderboardSince(period),
   );
-  const rows = buildGlobalLeaderboard(attempts, limit);
-  return withPresignedLeaderboardAvatars(rows);
+  const full = buildFullGlobalLeaderboard(attempts);
+  const top = full.slice(0, limit);
+  const viewerRow =
+    viewerUserId && viewerUserId.length > 0
+      ? (full.find((e) => e.userId === viewerUserId) ?? null)
+      : null;
+
+  const [entries, viewerList] = await Promise.all([
+    withPresignedLeaderboardAvatars(top),
+    viewerRow ? withPresignedLeaderboardAvatars([viewerRow]) : Promise.resolve([] as GlobalLeaderboardEntry[]),
+  ]);
+
+  return {
+    entries,
+    viewer: viewerList[0] ?? null,
+  };
 }
 
 export async function getAttempt(
@@ -1940,6 +1997,13 @@ export async function publishChallengeVersion(
 
   if (!version) {
     throw new NotFoundError('Challenge version not found');
+  }
+
+  const publishCfg = parseValidatorConfigWithLegacy(version.validatorConfig);
+  if (!publishCfg || publishCfg.passCriteria.length === 0) {
+    throw new ValidationError(
+      'Cannot publish: validator_config must include passCriteria with at least one rule.',
+    );
   }
 
   const published = await challengesRepository.publishVersion(versionId, version.challengeId, {

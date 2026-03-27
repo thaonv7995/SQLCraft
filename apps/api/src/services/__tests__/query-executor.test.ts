@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateSql } from '../query-executor';
+import { buildExplainResultFromPgRow, repairExplainPlanResult, validateSql } from '../query-executor';
 
 describe('validateSql', () => {
   describe('empty / blank input', () => {
@@ -173,5 +173,107 @@ describe('validateSql', () => {
     it('blocks uppercase GRANT', () => {
       expect(validateSql('GRANT SELECT ON users TO public').valid).toBe(false);
     });
+  });
+});
+
+describe('buildExplainResultFromPgRow', () => {
+  const planEnvelope = [
+    {
+      Plan: {
+        'Node Type': 'Seq Scan',
+        'Total Cost': 333.45,
+        'Actual Rows': 100,
+        'Actual Total Time': 1.23,
+      },
+    },
+  ];
+
+  it('reads Total Cost when column is lowercase query plan (node-pg default)', () => {
+    const { planSummary } = buildExplainResultFromPgRow({ 'query plan': planEnvelope });
+    expect(planSummary.totalCost).toBe(333.45);
+    expect(planSummary.nodeType).toBe('Seq Scan');
+  });
+
+  it('reads Total Cost when column is QUERY PLAN', () => {
+    const { planSummary } = buildExplainResultFromPgRow({ 'QUERY PLAN': planEnvelope });
+    expect(planSummary.totalCost).toBe(333.45);
+  });
+
+  it('unwraps a single-column row to the plan payload', () => {
+    const { planSummary } = buildExplainResultFromPgRow({ 'query plan': planEnvelope });
+    expect(planSummary.totalCost).toBe(333.45);
+  });
+
+  it('parses JSON string payloads', () => {
+    const { planSummary } = buildExplainResultFromPgRow({
+      'query plan': JSON.stringify(planEnvelope),
+    });
+    expect(planSummary.totalCost).toBe(333.45);
+  });
+
+  it('coerces Total Cost from string', () => {
+    const { planSummary } = buildExplainResultFromPgRow({
+      'query plan': [{ Plan: { 'Node Type': 'Result', 'Total Cost': '12.5' } }],
+    });
+    expect(planSummary.totalCost).toBe(12.5);
+  });
+
+  it('reads Total Cost from snake_case keys on Plan node', () => {
+    const { planSummary } = buildExplainResultFromPgRow({
+      'query plan': [{ Plan: { node_type: 'Seq Scan', total_cost: 42 } }],
+    });
+    expect(planSummary.totalCost).toBe(42);
+    expect(planSummary.nodeType).toBe('Seq Scan');
+  });
+
+  it('reads integer Total Cost on object envelope with Planning sibling (ANALYZE JSON)', () => {
+    const row = {
+      'query plan': {
+        Plan: {
+          'Node Type': 'Seq Scan',
+          'Total Cost': 3,
+          'Actual Rows': 100,
+          'Actual Total Time': 0.01,
+        },
+        Planning: { 'Shared Hit Blocks': 77 },
+        'Planning Time': 0.239,
+        'Execution Time': 0.04,
+      },
+    };
+    const { planSummary } = buildExplainResultFromPgRow(row);
+    expect(planSummary.totalCost).toBe(3);
+    expect(planSummary.actualTime).toBe(0.01);
+  });
+
+  it('reads Total Cost when the only column is ?column?', () => {
+    const { planSummary } = buildExplainResultFromPgRow({ '?column?': planEnvelope });
+    expect(planSummary.totalCost).toBe(333.45);
+  });
+
+  it('finds EXPLAIN JSON among multiple columns with non-standard names', () => {
+    const { planSummary } = buildExplainResultFromPgRow({
+      junk: 'not-json',
+      custom: planEnvelope,
+    });
+    expect(planSummary.totalCost).toBe(333.45);
+  });
+});
+
+describe('repairExplainPlanResult', () => {
+  it('fills totalCost from rawPlan when planSummary was empty', () => {
+    const repaired = repairExplainPlanResult({
+      rawPlan: { Plan: { 'Node Type': 'Seq Scan', 'Total Cost': 3 } },
+      planSummary: {},
+    });
+    expect(repaired.planSummary.totalCost).toBe(3);
+    expect(repaired.planSummary.nodeType).toBe('Seq Scan');
+  });
+
+  it('coerces string Total Cost on planSummary using rawPlan merge', () => {
+    const repaired = repairExplainPlanResult({
+      rawPlan: { Plan: { 'Node Type': 'Seq Scan', 'Total Cost': 3 } },
+      planSummary: { totalCost: '3' as unknown as number },
+    });
+    expect(repaired.planSummary.totalCost).toBe(3);
   });
 });
