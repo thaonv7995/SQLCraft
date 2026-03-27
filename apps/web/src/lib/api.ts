@@ -270,6 +270,12 @@ export interface ChallengeLeaderboardEntry {
   lastSubmittedAt: string;
 }
 
+const DATASET_SCALE_ORDER = ['tiny', 'small', 'medium', 'large'] as const;
+export type DatasetScale = (typeof DATASET_SCALE_ORDER)[number];
+const DATASET_SCALE_RANK = Object.fromEntries(
+  DATASET_SCALE_ORDER.map((scale, index) => [scale, index]),
+) as Record<DatasetScale, number>;
+
 /** Top-N entries plus the signed-in user's true rank (may be outside the top N). */
 export interface ChallengeLeaderboardContext {
   entries: ChallengeLeaderboardEntry[];
@@ -296,6 +302,7 @@ export interface ChallengeCatalogItem {
   sortOrder: number;
   status: 'draft' | 'published' | 'archived';
   points: number;
+  datasetScale: DatasetScale;
   publishedVersionId?: string | null;
   latestVersionId?: string | null;
   latestVersionNo?: number | null;
@@ -326,6 +333,7 @@ export interface EditableChallengeDetail {
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   sortOrder: number;
   points: number;
+  datasetScale: DatasetScale;
   status: 'draft' | 'published' | 'archived';
   publishedVersionId?: string | null;
   updatedAt: string;
@@ -389,13 +397,6 @@ export interface AdminLessonVersionDetail {
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
-
-const DATASET_SCALE_ORDER = ['tiny', 'small', 'medium', 'large'] as const;
-const DATASET_SCALE_RANK = Object.fromEntries(
-  DATASET_SCALE_ORDER.map((scale, index) => [scale, index]),
-) as Record<DatasetScale, number>;
-
-export type DatasetScale = (typeof DATASET_SCALE_ORDER)[number];
 
 export interface DatasetScaleContext {
   sourceScale: DatasetScale | null;
@@ -1153,6 +1154,7 @@ function normalizeChallengeCatalogItem(item: ChallengeCatalogItem): ChallengeCat
   return {
     ...item,
     description: item.description ?? '',
+    datasetScale: normalizeDatasetScale(item.datasetScale) ?? 'small',
     publishedVersionId: item.publishedVersionId ?? null,
     latestVersionId: item.latestVersionId ?? null,
     latestVersionNo: item.latestVersionNo ?? null,
@@ -1185,6 +1187,7 @@ function normalizeEditableChallengeDetail(detail: EditableChallengeDetail): Edit
   return {
     ...detail,
     description: detail.description ?? '',
+    datasetScale: normalizeDatasetScale(detail.datasetScale) ?? 'small',
     publishedVersionId: detail.publishedVersionId ?? null,
     latestVersion: {
       ...detail.latestVersion,
@@ -1605,19 +1608,13 @@ export const sessionsApi = {
   revertSchemaDiffChange: (id: string, payload: RevertSessionSchemaChangePayload) =>
     api.post(`/learning-sessions/${id}/schema-diff/revert`, payload).then((r) => r.data),
 
-  create: (payload: {
-    lessonVersionId?: string;
-    challengeVersionId?: string;
-    selectedScale?: DatasetScale;
-  }) =>
-    api.post<{ session: LearningSession; sandbox: { id: string; status: string } }>(
-      '/learning-sessions',
-      {
-        lessonVersionId: payload.lessonVersionId,
-        challengeVersionId: payload.challengeVersionId,
-        datasetSize: payload.selectedScale,
-      },
-    ).then((r) => normalizeLearningSession(r.data.session)),
+  create: (payload: { challengeVersionId: string }) =>
+    api
+      .post<{ session: LearningSession; sandbox: { id: string; status: string } }>(
+        '/learning-sessions',
+        { challengeVersionId: payload.challengeVersionId },
+      )
+      .then((r) => normalizeLearningSession(r.data.session)),
 
   end: (id: string) =>
     api.post<{ id: string; status: string; endedAt: string | null }>(
@@ -1815,6 +1812,7 @@ export interface AdminCreateChallengePayload {
   difficulty?: 'beginner' | 'intermediate' | 'advanced';
   sortOrder?: number;
   points?: number;
+  datasetScale?: DatasetScale;
   problemStatement: string;
   hintText?: string;
   expectedResultColumns?: string[];
@@ -1833,6 +1831,7 @@ export interface AdminCreateChallengeResult {
     difficulty: string;
     sortOrder: number;
     points: number;
+    datasetScale?: DatasetScale;
     status: string;
     publishedVersionId: string | null;
     createdBy: string | null;

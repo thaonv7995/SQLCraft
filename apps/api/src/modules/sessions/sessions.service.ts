@@ -446,7 +446,7 @@ export async function createSession(
 
   const resolved = await resolveRequestedDatasetTemplate(
     challengeVersion.databaseId,
-    body.datasetSize ?? body.scale,
+    challengeVersion.datasetScale,
   );
   selectedTemplate = resolved.selectedTemplate;
   dataset = resolved.summary;

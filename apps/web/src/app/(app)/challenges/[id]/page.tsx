@@ -7,18 +7,16 @@ import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { DifficultyBadge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  challengesApi,
-  sessionsApi,
-  type ChallengeCatalogItem,
-  type DatasetScale,
-} from '@/lib/api';
+import { challengesApi, sessionsApi, type ChallengeCatalogItem } from '@/lib/api';
 import { ChallengePassCriteriaDisplay } from '@/components/challenge/challenge-pass-criteria-display';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import { useAuthStore } from '@/stores/auth';
 import { formatRelativeTime } from '@/lib/utils';
 
-const DATASET_SCALE_META: Record<DatasetScale, { label: string; desc: string }> = {
+const DATASET_SCALE_META: Record<
+  ChallengeCatalogItem['datasetScale'],
+  { label: string; desc: string }
+> = {
   tiny: { label: 'Tiny', desc: '100 rows' },
   small: { label: 'Small', desc: '10K rows' },
   medium: { label: 'Medium', desc: '1M-5M rows' },
@@ -36,7 +34,6 @@ export default function ChallengeDetailPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const challengeId = challengeIdFromPathname(pathname);
-  const [selectedScale, setSelectedScale] = useState<DatasetScale>('small');
   const [isStartingSubmission, setIsStartingSubmission] = useState(false);
 
   const catalogQuery = useQuery({
@@ -84,7 +81,6 @@ export default function ChallengeDetailPage() {
     try {
       const session = await sessionsApi.create({
         challengeVersionId: challenge.publishedVersionId,
-        selectedScale,
       });
 
       saveLabBootstrap(session.id, {
@@ -188,26 +184,14 @@ export default function ChallengeDetailPage() {
         <div className="space-y-6">
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6 space-y-4">
             <h2 className="font-headline text-lg font-semibold text-on-surface">Tạo Submission</h2>
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-[0.18em] text-outline">Dataset scale</p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(DATASET_SCALE_META) as DatasetScale[]).map((scale) => (
-                  <button
-                    key={scale}
-                    type="button"
-                    onClick={() => setSelectedScale(scale)}
-                    className={
-                      selectedScale === scale
-                        ? 'rounded-full bg-surface-container-high px-3 py-1.5 text-xs font-medium text-on-surface'
-                        : 'rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-on-surface-variant'
-                    }
-                    title={DATASET_SCALE_META[scale].desc}
-                  >
-                    {DATASET_SCALE_META[scale].label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <p className="text-xs text-on-surface-variant">
+              <span className="uppercase tracking-[0.18em] text-outline">Dataset scale</span>
+              :{' '}
+              <span className="font-medium text-on-surface">
+                {DATASET_SCALE_META[challenge.datasetScale].label}
+              </span>
+              <span className="text-on-surface-variant"> — {DATASET_SCALE_META[challenge.datasetScale].desc}</span>
+            </p>
             <Button
               variant="primary"
               onClick={() => void startSubmission()}

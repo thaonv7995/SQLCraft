@@ -37,12 +37,9 @@ export default async function sessionsRouter(fastify: FastifyInstance): Promise<
         security: [{ bearerAuth: [] }],
         body: {
           type: 'object',
-          required: ['lessonVersionId'],
+          required: ['challengeVersionId'],
           properties: {
-            lessonVersionId: { type: 'string', format: 'uuid' },
             challengeVersionId: { type: 'string', format: 'uuid' },
-            datasetSize: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
-            scale: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
           },
         },
       },

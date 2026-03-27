@@ -135,6 +135,7 @@ export const challenges = pgTable(
     difficulty: difficultyEnum('difficulty').notNull().default('beginner'),
     sortOrder: integer('sort_order').notNull().default(0),
     points: integer('points').notNull().default(100),
+    datasetScale: datasetSizeEnum('dataset_scale').notNull().default('small'),
     status: contentStatusEnum('status').notNull().default('draft'),
     publishedVersionId: uuid('published_version_id'),
     createdBy: uuid('created_by').references(() => users.id),

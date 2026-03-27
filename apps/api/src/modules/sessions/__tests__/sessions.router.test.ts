@@ -95,8 +95,7 @@ describe('sessions router HTTP contracts', () => {
 
   it('creates learning sessions with the created envelope for authenticated users', async () => {
     const payload = {
-      lessonVersionId: '11111111-1111-4111-8111-111111111111',
-      datasetSize: 'small',
+      challengeVersionId: '11111111-1111-4111-8111-111111111111',
     };
 
     const response = await app.inject({
@@ -129,7 +128,7 @@ describe('sessions router HTTP contracts', () => {
         authorization: `Bearer ${signToken()}`,
       },
       payload: {
-        lessonVersionId: 'not-a-uuid',
+        challengeVersionId: 'not-a-uuid',
       },
     });
 

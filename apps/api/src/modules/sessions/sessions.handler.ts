@@ -1,10 +1,11 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
-import type {
-  CreateSessionBody,
-  RevertSchemaDiffChangeBody,
-  SessionParams,
+import {
+  CreateSessionSchema,
+  type CreateSessionBody,
+  type RevertSchemaDiffChangeBody,
+  type SessionParams,
 } from './sessions.schema';
 import {
   createSession,
@@ -31,7 +32,8 @@ export async function createSessionHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const userId = (request.user as JwtPayload).sub;
-  const result = await createSession(userId, request.body);
+  const body = CreateSessionSchema.parse(request.body);
+  const result = await createSession(userId, body);
   reply.status(201).send(created(result, MESSAGES.SESSION_CREATED));
 }
 

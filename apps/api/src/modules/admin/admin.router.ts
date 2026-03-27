@@ -57,6 +57,11 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
             sortOrder: { type: 'integer', default: 0 },
             points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
+            datasetScale: {
+              type: 'string',
+              enum: ['tiny', 'small', 'medium', 'large'],
+              default: 'small',
+            },
             problemStatement: { type: 'string' },
             hintText: { type: 'string' },
             referenceSolution: { type: 'string' },
@@ -92,6 +97,11 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             difficulty: { type: 'string', enum: ['beginner', 'intermediate', 'advanced'] },
             sortOrder: { type: 'integer', default: 0 },
             points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
+            datasetScale: {
+              type: 'string',
+              enum: ['tiny', 'small', 'medium', 'large'],
+              default: 'small',
+            },
             problemStatement: { type: 'string' },
             hintText: { type: 'string' },
             referenceSolution: { type: 'string' },

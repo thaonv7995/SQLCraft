@@ -140,11 +140,12 @@ Textarea.displayName = 'Textarea';
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   error?: string;
+  hint?: string;
   options: { value: string; label: string }[];
 }
 
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, label, error, options, id, ...props }, ref) => {
+  ({ className, label, error, hint, options, id, ...props }, ref) => {
     const generatedId = React.useId();
     const selectId = id ?? generatedId;
 
@@ -185,6 +186,9 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           ))}
         </select>
         {error && <p className="text-xs text-error font-body">{error}</p>}
+        {hint && !error && (
+          <p className="text-xs text-on-surface-variant font-body">{hint}</p>
+        )}
       </div>
     );
   }

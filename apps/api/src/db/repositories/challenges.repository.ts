@@ -113,6 +113,7 @@ export interface ChallengeCatalogRow {
   sortOrder: number;
   status: ChallengeRow['status'];
   points: number;
+  datasetScale: ChallengeRow['datasetScale'];
   publishedVersionId: string | null;
   latestVersionId: string | null;
   latestVersionNo: number | null;
@@ -140,6 +141,7 @@ export interface EditableChallengeDetailRow {
   difficulty: ChallengeRow['difficulty'];
   sortOrder: number;
   points: number;
+  datasetScale: ChallengeRow['datasetScale'];
   status: ChallengeRow['status'];
   publishedVersionId: string | null;
   createdBy: string | null;
@@ -594,6 +596,7 @@ export class ChallengesRepository {
         sortOrder: schema.challenges.sortOrder,
         status: schema.challenges.status,
         points: schema.challenges.points,
+        datasetScale: schema.challenges.datasetScale,
         publishedVersionId: schema.challenges.publishedVersionId,
         updatedAt: schema.challenges.updatedAt,
         createdAt: schema.challenges.createdAt,
@@ -642,6 +645,7 @@ export class ChallengesRepository {
         sortOrder: schema.challenges.sortOrder,
         status: schema.challenges.status,
         points: schema.challenges.points,
+        datasetScale: schema.challenges.datasetScale,
         publishedVersionId: schema.challenges.publishedVersionId,
         updatedAt: schema.challenges.updatedAt,
         createdAt: schema.challenges.createdAt,
@@ -684,6 +688,7 @@ export class ChallengesRepository {
         sortOrder: schema.challenges.sortOrder,
         status: schema.challenges.status,
         points: schema.challenges.points,
+        datasetScale: schema.challenges.datasetScale,
         publishedVersionId: schema.challenges.publishedVersionId,
         createdById: schema.users.id,
         createdByUsername: schema.users.username,
@@ -766,6 +771,7 @@ export class ChallengesRepository {
         sortOrder: schema.challenges.sortOrder,
         status: schema.challenges.status,
         points: schema.challenges.points,
+        datasetScale: schema.challenges.datasetScale,
         publishedVersionId: schema.challenges.publishedVersionId,
         createdById: schema.users.id,
         createdByUsername: schema.users.username,
@@ -896,6 +902,7 @@ export class ChallengesRepository {
         difficulty: schema.challenges.difficulty,
         sortOrder: schema.challenges.sortOrder,
         points: schema.challenges.points,
+        datasetScale: schema.challenges.datasetScale,
         status: schema.challenges.status,
         publishedVersionId: schema.challenges.publishedVersionId,
         createdBy: schema.challenges.createdBy,

@@ -184,6 +184,7 @@ export interface ChallengeCatalogItem {
   sortOrder: number;
   status: ChallengeRow['status'];
   points: number;
+  datasetScale: ChallengeRow['datasetScale'];
   publishedVersionId: string | null;
   latestVersionId: string | null;
   latestVersionNo: number | null;
@@ -217,6 +218,7 @@ export interface EditableChallengeDetail {
   difficulty: ChallengeRow['difficulty'];
   sortOrder: number;
   points: number;
+  datasetScale: ChallengeRow['datasetScale'];
   status: ChallengeRow['status'];
   publishedVersionId: string | null;
   updatedAt: Date;
@@ -371,6 +373,7 @@ function normalizeEditableChallengeDetail(row: EditableChallengeDetailRow): Edit
     difficulty: row.difficulty,
     sortOrder: row.sortOrder,
     points: row.points,
+    datasetScale: row.datasetScale,
     status: row.status,
     publishedVersionId: row.publishedVersionId,
     updatedAt: row.updatedAt,
@@ -403,6 +406,7 @@ interface NormalizedChallengeDraftPayload {
   difficulty: ChallengeRow['difficulty'];
   sortOrder: number;
   points: number;
+  datasetScale: ChallengeRow['datasetScale'];
   problemStatement: string;
   hintText?: string;
   expectedResultColumns: string[];
@@ -421,6 +425,7 @@ function normalizeChallengeDraftPayload(
     | 'difficulty'
     | 'sortOrder'
     | 'points'
+    | 'datasetScale'
     | 'problemStatement'
     | 'hintText'
     | 'expectedResultColumns'
@@ -437,6 +442,7 @@ function normalizeChallengeDraftPayload(
     difficulty: data.difficulty,
     sortOrder: data.sortOrder,
     points: data.points ?? 100,
+    datasetScale: data.datasetScale ?? 'small',
     problemStatement: data.problemStatement.trim(),
     hintText: normalizeNullableText(data.hintText) ?? undefined,
     expectedResultColumns: normalizeExpectedResultColumns(data.expectedResultColumns),
@@ -1851,6 +1857,7 @@ export async function createChallenge(
     difficulty: normalized.difficulty,
     sortOrder: normalized.sortOrder,
     points: normalized.points,
+    datasetScale: normalized.datasetScale,
     status: 'draft',
     createdBy: userId,
   });
@@ -1905,6 +1912,7 @@ export async function createChallengeVersion(
       difficulty: normalized.difficulty,
       sortOrder: normalized.sortOrder,
       points: normalized.points,
+      datasetScale: normalized.datasetScale,
     })) ?? existing;
 
   const latestVersionNo = await challengesRepository.getLatestVersionNo(challengeId);
@@ -2009,6 +2017,7 @@ export async function adminUpdateChallenge(
       difficulty: normalized.difficulty,
       sortOrder: normalized.sortOrder,
       points: normalized.points,
+      datasetScale: normalized.datasetScale,
     })) ?? existing;
 
   const version = await challengesRepository.updateVersion(editable.versionId, {

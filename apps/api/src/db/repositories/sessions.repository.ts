@@ -12,6 +12,7 @@ export type InsertSandbox = InferInsertModel<typeof schema.sandboxInstances>;
 export type ChallengeVersionRow = InferSelectModel<typeof schema.challengeVersions>;
 export type ChallengeVersionWithDatabaseRow = ChallengeVersionRow & {
   databaseId: string;
+  datasetScale: 'tiny' | 'small' | 'medium' | 'large';
 };
 
 export class SessionsRepository {
@@ -36,6 +37,7 @@ export class SessionsRepository {
         id: schema.challengeVersions.id,
         challengeId: schema.challengeVersions.challengeId,
         databaseId: schema.challenges.databaseId,
+        datasetScale: schema.challenges.datasetScale,
         versionNo: schema.challengeVersions.versionNo,
         problemStatement: schema.challengeVersions.problemStatement,
         hintText: schema.challengeVersions.hintText,
@@ -64,7 +66,9 @@ export class SessionsRepository {
       )
       .limit(1);
 
-    return row && row.databaseId ? { ...row, databaseId: row.databaseId } : null;
+    return row && row.databaseId && row.datasetScale
+      ? { ...row, databaseId: row.databaseId, datasetScale: row.datasetScale }
+      : null;
   }
 
   async createSession(data: Omit<InsertSession, 'id' | 'createdAt' | 'startedAt'>): Promise<SessionRow> {

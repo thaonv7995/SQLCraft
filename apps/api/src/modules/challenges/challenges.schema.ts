@@ -56,6 +56,7 @@ const CreateChallengeBaseSchema = z.object({
   difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
   sortOrder: z.number().int().default(0),
   points: z.number().int().min(10).max(1000).default(100),
+  datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).default('small'),
   problemStatement: z.string().min(1),
   hintText: z.string().optional(),
   expectedResultColumns: z.array(z.string()).optional(),

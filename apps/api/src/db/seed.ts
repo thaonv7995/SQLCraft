@@ -298,6 +298,7 @@ async function seed() {
         difficulty: 'beginner',
         sortOrder: 1,
         points: 100,
+        datasetScale: 'small',
         status: 'draft',
         createdBy: adminUser.id,
       })

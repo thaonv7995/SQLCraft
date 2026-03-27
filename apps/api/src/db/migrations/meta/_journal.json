@@ -57,6 +57,13 @@
       "when": 1774508402000,
       "tag": "0007_cleanup_legacy_constraints_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1774508403000,
+      "tag": "0008_challenges_dataset_scale",
+      "breakpoints": true
     }
   ]
 }

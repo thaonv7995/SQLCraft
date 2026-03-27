@@ -98,6 +98,7 @@ describe('LeaderboardPage', () => {
         sortOrder: 1,
         status: 'published',
         points: 200,
+        datasetScale: 'small',
         publishedVersionId: 'challenge-version-1',
         latestVersionId: 'challenge-version-1',
         latestVersionNo: 1,
@@ -120,6 +121,7 @@ describe('LeaderboardPage', () => {
         sortOrder: 2,
         status: 'published',
         points: 300,
+        datasetScale: 'small',
         publishedVersionId: 'challenge-version-2',
         latestVersionId: 'challenge-version-2',
         latestVersionNo: 2,
@@ -311,9 +313,7 @@ describe('LeaderboardPage', () => {
 
     await waitFor(() =>
       expect(mocks.sessionsApi.create).toHaveBeenCalledWith({
-        lessonVersionId: 'lesson-version-1',
         challengeVersionId: 'challenge-version-1',
-        selectedScale: 'tiny',
       }),
     );
 

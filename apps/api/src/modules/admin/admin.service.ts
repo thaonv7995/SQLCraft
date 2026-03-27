@@ -110,6 +110,7 @@ export async function createChallenge(
     difficulty: body.difficulty,
     sortOrder: body.sortOrder,
     points: body.points ?? 100,
+    datasetScale: body.datasetScale ?? 'small',
     status: 'draft',
     createdBy: userId,
   });
