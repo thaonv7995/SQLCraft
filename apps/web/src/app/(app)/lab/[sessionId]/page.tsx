@@ -661,7 +661,7 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 space-y-1">
+    <div className="h-full overflow-y-auto p-3 space-y-1">
       <p className="text-xs font-semibold uppercase tracking-wider text-outline px-2 mb-3">
         Tables ({schema.tables.length})
       </p>
@@ -1589,7 +1589,6 @@ const TABS = [
   { id: 'compare', label: 'Compare', icon: 'compare_arrows' },
   { id: 'history', label: 'History', icon: 'history' },
   { id: 'schema', label: 'Schema', icon: 'schema' },
-  { id: 'schemaDiff', label: 'Schema Diff', icon: 'difference' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -1877,6 +1876,12 @@ export default function LabPage() {
   const hasPersistedEditorTabs = Boolean(persistedEditorState);
 
   useEffect(() => {
+    if (activeTab === 'schemaDiff') {
+      setActiveTab('schema');
+    }
+  }, [activeTab, setActiveTab]);
+
+  useEffect(() => {
     if (!sessionId || hydratedEditorSessionIdRef.current === sessionId) {
       return;
     }
@@ -1984,6 +1989,9 @@ export default function LabPage() {
   const [leftWidth, setLeftWidth] = useState(55); // percent
   const resizing = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [schemaTopHeight, setSchemaTopHeight] = useState(50); // percent
+  const schemaResizing = useRef(false);
+  const schemaContainerRef = useRef<HTMLDivElement>(null);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -1998,6 +2006,27 @@ export default function LabPage() {
 
     const onMouseUp = () => {
       resizing.current = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, []);
+
+  const handleSchemaResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    schemaResizing.current = true;
+
+    const onMouseMove = (me: MouseEvent) => {
+      if (!schemaResizing.current || !schemaContainerRef.current) return;
+      const rect = schemaContainerRef.current.getBoundingClientRect();
+      const pct = ((me.clientY - rect.top) / rect.height) * 100;
+      setSchemaTopHeight(Math.min(80, Math.max(20, pct)));
+    };
+
+    const onMouseUp = () => {
+      schemaResizing.current = false;
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
@@ -2350,13 +2379,29 @@ export default function LabPage() {
               />
             )}
             {activeTab === 'history' && <QueryHistoryPanel sessionId={sessionId} />}
-            {activeTab === 'schema' && <SchemaPanel sessionId={sessionId} />}
-            {activeTab === 'schemaDiff' && (
-              <SchemaDiffPanel
-                sessionId={sessionId}
-                onReset={() => resetSandboxMutation.mutate()}
-                isResetting={resetSandboxMutation.isPending}
-              />
+            {activeTab === 'schema' && (
+              <div ref={schemaContainerRef} className="flex flex-1 min-h-0 flex-col overflow-hidden">
+                <div
+                  className="min-h-0 overflow-hidden"
+                  style={{ height: `${schemaTopHeight}%` }}
+                >
+                  <SchemaPanel sessionId={sessionId} />
+                </div>
+                <div
+                  className="group relative h-2 shrink-0 cursor-row-resize bg-surface-container-low transition-colors hover:bg-surface-container-high"
+                  onMouseDown={handleSchemaResizeMouseDown}
+                />
+                <div
+                  className="min-h-0 overflow-hidden"
+                  style={{ height: `${100 - schemaTopHeight}%` }}
+                >
+                  <SchemaDiffPanel
+                    sessionId={sessionId}
+                    onReset={() => resetSandboxMutation.mutate()}
+                    isResetting={resetSandboxMutation.isPending}
+                  />
+                </div>
+              </div>
             )}
           </div>
         </div>
