@@ -201,8 +201,10 @@ async function createPublishedChallenge(
         referenceSolution: lesson.starterQuery,
         validatorType: 'result_set',
         validatorConfig: {
-          baselineDurationMs: 60_000,
-          maxTotalCost: 1_000_000,
+          passCriteria: [
+            { type: 'max_query_duration_ms', maxMs: 60_000 },
+            { type: 'max_explain_total_cost', maxTotalCost: 1_000_000 },
+          ],
         },
       },
     }),

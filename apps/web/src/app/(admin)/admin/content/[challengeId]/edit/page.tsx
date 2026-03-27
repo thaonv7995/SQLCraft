@@ -4,15 +4,28 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
+import {
+  PassCriteriaEditor,
+  type PassCriteriaSchemaState,
+} from '@/components/challenge/pass-criteria-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select, Textarea } from '@/components/ui/input';
+import {
+  expectedResultColumnsFromPassCriteriaRows,
+  newPassCriterionDraft,
+  newRequiredOutputColumnGroup,
+  passCriteriaDraftsFromConfig,
+  passCriteriaDraftsToPayload,
+  type PassCriterionDraft,
+} from '@/lib/challenge-pass-criteria';
 import {
   adminApi,
   challengesApi,
   databasesApi,
   type AdminCreateChallengePayload,
 } from '@/lib/api';
+import { CHALLENGE_SLUG_PATTERN, slugifyChallengeTitle } from '@/lib/slugify-challenge';
 import toast from 'react-hot-toast';
 
 const DIFFICULTY_OPTIONS = [
@@ -20,16 +33,6 @@ const DIFFICULTY_OPTIONS = [
   { value: 'intermediate', label: 'Intermediate' },
   { value: 'advanced', label: 'Advanced' },
 ] as const;
-
-const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-function parseExpectedColumns(raw: string): string[] | undefined {
-  const cols = raw
-    .split(/[,;\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return cols.length > 0 ? cols : undefined;
-}
 
 export default function AdminEditChallengePage() {
   const router = useRouter();
@@ -58,7 +61,6 @@ export default function AdminEditChallengePage() {
   }, [databasesQuery.data?.items]);
 
   const [databaseId, setDatabaseId] = useState('');
-  const [slug, setSlug] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [difficulty, setDifficulty] = useState<'beginner' | 'intermediate' | 'advanced'>('beginner');
@@ -67,10 +69,24 @@ export default function AdminEditChallengePage() {
   const [problemStatement, setProblemStatement] = useState('');
   const [hintText, setHintText] = useState('');
   const [referenceSolution, setReferenceSolution] = useState('');
-  const [expectedColumnsRaw, setExpectedColumnsRaw] = useState('');
-  const [baselineDurationMs, setBaselineDurationMs] = useState(5000);
-  const [maxTotalCost, setMaxTotalCost] = useState(10_000);
-  const [requiresIndexOptimization, setRequiresIndexOptimization] = useState(false);
+  const [passCriteriaRows, setPassCriteriaRows] = useState<PassCriterionDraft[]>(() =>
+    passCriteriaDraftsFromConfig(null),
+  );
+
+  const databaseSchemaQuery = useQuery({
+    queryKey: ['admin-challenge-form-database', databaseId],
+    enabled: Boolean(databaseId),
+    queryFn: () => databasesApi.get(databaseId),
+  });
+
+  const schemaTables = databaseSchemaQuery.data?.schema ?? [];
+  const passCriteriaSchemaState: PassCriteriaSchemaState = !databaseId
+    ? 'no-database'
+    : databaseSchemaQuery.isLoading
+      ? 'loading'
+      : databaseSchemaQuery.isError
+        ? 'error'
+        : 'ready';
 
   useEffect(() => {
     hydratedRef.current = false;
@@ -81,17 +97,8 @@ export default function AdminEditChallengePage() {
     if (!data || hydratedRef.current) return;
     const v = data.latestVersion;
     const cfg = v.validatorConfig && typeof v.validatorConfig === 'object' ? v.validatorConfig : {};
-    const baseline =
-      typeof cfg.baselineDurationMs === 'number' && Number.isFinite(cfg.baselineDurationMs)
-        ? cfg.baselineDurationMs
-        : 5000;
-    const maxCost =
-      typeof cfg.maxTotalCost === 'number' && Number.isFinite(cfg.maxTotalCost)
-        ? cfg.maxTotalCost
-        : 10_000;
 
     setDatabaseId(data.databaseId ?? '');
-    setSlug(data.slug);
     setTitle(data.title);
     setDescription(data.description ?? '');
     setDifficulty(data.difficulty as 'beginner' | 'intermediate' | 'advanced');
@@ -100,10 +107,21 @@ export default function AdminEditChallengePage() {
     setProblemStatement(v.problemStatement);
     setHintText(v.hintText ?? '');
     setReferenceSolution(v.referenceSolution ?? '');
-    setExpectedColumnsRaw((v.expectedResultColumns ?? []).join(', '));
-    setBaselineDurationMs(baseline);
-    setMaxTotalCost(maxCost);
-    setRequiresIndexOptimization(cfg.requiresIndexOptimization === true);
+    let rows = passCriteriaDraftsFromConfig(cfg as Record<string, unknown>);
+    const existingCols = v.expectedResultColumns ?? [];
+    const hasColCriterion = rows.some((r) => r.type === 'required_output_columns');
+    if (existingCols.length > 0 && !hasColCriterion) {
+      const { key } = newPassCriterionDraft('required_output_columns');
+      rows = [
+        ...rows,
+        {
+          key,
+          type: 'required_output_columns' as const,
+          groups: [{ ...newRequiredOutputColumnGroup(), columns: [...existingCols] }],
+        },
+      ];
+    }
+    setPassCriteriaRows(rows);
     hydratedRef.current = true;
   }, [draftQuery.data]);
 
@@ -128,28 +146,30 @@ export default function AdminEditChallengePage() {
       toast.error('Select a database');
       return;
     }
-    if (!SLUG_PATTERN.test(slug)) {
-      toast.error('Slug: lowercase letters, numbers, and hyphens only (e.g. total-orders-q1)');
+    const slug = slugifyChallengeTitle(title);
+    if (!slug || !CHALLENGE_SLUG_PATTERN.test(slug)) {
+      toast.error(
+        'Title must include letters or numbers so a URL slug can be generated (e.g. Total orders Q1).',
+      );
       return;
     }
     if (!referenceSolution.trim()) {
       toast.error('Reference SQL is required for result_set validation');
       return;
     }
-    if (!Number.isFinite(baselineDurationMs) || baselineDurationMs <= 0) {
-      toast.error('Max query duration must be a positive number (ms)');
-      return;
-    }
-    if (!Number.isFinite(maxTotalCost) || maxTotalCost <= 0) {
-      toast.error('Max planner cost (EXPLAIN total cost) must be a positive number');
+    let validatorConfig: AdminCreateChallengePayload['validatorConfig'];
+    try {
+      validatorConfig = passCriteriaDraftsToPayload(passCriteriaRows);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Invalid pass criteria');
       return;
     }
 
-    const expectedResultColumns = parseExpectedColumns(expectedColumnsRaw);
+    const expectedResultColumns = expectedResultColumnsFromPassCriteriaRows(passCriteriaRows);
 
     updateMutation.mutate({
       databaseId,
-      slug: slug.trim(),
+      slug,
       title: title.trim(),
       description: description.trim() || undefined,
       difficulty,
@@ -160,22 +180,8 @@ export default function AdminEditChallengePage() {
       referenceSolution: referenceSolution.trim(),
       expectedResultColumns,
       validatorType: 'result_set',
-      validatorConfig: {
-        baselineDurationMs,
-        maxTotalCost,
-        ...(requiresIndexOptimization ? { requiresIndexOptimization: true } : {}),
-      },
+      validatorConfig,
     });
-  };
-
-  const suggestSlugFromTitle = () => {
-    const s = title
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 100);
-    if (s) setSlug(s);
   };
 
   if (!challengeId) {
@@ -231,34 +237,15 @@ export default function AdminEditChallengePage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Select
-                label="Database (schema)"
-                value={databaseId}
-                onChange={(e) => setDatabaseId(e.target.value)}
-                options={[
-                  { value: '', label: databasesQuery.isLoading ? 'Loading…' : 'Select database' },
-                  ...databaseOptions,
-                ]}
-              />
-              <div className="flex flex-col gap-1.5">
-                <Input
-                  label="Slug"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  placeholder="e.g. monthly-revenue"
-                  hint="Lowercase, numbers, hyphens only. Unique per database."
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="self-start text-xs"
-                  onClick={suggestSlugFromTitle}
-                >
-                  Suggest from title
-                </Button>
-              </div>
-            </div>
+            <Select
+              label="Database (schema)"
+              value={databaseId}
+              onChange={(e) => setDatabaseId(e.target.value)}
+              options={[
+                { value: '', label: databasesQuery.isLoading ? 'Loading…' : 'Select database' },
+                ...databaseOptions,
+              ]}
+            />
 
             <Input
               label="Title"
@@ -266,6 +253,7 @@ export default function AdminEditChallengePage() {
               onChange={(e) => setTitle(e.target.value)}
               required
               placeholder="Short display title"
+              hint="URL slug is generated from the title (lowercase, hyphens). Unique per database."
             />
 
             <Textarea
@@ -326,46 +314,11 @@ export default function AdminEditChallengePage() {
               hint="Required for result_set checking. This query defines the expected result shape."
             />
 
-            <div className="rounded-lg border border-outline-variant/20 bg-surface-container-low/40 p-4 space-y-3">
-              <p className="text-sm font-medium text-on-surface">Pass thresholds</p>
-              <p className="text-xs text-on-surface-variant">
-                Learners must return the correct result set and stay within these limits (when set) to pass.
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input
-                  label="Max query duration (ms)"
-                  type="number"
-                  min={1}
-                  value={baselineDurationMs}
-                  onChange={(e) => setBaselineDurationMs(Number(e.target.value) || 0)}
-                  hint="Wall-clock execution time on the sandbox must be ≤ this value."
-                />
-                <Input
-                  label="Max EXPLAIN total cost"
-                  type="number"
-                  min={1}
-                  step="any"
-                  value={maxTotalCost}
-                  onChange={(e) => setMaxTotalCost(Number(e.target.value) || 0)}
-                  hint="Planner total cost from EXPLAIN must be ≤ this value."
-                />
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-on-surface">
-                <input
-                  type="checkbox"
-                  checked={requiresIndexOptimization}
-                  onChange={(e) => setRequiresIndexOptimization(e.target.checked)}
-                  className="size-4 rounded border-outline"
-                />
-                Require index usage (EXPLAIN must show index scan when enabled)
-              </label>
-            </div>
-
-            <Input
-              label="Expected columns (optional)"
-              value={expectedColumnsRaw}
-              onChange={(e) => setExpectedColumnsRaw(e.target.value)}
-              placeholder="id, name, total — comma-separated"
+            <PassCriteriaEditor
+              rows={passCriteriaRows}
+              onChange={setPassCriteriaRows}
+              schemaTables={schemaTables}
+              schemaState={passCriteriaSchemaState}
             />
 
             <div className="flex flex-wrap gap-2 pt-2">

@@ -13,8 +13,7 @@ import {
   type ChallengeCatalogItem,
   type DatasetScale,
 } from '@/lib/api';
-import { ChallengePassMetricsPanel } from '@/components/challenge/challenge-pass-metrics';
-import { getChallengePassCriteriaLines } from '@/lib/challenge-pass-criteria';
+import { ChallengePassCriteriaDisplay } from '@/components/challenge/challenge-pass-criteria-display';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import { useAuthStore } from '@/stores/auth';
 import { formatRelativeTime } from '@/lib/utils';
@@ -178,33 +177,10 @@ export default function ChallengeDetailPage() {
               <p className="mb-3 text-xs uppercase tracking-[0.18em] text-outline">
                 Tiêu chí đạt (pass)
               </p>
-              <ChallengePassMetricsPanel validatorConfig={versionQuery.data.validatorConfig} />
-              <ul className="mt-4 list-disc space-y-2 pl-4 text-sm leading-relaxed text-on-surface-variant">
-                {getChallengePassCriteriaLines({
-                  validatorType: versionQuery.data.validatorType,
-                  validatorConfig: versionQuery.data.validatorConfig,
-                  points: versionQuery.data.points,
-                }).map((line, index) => (
-                  <li key={index}>{line}</li>
-                ))}
-              </ul>
-              {versionQuery.data.expectedResultColumns.length > 0 ? (
-                <div className="mt-4 border-t border-outline-variant/10 pt-4">
-                  <p className="mb-2 text-xs uppercase tracking-[0.18em] text-outline">
-                    Cột kết quả kỳ vọng
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {versionQuery.data.expectedResultColumns.map((column) => (
-                      <code
-                        key={column}
-                        className="rounded-md bg-surface-container-high px-2 py-1 text-xs"
-                      >
-                        {column}
-                      </code>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+              <ChallengePassCriteriaDisplay
+                validatorConfig={versionQuery.data.validatorConfig}
+                showExplainer={false}
+              />
             </div>
           ) : null}
         </div>

@@ -210,6 +210,12 @@ export interface ChallengeVersionDetail {
   createdAt: string;
 }
 
+export interface PassCriterionCheckClient {
+  type: string;
+  passed: boolean;
+  detail: string;
+}
+
 export interface ChallengeEvaluation {
   isCorrect: boolean;
   passesChallenge?: boolean;
@@ -226,6 +232,7 @@ export interface ChallengeEvaluation {
   queryTotalCost?: number | null;
   queryActualTime?: number | null;
   schemaDiff?: Record<string, unknown> | null;
+  passCriterionChecks?: PassCriterionCheckClient[];
 }
 
 export interface ChallengeAttempt {
@@ -1782,11 +1789,21 @@ export const usersApi = {
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 
-/** Matches server `ChallengeValidatorConfigSchema` (pass thresholds). */
+/** Matches server `PassCriterionSchema` / `ChallengeValidatorConfigSchema`. */
+export type PassCriterionPayload =
+  | { type: 'max_query_duration_ms'; maxMs: number }
+  | { type: 'max_explain_total_cost'; maxTotalCost: number }
+  | { type: 'requires_index_usage' }
+  | {
+      type: 'required_output_columns';
+      columns: string[];
+      /** Schema-aware picks (table + column); optional for legacy configs. */
+      selections?: Array<{ table: string; column: string }>;
+    }
+  | { type: 'required_tables_in_query'; tables: string[]; matchMode?: 'all' | 'any' };
+
 export type ChallengeValidatorConfigPayload = {
-  baselineDurationMs: number;
-  maxTotalCost: number;
-  requiresIndexOptimization?: boolean;
+  passCriteria: PassCriterionPayload[];
 };
 
 /** POST /admin/challenges — creates a draft challenge and version 1 (admin-only). */

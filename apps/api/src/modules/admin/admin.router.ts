@@ -97,10 +97,16 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             referenceSolution: { type: 'string' },
             expectedResultColumns: { type: 'array', items: { type: 'string' } },
             validatorType: { type: 'string', default: 'result_set' },
+            /** Shape is validated by CreateChallengeSchema (Zod); allow passCriteria + optional legacy keys. */
             validatorConfig: {
               type: 'object',
-              required: ['baselineDurationMs', 'maxTotalCost'],
+              additionalProperties: true,
               properties: {
+                passCriteria: {
+                  type: 'array',
+                  minItems: 1,
+                  items: { type: 'object', additionalProperties: true },
+                },
                 baselineDurationMs: { type: 'number' },
                 maxTotalCost: { type: 'number' },
                 requiresIndexOptimization: { type: 'boolean' },

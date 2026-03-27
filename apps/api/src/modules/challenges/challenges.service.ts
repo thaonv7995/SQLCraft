@@ -36,6 +36,11 @@ import type {
   SubmitAttemptBody,
   ValidateChallengeDraftBody,
 } from './challenges.schema';
+import {
+  ChallengeValidatorConfigSchema,
+  parseValidatorConfigWithLegacy,
+  type PassCriterion,
+} from './challenge-validator-config.schema';
 
 async function withPresignedLeaderboardAvatars<T extends { avatarUrl: string | null }>(
   entries: T[],
@@ -46,6 +51,12 @@ async function withPresignedLeaderboardAvatars<T extends { avatarUrl: string | n
       avatarUrl: await resolvePublicAvatarUrl(entry.avatarUrl),
     })),
   );
+}
+
+export interface PassCriterionCheck {
+  type: PassCriterion['type'];
+  passed: boolean;
+  detail: string;
 }
 
 export interface AttemptEvaluation {
@@ -65,6 +76,8 @@ export interface AttemptEvaluation {
   queryTotalCost?: number | null;
   queryActualTime?: number | null;
   schemaDiff?: SessionSchemaDiffResult | null;
+  /** Per-rule outcome when `validator_config.passCriteria` is used. */
+  passCriterionChecks?: PassCriterionCheck[];
 }
 
 export interface AttemptResult {
@@ -274,44 +287,8 @@ function normalizeExpectedResultColumns(value: unknown): string[] {
 }
 
 function normalizeValidatorConfig(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const config = value as Record<string, unknown>;
-  const normalized: Record<string, unknown> = {};
-  const baselineCandidate = config.baselineDurationMs;
-  const baselineDurationMs =
-    typeof baselineCandidate === 'number'
-      ? baselineCandidate
-      : typeof baselineCandidate === 'string'
-        ? Number(baselineCandidate)
-        : null;
-
-  if (
-    typeof baselineDurationMs === 'number' &&
-    Number.isFinite(baselineDurationMs) &&
-    baselineDurationMs > 0
-  ) {
-    normalized.baselineDurationMs = baselineDurationMs;
-  }
-
-  const maxCostCandidate = config.maxTotalCost;
-  const maxTotalCost =
-    typeof maxCostCandidate === 'number'
-      ? maxCostCandidate
-      : typeof maxCostCandidate === 'string'
-        ? Number(maxCostCandidate)
-        : null;
-  if (typeof maxTotalCost === 'number' && Number.isFinite(maxTotalCost) && maxTotalCost > 0) {
-    normalized.maxTotalCost = maxTotalCost;
-  }
-
-  if (config.requiresIndexOptimization === true) {
-    normalized.requiresIndexOptimization = true;
-  }
-
-  return Object.keys(normalized).length > 0 ? normalized : null;
+  const cfg = parseValidatorConfigWithLegacy(value);
+  return cfg ? (cfg as unknown as Record<string, unknown>) : null;
 }
 
 function normalizeChallengeVersionDetail(
@@ -465,7 +442,14 @@ function normalizeChallengeDraftPayload(
     expectedResultColumns: normalizeExpectedResultColumns(data.expectedResultColumns),
     referenceSolution: normalizeNullableText(data.referenceSolution),
     validatorType: data.validatorType,
-    validatorConfig: normalizeValidatorConfig(data.validatorConfig),
+    validatorConfig: (() => {
+      const ok = ChallengeValidatorConfigSchema.safeParse(data.validatorConfig);
+      if (ok.success) {
+        return ok.data as unknown as Record<string, unknown>;
+      }
+      const migrated = parseValidatorConfigWithLegacy(data.validatorConfig);
+      return migrated ? (migrated as unknown as Record<string, unknown>) : null;
+    })(),
   };
 }
 
@@ -508,31 +492,13 @@ async function buildDraftValidation(
     warnings.push('Description is empty. Add a short teaching summary for reviewers.');
   }
 
-  const baselineCandidate = normalized.validatorConfig?.baselineDurationMs;
-  const baselineDurationMs =
-    typeof baselineCandidate === 'number' && Number.isFinite(baselineCandidate)
-      ? baselineCandidate
-      : null;
-
-  if (baselineDurationMs === null || baselineDurationMs <= 0) {
-    errors.push('baselineDurationMs must be a positive number (ms) — required for pass.');
-  }
-
-  const maxCostCandidate = normalized.validatorConfig?.maxTotalCost;
-  const maxTotalCostDraft =
-    typeof maxCostCandidate === 'number' && Number.isFinite(maxCostCandidate)
-      ? maxCostCandidate
-      : null;
-
-  if (maxTotalCostDraft === null || maxTotalCostDraft <= 0) {
-    errors.push('maxTotalCost must be a positive number — EXPLAIN total cost ceiling for pass.');
-  }
-
-  if (
-    normalized.validatorConfig?.requiresIndexOptimization === true &&
-    baselineDurationMs === null
-  ) {
-    errors.push('Baseline duration is required when index optimization is enabled.');
+  const cfg = normalized.validatorConfig
+    ? parseValidatorConfigWithLegacy(normalized.validatorConfig)
+    : null;
+  if (!cfg || cfg.passCriteria.length === 0) {
+    errors.push(
+      'validatorConfig must include passCriteria with at least one rule (or valid legacy baseline/maxTotalCost).',
+    );
   }
 
   return {
@@ -948,6 +914,165 @@ function compareResultSets(
   return { matches: true };
 }
 
+function resultContainsAllColumnNames(actual: string[], required: string[]): boolean {
+  const set = new Set(actual.map((c) => c.trim().toLowerCase()));
+  return required.every((r) => set.has(r.trim().toLowerCase()));
+}
+
+function sqlReferencesTable(sql: string, table: string): boolean {
+  const t = table.trim().toLowerCase();
+  if (!t) return false;
+  const s = sql.replace(/\s+/g, ' ').toLowerCase();
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b(from|join)\\s+(?:[\\w"]+\\.)?${esc}\\b`, 'i').test(s);
+}
+
+function meetsAllOfType(
+  passCriteria: PassCriterion[],
+  checks: PassCriterionCheck[],
+  t: PassCriterion['type'],
+): boolean | null {
+  let any = false;
+  for (let i = 0; i < passCriteria.length; i++) {
+    if (passCriteria[i].type === t) {
+      any = true;
+      if (checks[i] === undefined || !checks[i].passed) {
+        return false;
+      }
+    }
+  }
+  return any ? true : null;
+}
+
+function deriveLegacyMetricsFromCriteria(
+  passCriteria: PassCriterion[],
+  checks: PassCriterionCheck[],
+): {
+  baselineDurationMs: number | null;
+  maxTotalCost: number | null;
+  requiresIndexOptimization: boolean;
+  meetsPerformanceTarget: boolean | null;
+  meetsCostTarget: boolean | null;
+} {
+  const firstDur = passCriteria.find(
+    (c): c is Extract<PassCriterion, { type: 'max_query_duration_ms' }> =>
+      c.type === 'max_query_duration_ms',
+  );
+  const firstCost = passCriteria.find(
+    (c): c is Extract<PassCriterion, { type: 'max_explain_total_cost' }> =>
+      c.type === 'max_explain_total_cost',
+  );
+  const needsIndex = passCriteria.some((c) => c.type === 'requires_index_usage');
+
+  return {
+    baselineDurationMs: firstDur?.maxMs ?? null,
+    maxTotalCost: firstCost?.maxTotalCost ?? null,
+    requiresIndexOptimization: needsIndex,
+    meetsPerformanceTarget: meetsAllOfType(passCriteria, checks, 'max_query_duration_ms'),
+    meetsCostTarget: meetsAllOfType(passCriteria, checks, 'max_explain_total_cost'),
+  };
+}
+
+function passChecksWhenQueryFailed(
+  passCriteria: PassCriterion[],
+  sqlText: string,
+): PassCriterionCheck[] {
+  return passCriteria.map((c) => {
+    if (c.type === 'required_tables_in_query') {
+      const mentions = (t: string) => sqlReferencesTable(sqlText, t);
+      const ok = c.matchMode === 'all' ? c.tables.every(mentions) : c.tables.some(mentions);
+      return {
+        type: c.type,
+        passed: ok,
+        detail: ok
+          ? `SQL references required table(s) (${c.matchMode}).`
+          : `SQL must ${c.matchMode === 'all' ? 'reference all of' : 'reference at least one of'}: ${c.tables.join(', ')}.`,
+      };
+    }
+    return {
+      type: c.type,
+      passed: false,
+      detail: 'Query did not complete successfully.',
+    };
+  });
+}
+
+function runPassCriteriaChecks(params: {
+  passCriteria: PassCriterion[];
+  latestDurationMs: number | null;
+  latestTotalCost: number | null;
+  sqlText: string;
+  resultPreview: NormalizedResultPreview;
+  usedIndexing: boolean;
+}): PassCriterionCheck[] {
+  const {
+    passCriteria,
+    latestDurationMs,
+    latestTotalCost,
+    sqlText,
+    resultPreview,
+    usedIndexing,
+  } = params;
+
+  return passCriteria.map((c) => {
+    switch (c.type) {
+      case 'max_query_duration_ms': {
+        const ok = latestDurationMs !== null && latestDurationMs <= c.maxMs;
+        return {
+          type: c.type,
+          passed: ok,
+          detail: ok
+            ? `Runtime ${latestDurationMs} ms ≤ ${c.maxMs} ms.`
+            : latestDurationMs === null
+              ? `Runtime unknown; limit is ${c.maxMs} ms.`
+              : `Runtime ${latestDurationMs} ms exceeds ${c.maxMs} ms.`,
+        };
+      }
+      case 'max_explain_total_cost': {
+        const ok = latestTotalCost !== null && latestTotalCost <= c.maxTotalCost;
+        return {
+          type: c.type,
+          passed: ok,
+          detail: ok
+            ? `Planner total cost ${latestTotalCost} ≤ ${c.maxTotalCost}.`
+            : latestTotalCost === null
+              ? `Planner cost unknown; limit is ${c.maxTotalCost}.`
+              : `Planner total cost ${latestTotalCost} exceeds ${c.maxTotalCost}.`,
+        };
+      }
+      case 'requires_index_usage':
+        return {
+          type: c.type,
+          passed: usedIndexing,
+          detail: usedIndexing
+            ? 'Plan shows index usage and prior session DDL supports it.'
+            : 'Plan does not show required index usage (or no CREATE INDEX before this query).',
+        };
+      case 'required_output_columns': {
+        const ok = resultContainsAllColumnNames(resultPreview.columns, c.columns);
+        return {
+          type: c.type,
+          passed: ok,
+          detail: ok
+            ? `Output includes required columns: ${c.columns.join(', ')}.`
+            : `Output must include all columns: ${c.columns.join(', ')}. Got: ${resultPreview.columns.join(', ') || '(none)'}.`,
+        };
+      }
+      case 'required_tables_in_query': {
+        const mentions = (t: string) => sqlReferencesTable(sqlText, t);
+        const ok = c.matchMode === 'all' ? c.tables.every(mentions) : c.tables.some(mentions);
+        return {
+          type: c.type,
+          passed: ok,
+          detail: ok
+            ? `SQL references required table(s) (${c.matchMode}).`
+            : `SQL must ${c.matchMode === 'all' ? 'use all of' : 'use at least one of'}: ${c.tables.join(', ')}.`,
+        };
+      }
+    }
+  });
+}
+
 function shouldExplainAnalyze(sqlText: string): boolean {
   return /^(select|with)\b/i.test(sqlText.trim());
 }
@@ -1032,15 +1157,104 @@ function detectIndexUsage(
   return hasIndex;
 }
 
+function buildAttemptEvaluationFromCriteria(params: {
+  challengeVersion: Pick<
+    PublishedChallengeVersionRow,
+    'validatorType' | 'validatorConfig' | 'expectedResultColumns' | 'referenceSolution' | 'points'
+  >;
+  queryExecution: {
+    id?: string;
+    status: string;
+    resultPreview: unknown;
+    rowsReturned: number | null;
+    errorMessage: string | null;
+    durationMs: number | null;
+    sqlText?: string | null;
+  };
+  sessionExecutions: SessionExecutionSummaryRow[];
+  context: AttemptEvaluationContext;
+  isCorrect: boolean;
+  incorrectFeedbackText: string | null;
+}): AttemptEvaluation {
+  const totalPoints = Math.max(0, params.challengeVersion.points ?? 100);
+  const parsed = parseValidatorConfigWithLegacy(params.challengeVersion.validatorConfig);
+  const passCriteria = parsed?.passCriteria ?? [];
+  const sqlText = (params.queryExecution.sqlText ?? '').trim();
+  const latestDurationMs = params.queryExecution.durationMs ?? null;
+  const latestTotalCost = normalizeNullableMetric(params.context.explainPlan?.planSummary?.totalCost);
+
+  const querySucceeded = params.queryExecution.status === 'succeeded';
+  const resultPreview = querySucceeded
+    ? normalizeResultPreview(params.queryExecution.resultPreview)
+    : normalizeResultPreview(null);
+
+  const usedIndexing = passCriteria.some((c) => c.type === 'requires_index_usage')
+    ? detectIndexUsage(
+        params.sessionExecutions,
+        params.queryExecution.id,
+        params.context.explainPlan,
+      )
+    : false;
+
+  const checks = querySucceeded
+    ? runPassCriteriaChecks({
+        passCriteria,
+        latestDurationMs,
+        latestTotalCost,
+        sqlText,
+        resultPreview,
+        usedIndexing,
+      })
+    : passChecksWhenQueryFailed(passCriteria, sqlText);
+
+  const leg = deriveLegacyMetricsFromCriteria(passCriteria, checks);
+  const passesChallenge =
+    params.isCorrect && (passCriteria.length === 0 || checks.every((c) => c.passed));
+
+  const evaluation: AttemptEvaluation = {
+    isCorrect: params.isCorrect,
+    passesChallenge,
+    score: passesChallenge ? totalPoints : 0,
+    feedbackText: params.isCorrect ? '' : (params.incorrectFeedbackText ?? 'Incorrect.'),
+    pointsPossible: totalPoints,
+    baselineDurationMs: leg.baselineDurationMs,
+    latestDurationMs,
+    meetsPerformanceTarget: leg.meetsPerformanceTarget,
+    maxTotalCost: leg.maxTotalCost,
+    meetsCostTarget: leg.meetsCostTarget,
+    queryTotalCost: latestTotalCost,
+    requiresIndexOptimization: leg.requiresIndexOptimization,
+    usedIndexing,
+    passCriterionChecks: passCriteria.length > 0 ? checks : undefined,
+  };
+
+  evaluation.feedbackText = buildFeedback(evaluation);
+  return evaluation;
+}
+
 function buildFeedback(evaluation: AttemptEvaluation): string {
   if (!evaluation.isCorrect) {
-    return evaluation.feedbackText;
+    const base = evaluation.feedbackText;
+    if (evaluation.passCriterionChecks?.length) {
+      const extra = evaluation.passCriterionChecks
+        .map((ch) => `${ch.passed ? 'OK:' : 'Miss:'} [${ch.type}] ${ch.detail}`)
+        .join(' ');
+      return `${base} ${extra}`.trim();
+    }
+    return base;
   }
 
   const notes: string[] = [
     evaluation.passesChallenge ? 'Challenge passed.' : 'Challenge requirements not met.',
     'Result set matches the validator.',
   ];
+
+  if (evaluation.passCriterionChecks?.length) {
+    for (const ch of evaluation.passCriterionChecks) {
+      notes.push(`${ch.passed ? 'OK:' : 'Miss:'} [${ch.type}] ${ch.detail}`);
+    }
+    return notes.join(' ');
+  }
 
   if (evaluation.baselineDurationMs !== null) {
     if (evaluation.meetsPerformanceTarget === true) {
@@ -1094,52 +1308,20 @@ export function evaluateAttempt(
     rowsReturned: number | null;
     errorMessage: string | null;
     durationMs: number | null;
+    sqlText?: string | null;
   },
   sessionExecutions: SessionExecutionSummaryRow[] = [],
   context: AttemptEvaluationContext = {},
 ): AttemptEvaluation {
-  const config =
-    challengeVersion.validatorConfig && typeof challengeVersion.validatorConfig === 'object'
-      ? (challengeVersion.validatorConfig as Record<string, unknown>)
-      : {};
-  const baselineDurationMs =
-    typeof config.baselineDurationMs === 'number' &&
-    Number.isFinite(config.baselineDurationMs) &&
-    config.baselineDurationMs > 0
-      ? config.baselineDurationMs
-      : null;
-  const maxTotalCost =
-    typeof config.maxTotalCost === 'number' &&
-    Number.isFinite(config.maxTotalCost) &&
-    config.maxTotalCost > 0
-      ? config.maxTotalCost
-      : null;
-  const requiresIndexOptimization = config.requiresIndexOptimization === true;
-  const totalPoints = Math.max(0, challengeVersion.points ?? 100);
-
-  const failMeta = {
-    baselineDurationMs,
-    maxTotalCost,
-    meetsCostTarget: maxTotalCost === null ? null : false,
-    queryTotalCost: null as number | null,
-  };
-
   if (queryExecution.status !== 'succeeded') {
-    return {
+    return buildAttemptEvaluationFromCriteria({
+      challengeVersion,
+      queryExecution,
+      sessionExecutions,
+      context,
       isCorrect: false,
-      passesChallenge: false,
-      score: 0,
-      feedbackText: `Query execution failed: ${queryExecution.errorMessage ?? 'Unknown error'}`,
-      pointsPossible: totalPoints,
-      baselineDurationMs,
-      latestDurationMs: queryExecution.durationMs ?? null,
-      meetsPerformanceTarget: baselineDurationMs === null ? null : false,
-      maxTotalCost: failMeta.maxTotalCost,
-      meetsCostTarget: failMeta.meetsCostTarget,
-      queryTotalCost: failMeta.queryTotalCost,
-      requiresIndexOptimization,
-      usedIndexing: false,
-    };
+      incorrectFeedbackText: `Query execution failed: ${queryExecution.errorMessage ?? 'Unknown error'}`,
+    });
   }
 
   const expectedColumns = normalizeExpectedResultColumns(challengeVersion.expectedResultColumns);
@@ -1147,21 +1329,14 @@ export function evaluateAttempt(
 
   if (challengeVersion.validatorType === 'result_set') {
     if (resultPreview.columns.length === 0) {
-      return {
+      return buildAttemptEvaluationFromCriteria({
+        challengeVersion,
+        queryExecution,
+        sessionExecutions,
+        context,
         isCorrect: false,
-        passesChallenge: false,
-        score: 0,
-        feedbackText: 'No results returned',
-        pointsPossible: totalPoints,
-        baselineDurationMs,
-        latestDurationMs: queryExecution.durationMs ?? null,
-        meetsPerformanceTarget: baselineDurationMs === null ? null : false,
-        maxTotalCost: failMeta.maxTotalCost,
-        meetsCostTarget: failMeta.meetsCostTarget,
-        queryTotalCost: failMeta.queryTotalCost,
-        requiresIndexOptimization,
-        usedIndexing: false,
-      };
+        incorrectFeedbackText: 'No results returned',
+      });
     }
 
     if (context.referenceResult) {
@@ -1172,76 +1347,36 @@ export function evaluateAttempt(
       );
 
       if (!comparison.matches) {
-        return {
+        return buildAttemptEvaluationFromCriteria({
+          challengeVersion,
+          queryExecution,
+          sessionExecutions,
+          context,
           isCorrect: false,
-          passesChallenge: false,
-          score: 0,
-          feedbackText: comparison.feedbackText ?? 'Result set does not match the reference solution.',
-          pointsPossible: totalPoints,
-          baselineDurationMs,
-          latestDurationMs: queryExecution.durationMs ?? null,
-          meetsPerformanceTarget: baselineDurationMs === null ? null : false,
-          maxTotalCost: failMeta.maxTotalCost,
-          meetsCostTarget: failMeta.meetsCostTarget,
-          queryTotalCost: failMeta.queryTotalCost,
-          requiresIndexOptimization,
-          usedIndexing: false,
-        };
+          incorrectFeedbackText:
+            comparison.feedbackText ?? 'Result set does not match the reference solution.',
+        });
       }
     } else if (expectedColumns.length > 0 && !compareColumnLists(resultPreview.columns, expectedColumns)) {
-      return {
+      return buildAttemptEvaluationFromCriteria({
+        challengeVersion,
+        queryExecution,
+        sessionExecutions,
+        context,
         isCorrect: false,
-        passesChallenge: false,
-        score: 0,
-        feedbackText: `Expected columns: ${expectedColumns.join(', ')}. Got: ${resultPreview.columns.join(', ')}`,
-        pointsPossible: totalPoints,
-        baselineDurationMs,
-        latestDurationMs: queryExecution.durationMs ?? null,
-        meetsPerformanceTarget: baselineDurationMs === null ? null : false,
-        maxTotalCost: failMeta.maxTotalCost,
-        meetsCostTarget: failMeta.meetsCostTarget,
-        queryTotalCost: failMeta.queryTotalCost,
-        requiresIndexOptimization,
-        usedIndexing: false,
-      };
+        incorrectFeedbackText: `Expected columns: ${expectedColumns.join(', ')}. Got: ${resultPreview.columns.join(', ')}`,
+      });
     }
   }
 
-  const latestDurationMs = queryExecution.durationMs ?? null;
-  const meetsPerformanceTarget =
-    baselineDurationMs === null ? null : latestDurationMs !== null && latestDurationMs <= baselineDurationMs;
-
-  const latestTotalCost = normalizeNullableMetric(context.explainPlan?.planSummary?.totalCost);
-  const meetsCostTarget =
-    maxTotalCost === null ? null : latestTotalCost !== null && latestTotalCost <= maxTotalCost;
-
-  const usedIndexing =
-    requiresIndexOptimization
-      ? detectIndexUsage(sessionExecutions, queryExecution.id, context.explainPlan)
-      : false;
-  const passesChallenge =
-    (baselineDurationMs === null || meetsPerformanceTarget === true) &&
-    (maxTotalCost === null || meetsCostTarget === true) &&
-    (!requiresIndexOptimization || usedIndexing);
-
-  const evaluation: AttemptEvaluation = {
+  return buildAttemptEvaluationFromCriteria({
+    challengeVersion,
+    queryExecution,
+    sessionExecutions,
+    context,
     isCorrect: true,
-    passesChallenge,
-    score: passesChallenge ? totalPoints : 0,
-    feedbackText: '',
-    pointsPossible: totalPoints,
-    baselineDurationMs,
-    latestDurationMs,
-    meetsPerformanceTarget,
-    maxTotalCost,
-    meetsCostTarget,
-    queryTotalCost: latestTotalCost,
-    requiresIndexOptimization,
-    usedIndexing,
-  };
-  evaluation.feedbackText = buildFeedback(evaluation);
-
-  return evaluation;
+    incorrectFeedbackText: null,
+  });
 }
 
 function buildSandboxConnectionString(params: {
@@ -1282,10 +1417,10 @@ async function buildEvaluationContext(
     containerRef: sandbox.containerRef ?? null,
   });
   const runtime = getSandboxRuntimeConfig();
-  const validatorConfig =
-    challengeVersion.validatorConfig && typeof challengeVersion.validatorConfig === 'object'
-      ? (challengeVersion.validatorConfig as Record<string, unknown>)
-      : {};
+  const parsedValidator = parseValidatorConfigWithLegacy(challengeVersion.validatorConfig);
+  const passCriteria = parsedValidator?.passCriteria ?? [];
+  const needsPlannerCost = passCriteria.some((c) => c.type === 'max_explain_total_cost');
+  const needsIndexRule = passCriteria.some((c) => c.type === 'requires_index_usage');
   const context: AttemptEvaluationContext = {};
 
   if (
@@ -1306,16 +1441,9 @@ async function buildEvaluationContext(
     };
   }
 
-  const needsPlannerCost =
-    typeof validatorConfig.maxTotalCost === 'number' &&
-    Number.isFinite(validatorConfig.maxTotalCost) &&
-    validatorConfig.maxTotalCost > 0;
-
   if (
     shouldExplainAnalyze(queryExecution.sqlText) &&
-    (validatorConfig.requiresIndexOptimization === true ||
-      challengeVersion.validatorType === 'result_set' ||
-      needsPlannerCost)
+    (needsIndexRule || challengeVersion.validatorType === 'result_set' || needsPlannerCost)
   ) {
     try {
       context.explainPlan = await getExplainPlan(

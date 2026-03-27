@@ -1,6 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import {
+  CalendarClock,
+  ClipboardCheck,
+  Database,
+  LayoutGrid,
+  ListOrdered,
+  Medal,
+} from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,8 +23,7 @@ import {
   TableRow,
   TableSkeleton,
 } from '@/components/ui/table';
-import { ChallengePassMetricsPanel } from '@/components/challenge/challenge-pass-metrics';
-import { getChallengePassCriteriaLines } from '@/lib/challenge-pass-criteria';
+import { ChallengePassCriteriaDisplay } from '@/components/challenge/challenge-pass-criteria-display';
 import { adminApi, challengesApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { cn, formatDate, generateInitials } from '@/lib/utils';
@@ -108,6 +115,16 @@ export default function AdminChallengeDetailPage() {
   const v = d.latestVersion;
   const leaders = leaderboardQuery.data ?? [];
 
+  const reviewLabel = v.reviewStatus.replace(/_/g, ' ');
+  const reviewPillClass =
+    v.reviewStatus === 'approved'
+      ? 'bg-secondary/15 text-secondary ring-secondary/25'
+      : v.reviewStatus === 'rejected'
+        ? 'bg-error/12 text-error ring-error/25'
+        : v.reviewStatus === 'changes_requested'
+          ? 'bg-primary/12 text-primary ring-primary/25'
+          : 'bg-surface-container-highest text-on-surface-variant ring-outline-variant/20';
+
   return (
     <div className="page-shell-wide page-stack pb-10">
       <Link href="/admin/content" className="text-sm text-primary hover:underline">
@@ -163,31 +180,95 @@ export default function AdminChallengeDetailPage() {
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5 lg:col-span-1">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-outline">Catalog</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div>
-              <dt className="text-on-surface-variant">Database</dt>
-              <dd className="mt-0.5 font-medium text-on-surface">{d.databaseName ?? '—'}</dd>
+        <aside className="overflow-hidden rounded-xl border border-outline-variant/10 bg-surface-container-low ring-1 ring-outline-variant/5 lg:col-span-1">
+          <div className="border-b border-outline-variant/10 bg-surface-container-high/35 px-4 py-3.5">
+            <div className="flex items-center gap-3">
+              <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary ring-1 ring-primary/20">
+                <LayoutGrid className="size-[18px]" strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-outline">
+                  Catalog
+                </h2>
+                <p className="mt-0.5 text-xs text-on-surface-variant">Metadata &amp; listing</p>
+              </div>
             </div>
-            <div>
-              <dt className="text-on-surface-variant">Points</dt>
-              <dd className="mt-0.5 font-mono font-semibold text-on-surface">{d.points}</dd>
+          </div>
+          <dl className="divide-y divide-outline-variant/10">
+            <div className="flex gap-3 px-4 py-3">
+              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest/90 text-on-surface-variant ring-1 ring-outline-variant/12">
+                <Database className="size-4" strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-outline">
+                  Database
+                </dt>
+                <dd className="mt-1 text-sm font-medium leading-snug text-on-surface">
+                  {d.databaseName ?? '—'}
+                </dd>
+              </div>
             </div>
-            <div>
-              <dt className="text-on-surface-variant">Sort order</dt>
-              <dd className="mt-0.5 font-mono text-on-surface">{d.sortOrder}</dd>
+            <div className="flex gap-3 px-4 py-3">
+              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest/90 text-on-surface-variant ring-1 ring-outline-variant/12">
+                <Medal className="size-4" strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-outline">
+                  Points
+                </dt>
+                <dd className="mt-1 font-mono text-sm font-semibold tabular-nums text-secondary">
+                  {d.points}
+                </dd>
+              </div>
             </div>
-            <div>
-              <dt className="text-on-surface-variant">Updated</dt>
-              <dd className="mt-0.5 text-on-surface">{formatDate(d.updatedAt)}</dd>
+            <div className="flex gap-3 px-4 py-3">
+              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest/90 text-on-surface-variant ring-1 ring-outline-variant/12">
+                <ListOrdered className="size-4" strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-outline">
+                  Sort order
+                </dt>
+                <dd className="mt-1 font-mono text-sm font-medium tabular-nums text-on-surface">
+                  {d.sortOrder}
+                </dd>
+              </div>
             </div>
-            <div>
-              <dt className="text-on-surface-variant">Review</dt>
-              <dd className="mt-0.5 capitalize text-on-surface">{v.reviewStatus.replace(/_/g, ' ')}</dd>
+            <div className="flex gap-3 px-4 py-3">
+              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest/90 text-on-surface-variant ring-1 ring-outline-variant/12">
+                <CalendarClock className="size-4" strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-outline">
+                  Updated
+                </dt>
+                <dd className="mt-1 text-sm font-medium leading-snug text-on-surface">
+                  {formatDate(d.updatedAt)}
+                </dd>
+              </div>
+            </div>
+            <div className="flex gap-3 px-4 py-3">
+              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest/90 text-on-surface-variant ring-1 ring-outline-variant/12">
+                <ClipboardCheck className="size-4" strokeWidth={2} aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-outline">
+                  Review
+                </dt>
+                <dd className="mt-1.5">
+                  <span
+                    className={cn(
+                      'inline-flex max-w-full items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ring-1',
+                      reviewPillClass,
+                    )}
+                  >
+                    {reviewLabel}
+                  </span>
+                </dd>
+              </div>
             </div>
           </dl>
-        </div>
+        </aside>
 
         <div className="space-y-6 lg:col-span-2">
           <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
@@ -210,36 +291,16 @@ export default function AdminChallengeDetailPage() {
             <h2 className="text-xs font-semibold uppercase tracking-wider text-outline">
               Tiêu chí đạt (pass)
             </h2>
-            <p className="mt-2 text-xs text-on-surface-variant">
-              Khớp với logic chấm trên server (evaluateAttempt); không hiển thị reference SQL cho learner.
-            </p>
-            <ChallengePassMetricsPanel validatorConfig={v.validatorConfig} className="mt-4" />
-            <ul className="mt-4 list-disc space-y-2 pl-4 text-sm leading-relaxed text-on-surface-variant">
-              {getChallengePassCriteriaLines({
+            <ChallengePassCriteriaDisplay
+              className="mt-4"
+              validatorConfig={v.validatorConfig}
+              explainerSource={{
                 validatorType: v.validatorType,
                 validatorConfig: v.validatorConfig,
                 points: d.points,
-              }).map((line, index) => (
-                <li key={index}>{line}</li>
-              ))}
-            </ul>
-            {v.expectedResultColumns?.length ? (
-              <div className="mt-4 border-t border-outline-variant/10 pt-4">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-outline">
-                  Expected columns
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {v.expectedResultColumns.map((column) => (
-                    <code
-                      key={column}
-                      className="rounded-md bg-surface-container-highest px-2 py-1 font-mono text-xs text-on-surface"
-                    >
-                      {column}
-                    </code>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+              }}
+              adminNote="Khớp với logic chấm trên server (evaluateAttempt); không hiển thị reference SQL cho learner."
+            />
           </section>
 
           {v.hintText ? (
