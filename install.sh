@@ -246,6 +246,12 @@ wait_for_docker() {
 
 is_port_in_use() {
   local port="$1"
+
+  # Docker-published ports (works even when host tools miss docker-proxy/rootless binds)
+  if docker ps --format '{{.Ports}}' | grep -Eq "(0\\.0\\.0\\.0:${port}->|\\[::\\]:${port}->|:::${port}->)"; then
+    return 0
+  fi
+
   if command -v lsof >/dev/null 2>&1; then
     lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
     return $?
