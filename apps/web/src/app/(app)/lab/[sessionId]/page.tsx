@@ -31,6 +31,7 @@ import {
   challengesApi,
   sandboxesApi,
   sessionsApi,
+  type RevertSessionSchemaChangePayload,
   type DatasetScale,
   type LearningSession,
   type QueryExecution,
@@ -682,10 +683,33 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
     return map;
   }, [schemaDiff]);
 
+  const removedIndexFieldsByTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const removedIndexes = schemaDiff?.indexes.removed ?? [];
+    for (const index of removedIndexes) {
+      const fields = extractIndexFieldsFromDefinition(index.definition);
+      if (fields.length === 0) continue;
+      const existing = map.get(index.tableName) ?? [];
+      const merged = Array.from(new Set([...existing, ...fields]));
+      map.set(index.tableName, merged);
+    }
+    return map;
+  }, [schemaDiff]);
+
   const basePartitionsByParentTable = useMemo(() => {
     const map = new Map<string, string[]>();
     const basePartitions = schemaDiff?.partitions.base ?? [];
     for (const partition of basePartitions) {
+      const existing = map.get(partition.parentTable) ?? [];
+      map.set(partition.parentTable, [...existing, partition.name]);
+    }
+    return map;
+  }, [schemaDiff]);
+
+  const removedPartitionsByParentTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const removedPartitions = schemaDiff?.partitions.removed ?? [];
+    for (const partition of removedPartitions) {
       const existing = map.get(partition.parentTable) ?? [];
       map.set(partition.parentTable, [...existing, partition.name]);
     }
@@ -732,10 +756,13 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
         const isExpanded = expandedTable === table.name;
         const indexedFields = baseIndexFieldsByTable.get(table.name) ?? [];
         const addedIndexedFields = addedIndexFieldsByTable.get(table.name) ?? [];
+        const removedIndexedFields = removedIndexFieldsByTable.get(table.name) ?? [];
         const indexedFieldSet = new Set(indexedFields);
         const addedIndexedFieldSet = new Set(addedIndexedFields);
+        const removedIndexedFieldSet = new Set(removedIndexedFields);
         const partitionNames = basePartitionsByParentTable.get(table.name) ?? [];
         const addedPartitionNames = addedPartitionsByParentTable.get(table.name) ?? [];
+        const removedPartitionNames = removedPartitionsByParentTable.get(table.name) ?? [];
         return (
           <div key={table.name} className="rounded-lg overflow-hidden">
             <button
@@ -771,6 +798,20 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                   +part:{addedPartitionNames.length}
                 </button>
               ) : null}
+              {removedPartitionNames.length > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex h-4 items-center rounded-[10px] border border-error/35 bg-error/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-error hover:bg-error/25"
+                  title="Mở table để xem chi tiết partition đã xóa"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setExpandedTable(table.name);
+                  }}
+                >
+                  -part:{removedPartitionNames.length}
+                </button>
+              ) : null}
               <span className="text-xs text-outline ml-auto">{table.columns.length} cols</span>
             </button>
             {isExpanded && (
@@ -796,6 +837,10 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                       <span className="inline-flex h-4 items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-blue-200">
                         idx
                       </span>
+                    ) : removedIndexedFieldSet.has(col.name) ? (
+                      <span className="inline-flex h-4 items-center rounded-[10px] border border-error/35 bg-error/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-error">
+                        -idx
+                      </span>
                     ) : indexedFieldSet.has(col.name) ? (
                       <span className="inline-flex h-4 items-center rounded-[10px] border border-outline-variant/10 bg-surface-container-high px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-on-surface-variant">
                         idx
@@ -809,7 +854,9 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                     <span className="text-xs font-mono text-outline shrink-0">{col.type}</span>
                   </div>
                 ))}
-                {partitionNames.length > 0 || addedPartitionNames.length > 0 ? (
+                {partitionNames.length > 0 ||
+                addedPartitionNames.length > 0 ||
+                removedPartitionNames.length > 0 ? (
                   <div className="mt-2 rounded-md border border-outline-variant/10 bg-surface-container-low/70 px-3 py-2">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-outline">
                       Partitions
@@ -829,6 +876,14 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                           className="inline-flex items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-mono text-blue-200"
                         >
                           + {name}
+                        </span>
+                      ))}
+                      {removedPartitionNames.map((name) => (
+                        <span
+                          key={`removed-part-${table.name}-${name}`}
+                          className="inline-flex items-center rounded-[10px] border border-error/35 bg-error/20 px-1.5 py-0.5 text-[10px] font-mono text-error"
+                        >
+                          - {name}
                         </span>
                       ))}
                     </div>
@@ -1420,6 +1475,117 @@ function EndSessionModal({
   );
 }
 
+function RevertSchemaChangeModal({
+  open,
+  payload,
+  isPending,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  payload: RevertSessionSchemaChangePayload | null;
+  isPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    if (!open || isPending) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isPending, onCancel, open]);
+
+  if (!open || !payload) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      onClick={() => {
+        if (!isPending) {
+          onCancel();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="revert-schema-title"
+        className="w-full max-w-md rounded-xl border border-outline-variant/15 bg-surface-container-low p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-5 flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-error/10 text-error">
+            <span className="material-symbols-outlined text-[22px]">undo</span>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+              Schema Diff
+            </p>
+            <h2 id="revert-schema-title" className="mt-1 text-lg font-semibold text-on-surface">
+              Revert change trong sandbox?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+              Thao tác này sẽ chạy SQL trên database sandbox để hoàn tác thay đổi này.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-outline-variant/10 bg-surface-container-high/50 px-3 py-2.5 font-mono text-[11px] leading-5 text-on-surface-variant space-y-1">
+          <p>
+            <span className="text-outline">Type</span>{' '}
+            <span className="text-on-surface">{payload.resourceType}</span>
+          </p>
+          <p>
+            <span className="text-outline">Change</span>{' '}
+            <span className="text-on-surface">{payload.changeType}</span>
+          </p>
+          <p>
+            <span className="text-outline">Name</span>{' '}
+            <span className="text-on-surface">{payload.name}</span>
+          </p>
+          {payload.tableName ? (
+            <p>
+              <span className="text-outline">Table</span>{' '}
+              <span className="text-on-surface">{payload.tableName}</span>
+            </p>
+          ) : null}
+          {payload.signature ? (
+            <p>
+              <span className="text-outline">Signature</span>{' '}
+              <span className="text-on-surface break-all">{payload.signature}</span>
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mt-6 flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel} disabled={isPending}>
+            Hủy
+          </Button>
+          <Button
+            variant="destructive"
+            loading={isPending}
+            onClick={onConfirm}
+            leftIcon={<span className="material-symbols-outlined text-[18px]">undo</span>}
+          >
+            Revert
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SchemaDiffEntry({
   tone,
   title,
@@ -1428,6 +1594,7 @@ function SchemaDiffEntry({
   fields,
   definition,
   previousDefinition,
+  onRemove,
 }: {
   tone: 'added' | 'removed' | 'changed';
   title: string;
@@ -1436,6 +1603,7 @@ function SchemaDiffEntry({
   fields?: string[] | null;
   definition?: string | null;
   previousDefinition?: string | null;
+  onRemove?: () => void;
 }) {
   const toneClass =
     tone === 'added'
@@ -1447,7 +1615,17 @@ function SchemaDiffEntry({
     tone === 'added' ? 'Added' : tone === 'removed' ? 'Removed' : 'Changed';
 
   return (
-    <div className={cn('rounded-lg border px-2.5 py-2', toneClass)}>
+    <div className={cn('relative rounded-lg border px-2.5 py-2', toneClass)}>
+      {onRemove ? (
+        <button
+          type="button"
+          className="absolute -right-2 -top-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-error/45 bg-surface-container-low/90 text-error/85 shadow-sm hover:bg-error/15 hover:text-error"
+          title="Revert change này trong sandbox"
+          onClick={onRemove}
+        >
+          <span className="material-symbols-outlined text-[13px] leading-none">remove</span>
+        </button>
+      ) : null}
       <div className="flex items-start justify-between gap-2">
         <p className="truncate text-sm font-medium text-on-surface">{title}</p>
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-outline">
@@ -1510,7 +1688,37 @@ function SchemaDiffPanel({
   onReset: () => void;
   isResetting: boolean;
 }) {
+  const queryClient = useQueryClient();
+  const [revertTarget, setRevertTarget] = useState<RevertSessionSchemaChangePayload | null>(null);
   const { data: diff, isLoading, isError, error } = useSessionSchemaDiff(sessionId);
+  const revertChangeMutation = useMutation({
+    mutationFn: (payload: RevertSessionSchemaChangePayload) =>
+      sessionsApi.revertSchemaDiffChange(sessionId, payload),
+    onSuccess: () => {
+      toast.success('Schema change reverted in sandbox.');
+      queryClient.invalidateQueries({ queryKey: ['session-schema-diff', sessionId] });
+      queryClient.invalidateQueries({ queryKey: ['session-schema', sessionId] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to revert schema change');
+    },
+  });
+
+  const openRevertConfirm = useCallback(
+    (payload: RevertSessionSchemaChangePayload) => {
+      if (revertChangeMutation.isPending) return;
+      setRevertTarget(payload);
+    },
+    [revertChangeMutation.isPending],
+  );
+
+  const handleConfirmRevert = useCallback(() => {
+    if (!revertTarget) return;
+    revertChangeMutation.mutate(revertTarget, {
+      onSettled: () => setRevertTarget(null),
+    });
+  }, [revertTarget, revertChangeMutation]);
+
   const totalChanges = diff
     ? diff.indexes.added.length +
       diff.indexes.removed.length +
@@ -1531,6 +1739,7 @@ function SchemaDiffPanel({
 
   const renderSection = <T,>(
     title: string,
+    resourceType: RevertSessionSchemaChangePayload['resourceType'],
     icon: string,
     section: {
       added: T[];
@@ -1544,6 +1753,7 @@ function SchemaDiffPanel({
       fields?: string[] | null;
       definition?: string | null;
     },
+    identify: (item: T) => Pick<RevertSessionSchemaChangePayload, 'name' | 'tableName' | 'signature'>,
     describeChanged?: (item: T) => {
       title: string;
       subtitle?: string | null;
@@ -1571,40 +1781,60 @@ function SchemaDiffPanel({
         </div>
 
         <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
-          {section.added.map((item) => {
+          {section.added.map((item, idx) => {
             const formatted = describe(item);
+            const entryKey = `${title}:added:${idx}`;
+            const identity = identify(item);
             return (
               <SchemaDiffEntry
-                key={`added-${formatted.title}`}
+                key={entryKey}
                 tone="added"
                 title={formatted.title}
                 subtitle={formatted.subtitle}
                 tableName={formatted.tableName}
                 fields={formatted.fields}
                 definition={formatted.definition}
+                onRemove={() =>
+                  openRevertConfirm({
+                    resourceType,
+                    changeType: 'added',
+                    ...identity,
+                  })
+                }
               />
             );
           })}
-          {section.removed.map((item) => {
+          {section.removed.map((item, idx) => {
             const formatted = describe(item);
+            const entryKey = `${title}:removed:${idx}`;
+            const identity = identify(item);
             return (
               <SchemaDiffEntry
-                key={`removed-${formatted.title}`}
+                key={entryKey}
                 tone="removed"
                 title={formatted.title}
                 subtitle={formatted.subtitle}
                 tableName={formatted.tableName}
                 fields={formatted.fields}
                 definition={formatted.definition}
+                onRemove={() =>
+                  openRevertConfirm({
+                    resourceType,
+                    changeType: 'removed',
+                    ...identity,
+                  })
+                }
               />
             );
           })}
-          {section.changed.map((item) => {
+          {section.changed.map((item, idx) => {
             const currentFormatted = (describeChanged ?? describe)(item.current);
             const baseFormatted = describe(item.base);
+            const entryKey = `${title}:changed:${idx}`;
+            const identity = identify(item.current);
             return (
               <SchemaDiffEntry
-                key={`changed-${currentFormatted.title}`}
+                key={entryKey}
                 tone="changed"
                 title={currentFormatted.title}
                 subtitle={currentFormatted.subtitle}
@@ -1612,6 +1842,13 @@ function SchemaDiffPanel({
                 fields={currentFormatted.fields}
                 definition={currentFormatted.definition}
                 previousDefinition={baseFormatted.definition}
+                onRemove={() =>
+                  openRevertConfirm({
+                    resourceType,
+                    changeType: 'changed',
+                    ...identity,
+                  })
+                }
               />
             );
           })}
@@ -1638,88 +1875,119 @@ function SchemaDiffPanel({
   }
 
   return (
-    <div className="h-full overflow-auto p-3">
-      <div className="space-y-3">
-        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-on-surface">Schema Diff</p>
-              <p className="text-[11px] text-on-surface-variant">
-                {diff.hasChanges ? `${totalChanges} changes` : 'No drift'}
-              </p>
+    <>
+      <div className="h-full overflow-auto p-3">
+        <div className="space-y-3">
+          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-on-surface">Schema Diff</p>
+                <p className="text-[11px] text-on-surface-variant">
+                  {diff.hasChanges ? `${totalChanges} changes` : 'No drift'}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={isResetting}
+                onClick={onReset}
+                className="h-7 whitespace-nowrap px-2.5 text-[11px]"
+              >
+                Reset về base
+              </Button>
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={isResetting}
-              onClick={onReset}
-              className="h-7 whitespace-nowrap px-2.5 text-[11px]"
-            >
-              Reset về base
-            </Button>
           </div>
-        </div>
 
-        {!diff.hasChanges ? (
-          <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-low px-3 py-6 text-center text-xs text-on-surface-variant">
-            No schema drift.
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {renderSection(
-              'Indexes',
-              'database',
-              diff.indexes,
-              (item) => ({
-                title: item.name,
-                subtitle: null,
-                tableName: item.tableName,
-                fields: extractIndexFieldsFromDefinition(item.definition),
-                definition: null,
-              }),
-            )}
-            {renderSection(
-              'Views',
-              'preview',
-              diff.views,
-              (item) => ({
-                title: item.name,
-                definition: null,
-              }),
-            )}
-            {renderSection(
-              'Materialized Views',
-              'inventory_2',
-              diff.materializedViews,
-              (item) => ({
-                title: item.name,
-                definition: null,
-              }),
-            )}
-            {renderSection(
-              'Functions',
-              'code_blocks',
-              diff.functions,
-              (item) => ({
-                title: `${item.name}(${item.signature})`,
-                subtitle: item.language ? `Language ${item.language}` : null,
-                definition: null,
-              }),
-            )}
-            {renderSection(
-              'Partitions',
-              'splitscreen',
-              diff.partitions,
-              (item) => ({
-                title: item.name,
-                subtitle: `${item.parentTable}${item.strategy ? ` · ${item.strategy}` : ''}`,
-                definition: null,
-              }),
-            )}
-          </div>
-        )}
+          {!diff.hasChanges ? (
+            <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-low px-3 py-6 text-center text-xs text-on-surface-variant">
+              No schema drift.
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {renderSection(
+                'Indexes',
+                'indexes',
+                'database',
+                diff.indexes,
+                (item) => ({
+                  title: item.name,
+                  subtitle: null,
+                  tableName: item.tableName,
+                  fields: extractIndexFieldsFromDefinition(item.definition),
+                  definition: null,
+                }),
+                (item) => ({
+                  name: item.name,
+                  tableName: item.tableName,
+                }),
+              )}
+              {renderSection(
+                'Views',
+                'views',
+                'preview',
+                diff.views,
+                (item) => ({
+                  title: item.name,
+                  definition: null,
+                }),
+                (item) => ({
+                  name: item.name,
+                }),
+              )}
+              {renderSection(
+                'Materialized Views',
+                'materializedViews',
+                'inventory_2',
+                diff.materializedViews,
+                (item) => ({
+                  title: item.name,
+                  definition: null,
+                }),
+                (item) => ({
+                  name: item.name,
+                }),
+              )}
+              {renderSection(
+                'Functions',
+                'functions',
+                'code_blocks',
+                diff.functions,
+                (item) => ({
+                  title: `${item.name}(${item.signature})`,
+                  subtitle: item.language ? `Language ${item.language}` : null,
+                  definition: null,
+                }),
+                (item) => ({
+                  name: item.name,
+                  signature: item.signature,
+                }),
+              )}
+              {renderSection(
+                'Partitions',
+                'partitions',
+                'splitscreen',
+                diff.partitions,
+                (item) => ({
+                  title: item.name,
+                  subtitle: `${item.parentTable}${item.strategy ? ` · ${item.strategy}` : ''}`,
+                  definition: null,
+                }),
+                (item) => ({
+                  name: item.name,
+                }),
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+      <RevertSchemaChangeModal
+        open={revertTarget !== null}
+        payload={revertTarget}
+        isPending={revertChangeMutation.isPending}
+        onCancel={() => setRevertTarget(null)}
+        onConfirm={handleConfirmRevert}
+      />
+    </>
   );
 }
 

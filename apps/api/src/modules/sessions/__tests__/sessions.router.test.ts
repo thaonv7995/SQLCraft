@@ -13,6 +13,7 @@ const sessionServiceMocks = vi.hoisted(() => ({
   endSession: vi.fn(),
   getSessionSchema: vi.fn(),
   getSessionSchemaDiff: vi.fn(),
+  revertSessionSchemaDiffChange: vi.fn(),
 }));
 
 vi.mock('../sessions.service', () => sessionServiceMocks);
@@ -43,6 +44,12 @@ describe('sessions router HTTP contracts', () => {
       current: [],
       added: [],
       removed: [],
+    });
+    sessionServiceMocks.revertSessionSchemaDiffChange.mockResolvedValue({
+      reverted: true,
+      resourceType: 'indexes',
+      changeType: 'added',
+      name: 'idx_users_email',
     });
 
     app = Fastify({ logger: false });
@@ -155,5 +162,31 @@ describe('sessions router HTTP contracts', () => {
         removed: [],
       },
     });
+  });
+
+  it('reverts a schema diff change for authenticated users', async () => {
+    const payload = {
+      resourceType: 'indexes',
+      changeType: 'added',
+      name: 'idx_users_email',
+      tableName: 'users',
+    };
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/learning-sessions/11111111-1111-4111-8111-111111111111/schema-diff/revert',
+      headers: {
+        authorization: `Bearer ${signToken()}`,
+      },
+      payload,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(sessionServiceMocks.revertSessionSchemaDiffChange).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+      'user-123',
+      false,
+      payload,
+    );
   });
 });

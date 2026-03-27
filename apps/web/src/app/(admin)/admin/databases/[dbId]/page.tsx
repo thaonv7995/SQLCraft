@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
@@ -421,6 +422,7 @@ export default function AdminDatabaseDetailPage() {
   const [activeTab, setActiveTab] = useState<DatabaseDetailTab>(
     isDetailTab(requestedTab) ? requestedTab : 'schema-template',
   );
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   const { data: database, isLoading, isError } = useQuery({
     queryKey: ['admin-database-detail', databaseId],
@@ -489,22 +491,6 @@ export default function AdminDatabaseDetailPage() {
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
 
-  const handleDeleteDatabase = () => {
-    if (!databaseId) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Delete "${database.name}"? This removes its schema template and published dataset variants. If any lesson versions or sandboxes still reference it, the delete will be blocked.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    deleteMutation.mutate(databaseId);
-  };
-
   return (
     <div className="page-shell-wide page-stack">
       <div className="flex flex-wrap items-center gap-2 text-sm text-on-surface-variant">
@@ -547,7 +533,7 @@ export default function AdminDatabaseDetailPage() {
             </Link>
             <Button
               variant="destructive"
-              onClick={handleDeleteDatabase}
+              onClick={() => setDeleteConfirmOpen(true)}
               loading={deleteMutation.isPending}
             >
               Delete Database
@@ -606,6 +592,25 @@ export default function AdminDatabaseDetailPage() {
           jobsLoading={jobsLoading}
         />
       ) : null}
+
+      <ConfirmModal
+        open={deleteConfirmOpen}
+        eyebrow="Databases"
+        title={`Delete “${database.name}”?`}
+        description="This removes its schema template and published dataset variants. If any lesson versions or sandboxes still reference it, the delete will be blocked."
+        confirmLabel="Delete database"
+        cancelLabel="Cancel"
+        icon="delete_forever"
+        isPending={deleteMutation.isPending}
+        onCancel={() => setDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          if (!databaseId) return;
+          deleteMutation.mutate(databaseId, {
+            onSettled: () => setDeleteConfirmOpen(false),
+          });
+        }}
+        titleId="admin-delete-database-title"
+      />
     </div>
   );
 }

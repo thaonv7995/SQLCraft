@@ -4,6 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Select, Textarea } from '@/components/ui/input';
 import {
@@ -236,6 +237,7 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<AdminRoleFilter>('all');
   const [page, setPage] = useState(1);
   const [editorState, setEditorState] = useState<UserEditorState | null>(null);
+  const [userPendingDelete, setUserPendingDelete] = useState<AdminUser | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-users', search, roleFilter, page],
@@ -536,17 +538,7 @@ export default function AdminUsersPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            const confirmed = window.confirm(
-                              `Soft delete ${user.displayName ?? user.username}? This disables sign-in and anonymizes the account, but keeps historical records.`,
-                            );
-
-                            if (!confirmed) {
-                              return;
-                            }
-
-                            deleteMutation.mutate(user.id);
-                          }}
+                          onClick={() => setUserPendingDelete(user)}
                           loading={deleteMutation.isPending && deleteMutation.variables === user.id}
                           title="Delete user"
                         >
@@ -587,6 +579,33 @@ export default function AdminUsersPage() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmModal
+        open={userPendingDelete !== null}
+        eyebrow="Admin"
+        title="Delete user?"
+        description={
+          userPendingDelete
+            ? `Soft delete ${userPendingDelete.displayName ?? userPendingDelete.username}? This disables sign-in and anonymizes the account, but keeps historical records.`
+            : ''
+        }
+        confirmLabel="Delete user"
+        cancelLabel="Cancel"
+        icon="delete_forever"
+        isPending={
+          Boolean(userPendingDelete) &&
+          deleteMutation.isPending &&
+          deleteMutation.variables === userPendingDelete?.id
+        }
+        onCancel={() => setUserPendingDelete(null)}
+        onConfirm={() => {
+          if (!userPendingDelete) return;
+          deleteMutation.mutate(userPendingDelete.id, {
+            onSettled: () => setUserPendingDelete(null),
+          });
+        }}
+        titleId="admin-delete-user-title"
+      />
     </div>
   );
 }

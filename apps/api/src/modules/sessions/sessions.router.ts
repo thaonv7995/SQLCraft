@@ -7,6 +7,7 @@ import {
   endSessionHandler,
   getSessionSchemaHandler,
   getSessionSchemaDiffHandler,
+  revertSessionSchemaDiffChangeHandler,
 } from './sessions.handler';
 
 export default async function sessionsRouter(fastify: FastifyInstance): Promise<void> {
@@ -109,6 +110,41 @@ export default async function sessionsRouter(fastify: FastifyInstance): Promise<
       },
     },
     getSessionSchemaDiffHandler,
+  );
+
+  // POST /v1/learning-sessions/:sessionId/schema-diff/revert
+  fastify.post(
+    '/v1/learning-sessions/:sessionId/schema-diff/revert',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Revert one schema diff change in the session sandbox',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: {
+            sessionId: { type: 'string', format: 'uuid' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['resourceType', 'changeType', 'name'],
+          properties: {
+            resourceType: {
+              type: 'string',
+              enum: ['indexes', 'views', 'materializedViews', 'functions', 'partitions'],
+            },
+            changeType: { type: 'string', enum: ['added', 'removed', 'changed'] },
+            name: { type: 'string' },
+            tableName: { type: 'string' },
+            signature: { type: 'string' },
+          },
+        },
+      },
+    },
+    revertSessionSchemaDiffChangeHandler,
   );
 
   // POST /v1/learning-sessions/:sessionId/end

@@ -856,6 +856,22 @@ export interface SessionSchemaDiffResponse {
   partitions: SessionSchemaDiffSection<SessionSchemaPartition>;
 }
 
+export type SessionSchemaRevertResourceType =
+  | 'indexes'
+  | 'views'
+  | 'materializedViews'
+  | 'functions'
+  | 'partitions';
+export type SessionSchemaRevertChangeType = 'added' | 'removed' | 'changed';
+
+export interface RevertSessionSchemaChangePayload {
+  resourceType: SessionSchemaRevertResourceType;
+  changeType: SessionSchemaRevertChangeType;
+  name: string;
+  tableName?: string;
+  signature?: string;
+}
+
 // ─── Databases ────────────────────────────────────────────────────────────────
 
 export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'social' | 'analytics' | 'other';
@@ -1533,6 +1549,9 @@ export const sessionsApi = {
 
   getSchemaDiff: (id: string) =>
     api.get<SessionSchemaDiffResponse>(`/learning-sessions/${id}/schema-diff`).then((r) => r.data),
+
+  revertSchemaDiffChange: (id: string, payload: RevertSessionSchemaChangePayload) =>
+    api.post(`/learning-sessions/${id}/schema-diff/revert`, payload).then((r) => r.data),
 
   create: (payload: {
     lessonVersionId?: string;

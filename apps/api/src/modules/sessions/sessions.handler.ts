@@ -1,7 +1,11 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
-import type { CreateSessionBody, SessionParams } from './sessions.schema';
+import type {
+  CreateSessionBody,
+  RevertSchemaDiffChangeBody,
+  SessionParams,
+} from './sessions.schema';
 import {
   createSession,
   getSession,
@@ -9,6 +13,7 @@ import {
   listUserSessions,
   getSessionSchema,
   getSessionSchemaDiff,
+  revertSessionSchemaDiffChange,
 } from './sessions.service';
 
 export async function listSessionsHandler(
@@ -67,4 +72,19 @@ export async function endSessionHandler(
   const user = request.user as JwtPayload;
   const result = await endSession(sessionId, user.sub, user.roles?.includes('admin') ?? false);
   reply.send(success(result, MESSAGES.SESSION_ENDED));
+}
+
+export async function revertSessionSchemaDiffChangeHandler(
+  request: FastifyRequest<{ Params: SessionParams; Body: RevertSchemaDiffChangeBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { sessionId } = request.params;
+  const user = request.user as JwtPayload;
+  const result = await revertSessionSchemaDiffChange(
+    sessionId,
+    user.sub,
+    user.roles?.includes('admin') ?? false,
+    request.body,
+  );
+  reply.send(success(result, 'Schema change reverted'));
 }
