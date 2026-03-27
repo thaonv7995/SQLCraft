@@ -1302,12 +1302,16 @@ function SchemaDiffEntry({
   tone,
   title,
   subtitle,
+  tableName,
+  fields,
   definition,
   previousDefinition,
 }: {
   tone: 'added' | 'removed' | 'changed';
   title: string;
   subtitle?: string | null;
+  tableName?: string | null;
+  fields?: string[] | null;
   definition?: string | null;
   previousDefinition?: string | null;
 }) {
@@ -1321,13 +1325,33 @@ function SchemaDiffEntry({
     tone === 'added' ? 'Added' : tone === 'removed' ? 'Removed' : 'Changed';
 
   return (
-    <div className={cn('rounded-xl border px-3 py-3', toneClass)}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium text-on-surface">{title}</p>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-outline">
+    <div className={cn('rounded-lg border px-2.5 py-2', toneClass)}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="truncate text-sm font-medium text-on-surface">{title}</p>
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-outline">
           {label}
         </span>
       </div>
+      {tableName ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="rounded-md border border-outline-variant/20 bg-surface-container-high px-1.5 py-0.5 text-outline">
+            table
+          </span>
+          <span className="rounded-md bg-surface-container-high px-1.5 py-0.5 font-mono text-on-surface">
+            {tableName}
+          </span>
+          {fields && fields.length > 0 ? (
+            <>
+              <span className="ml-1 rounded-md border border-outline-variant/20 bg-surface-container-high px-1.5 py-0.5 text-outline">
+                fields
+              </span>
+              <span className="rounded-md bg-surface-container-high px-1.5 py-0.5 font-mono text-on-surface">
+                {fields.join(', ')}
+              </span>
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {subtitle ? (
         <p className="mt-1 text-xs text-on-surface-variant">{subtitle}</p>
       ) : null}
@@ -1335,19 +1359,19 @@ function SchemaDiffEntry({
         <div className="mt-3 space-y-2 text-[11px]">
           <div>
             <p className="mb-1 uppercase tracking-[0.16em] text-outline">Base</p>
-            <pre className="overflow-x-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-outline">
+            <pre className="max-h-36 overflow-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-outline">
               {previousDefinition}
             </pre>
           </div>
           <div>
             <p className="mb-1 uppercase tracking-[0.16em] text-outline">Current</p>
-            <pre className="overflow-x-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-on-surface-variant">
+            <pre className="max-h-36 overflow-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-on-surface-variant">
               {definition}
             </pre>
           </div>
         </div>
       ) : definition ? (
-        <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-[11px] text-on-surface-variant">
+        <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-surface-container-high px-3 py-2 font-mono text-[11px] text-on-surface-variant">
           {definition}
         </pre>
       ) : null}
@@ -1365,6 +1389,38 @@ function SchemaDiffPanel({
   isResetting: boolean;
 }) {
   const { data: diff, isLoading, isError, error } = useSessionSchemaDiff(sessionId);
+  const extractIndexFields = (definition?: string | null): string[] => {
+    if (!definition) return [];
+    const match = definition.match(/\(([^)]+)\)/);
+    if (!match?.[1]) return [];
+    return match[1]
+      .split(',')
+      .map((part) => part.trim())
+      .map((part) =>
+        part
+          .replace(/\s+(asc|desc)\b/gi, '')
+          .replace(/\s+nulls\s+(first|last)\b/gi, '')
+          .replace(/"/g, ''),
+      )
+      .filter(Boolean);
+  };
+  const totalChanges = diff
+    ? diff.indexes.added.length +
+      diff.indexes.removed.length +
+      diff.indexes.changed.length +
+      diff.views.added.length +
+      diff.views.removed.length +
+      diff.views.changed.length +
+      diff.materializedViews.added.length +
+      diff.materializedViews.removed.length +
+      diff.materializedViews.changed.length +
+      diff.functions.added.length +
+      diff.functions.removed.length +
+      diff.functions.changed.length +
+      diff.partitions.added.length +
+      diff.partitions.removed.length +
+      diff.partitions.changed.length
+    : 0;
 
   const renderSection = <T,>(
     title: string,
@@ -1374,8 +1430,20 @@ function SchemaDiffPanel({
       removed: T[];
       changed: Array<{ base: T; current: T }>;
     },
-    describe: (item: T) => { title: string; subtitle?: string | null; definition?: string | null },
-    describeChanged?: (item: T) => { title: string; subtitle?: string | null; definition?: string | null },
+    describe: (item: T) => {
+      title: string;
+      subtitle?: string | null;
+      tableName?: string | null;
+      fields?: string[] | null;
+      definition?: string | null;
+    },
+    describeChanged?: (item: T) => {
+      title: string;
+      subtitle?: string | null;
+      tableName?: string | null;
+      fields?: string[] | null;
+      definition?: string | null;
+    },
   ) => {
     const changeCount = section.added.length + section.removed.length + section.changed.length;
 
@@ -1384,18 +1452,18 @@ function SchemaDiffPanel({
     }
 
     return (
-      <div key={title} className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-        <div className="mb-3 flex items-center gap-2">
+      <div key={title} className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 p-3">
+        <div className="mb-2 flex items-center gap-2">
           <span className="material-symbols-outlined text-base text-tertiary">{icon}</span>
           <div>
-            <p className="text-sm font-medium text-on-surface">{title}</p>
+            <p className="text-xs font-semibold text-on-surface">{title}</p>
             <p className="text-[11px] text-outline">
               {changeCount} change{changeCount === 1 ? '' : 's'}
             </p>
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
           {section.added.map((item) => {
             const formatted = describe(item);
             return (
@@ -1404,6 +1472,8 @@ function SchemaDiffPanel({
                 tone="added"
                 title={formatted.title}
                 subtitle={formatted.subtitle}
+                tableName={formatted.tableName}
+                fields={formatted.fields}
                 definition={formatted.definition}
               />
             );
@@ -1416,6 +1486,8 @@ function SchemaDiffPanel({
                 tone="removed"
                 title={formatted.title}
                 subtitle={formatted.subtitle}
+                tableName={formatted.tableName}
+                fields={formatted.fields}
                 definition={formatted.definition}
               />
             );
@@ -1429,6 +1501,8 @@ function SchemaDiffPanel({
                 tone="changed"
                 title={currentFormatted.title}
                 subtitle={currentFormatted.subtitle}
+                tableName={currentFormatted.tableName}
+                fields={currentFormatted.fields}
                 definition={currentFormatted.definition}
                 previousDefinition={baseFormatted.definition}
               />
@@ -1448,7 +1522,7 @@ function SchemaDiffPanel({
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="max-w-sm text-center space-y-2">
           <span className="material-symbols-outlined text-3xl text-outline block">difference</span>
-          <p className="text-sm text-on-surface-variant">
+          <p className="text-xs text-on-surface-variant">
             {error instanceof Error ? error.message : 'Unable to load schema diff'}
           </p>
         </div>
@@ -1457,16 +1531,14 @@ function SchemaDiffPanel({
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4">
-      <div className="space-y-4">
-        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low/70 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-on-surface">Sandbox schema drift</p>
-              <p className="max-w-3xl text-sm leading-6 text-on-surface-variant">
-                This compares the live sandbox against the published base schema template. Use it
-                to see indexes, views, materialized views, functions, and partitions that were
-                added, removed, or changed while optimizing the lesson.
+    <div className="h-full overflow-auto p-3">
+      <div className="space-y-3">
+        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/70 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-on-surface">Schema Diff</p>
+              <p className="text-[11px] text-on-surface-variant">
+                {diff.hasChanges ? `${totalChanges} changes` : 'No drift'}
               </p>
             </div>
             <Button
@@ -1474,26 +1546,29 @@ function SchemaDiffPanel({
               size="sm"
               loading={isResetting}
               onClick={onReset}
+              className="h-7 whitespace-nowrap px-2.5 text-[11px]"
             >
-              Reset sandbox về base
+              Reset về base
             </Button>
           </div>
         </div>
 
         {!diff.hasChanges ? (
-          <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-low px-4 py-8 text-center text-sm text-on-surface-variant">
-            No drift detected. The sandbox still matches the published base definition.
+          <div className="rounded-xl border border-dashed border-outline-variant/20 bg-surface-container-low px-3 py-6 text-center text-xs text-on-surface-variant">
+            No schema drift.
           </div>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-3 2xl:grid-cols-2">
             {renderSection(
               'Indexes',
               'database',
               diff.indexes,
               (item) => ({
                 title: item.name,
-                subtitle: `Table ${item.tableName}`,
-                definition: item.definition,
+                subtitle: null,
+                tableName: item.tableName,
+                fields: extractIndexFields(item.definition),
+                definition: null,
               }),
             )}
             {renderSection(
@@ -1502,7 +1577,7 @@ function SchemaDiffPanel({
               diff.views,
               (item) => ({
                 title: item.name,
-                definition: item.definition,
+                definition: null,
               }),
             )}
             {renderSection(
@@ -1511,7 +1586,7 @@ function SchemaDiffPanel({
               diff.materializedViews,
               (item) => ({
                 title: item.name,
-                definition: item.definition,
+                definition: null,
               }),
             )}
             {renderSection(
@@ -1521,7 +1596,7 @@ function SchemaDiffPanel({
               (item) => ({
                 title: `${item.name}(${item.signature})`,
                 subtitle: item.language ? `Language ${item.language}` : null,
-                definition: item.definition,
+                definition: null,
               }),
             )}
             {renderSection(
@@ -1531,7 +1606,7 @@ function SchemaDiffPanel({
               (item) => ({
                 title: item.name,
                 subtitle: `${item.parentTable}${item.strategy ? ` · ${item.strategy}` : ''}`,
-                definition: item.definition ?? null,
+                definition: null,
               }),
             )}
           </div>
