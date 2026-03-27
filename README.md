@@ -27,6 +27,12 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 | Monorepo | pnpm workspaces + Turborepo |
 | Containers | Docker + Docker Compose |
 
+## Databases
+
+**Today:** the stack is built around **PostgreSQL** for both metadata and learner sandboxes.
+
+**PostgreSQL vs other engines** (MySQL, MariaDB, SQLite, SQL Server, …): **in progress** — those dialects are not available in sandboxes or the Lab yet; work to support additional engines is ongoing. Until then, assume **PostgreSQL-only** for SQL execution, `EXPLAIN`, and plan tooling.
+
 ## Quick Start
 
 ### Prerequisites
