@@ -85,11 +85,11 @@ export default function ProfilePage() {
         <section className="section-card card-padding">
           <h2 className="page-section-title">Activity</h2>
           <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Stat label="Active sessions" value={stats.activeSessions} />
             <Stat label="Queries run" value={stats.queriesRun} />
             <Stat label="Challenges done" value={stats.completedChallenges} />
             <Stat label="Total points" value={stats.totalPoints} />
             <Stat label="Current streak" value={stats.currentStreak} />
-            <Stat label="Active sessions" value={stats.activeSessions} />
           </dl>
         </section>
       )}

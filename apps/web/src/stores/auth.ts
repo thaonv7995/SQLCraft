@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AuthTokens, User } from '@/lib/api';
+import { authApi } from '@/lib/api';
 
 interface AuthState {
   user: User | null;
@@ -9,6 +10,8 @@ interface AuthState {
   clearAuth: () => void;
   isAuthenticated: () => boolean;
   updateUser: (patch: Partial<User>) => void;
+  /** Re-fetch profile (incl. stats) from GET /auth/me — keeps dashboard stats fresh without re-login */
+  refreshProfile: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -27,6 +30,16 @@ export const useAuthStore = create<AuthState>()(
         const current = get().user;
         if (current) {
           set({ user: { ...current, ...patch } });
+        }
+      },
+
+      refreshProfile: async () => {
+        if (!get().tokens?.accessToken) return;
+        try {
+          const user = await authApi.me();
+          set({ user });
+        } catch {
+          // 401 → axios interceptor clears storage & redirects
         }
       },
     }),

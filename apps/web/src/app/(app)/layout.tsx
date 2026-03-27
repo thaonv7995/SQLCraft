@@ -2,11 +2,13 @@ import { Navbar } from '@/components/layout/navbar';
 import { Sidebar } from '@/components/layout/sidebar';
 import { MobileAppNav } from '@/components/layout/mobile-app-nav';
 import { AuthGuard } from '@/components/auth-guard';
+import { AuthProfileSync } from '@/components/auth-profile-sync';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthGuard>
       <div className="h-screen bg-surface flex flex-col overflow-hidden">
+        <AuthProfileSync />
         {/* Top navbar */}
         <Navbar />
 

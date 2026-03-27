@@ -244,7 +244,7 @@ export class UsersRepository {
   }> {
     const db = this.db;
 
-    const [queriesResult, challengesResult, sessionsResult] = await Promise.all([
+    const [queriesResult, challengesResult, activeSessionsResult] = await Promise.all([
       // Count queries run via sessions owned by user
       db
         .select({ total: count() })
@@ -259,17 +259,27 @@ export class UsersRepository {
         .innerJoin(schema.learningSessions, eq(schema.challengeAttempts.learningSessionId, schema.learningSessions.id))
         .where(and(eq(schema.learningSessions.userId, userId), eq(schema.challengeAttempts.status, 'passed'))),
 
-      // Count active learning sessions
+      // Lab sessions with status `active` only; exclude rows whose sandbox is already torn down (session row can lag)
       db
         .select({ total: count() })
         .from(schema.learningSessions)
-        .where(and(eq(schema.learningSessions.userId, userId), eq(schema.learningSessions.status, 'active'))),
+        .where(
+          and(
+            eq(schema.learningSessions.userId, userId),
+            eq(schema.learningSessions.status, 'active'),
+            sql`NOT EXISTS (
+              SELECT 1 FROM ${schema.sandboxInstances}
+              WHERE ${schema.sandboxInstances.learningSessionId} = ${schema.learningSessions.id}
+              AND ${schema.sandboxInstances.status} IN ('destroyed', 'failed', 'expiring')
+            )`,
+          ),
+        ),
     ]);
 
     return {
       queriesRun: queriesResult[0]?.total ?? 0,
       completedChallenges: challengesResult[0]?.total ?? 0,
-      activeSessions: sessionsResult[0]?.total ?? 0,
+      activeSessions: activeSessionsResult[0]?.total ?? 0,
       totalPoints: 0,
       currentStreak: 0,
     };

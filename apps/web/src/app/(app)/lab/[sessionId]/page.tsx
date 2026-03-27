@@ -2322,6 +2322,7 @@ export default function LabPage() {
       queryClient.invalidateQueries({ queryKey: ['session-schema', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['session-schema-diff', sessionId] });
       queryClient.invalidateQueries({ queryKey: ['query-history', sessionId] });
+      void useAuthStore.getState().refreshProfile();
       toast.success('Session ended. Sandbox is shutting down.');
       router.replace(entryPath ?? '/lab');
     },

@@ -4,8 +4,8 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { sessionsApi, databasesApi, queryApi } from '@/lib/api';
-import type { LearningSession, UserStats } from '@/lib/api';
+import { databasesApi, queryApi } from '@/lib/api';
+import type { UserStats } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { StatCard } from '@/components/ui/card';
 import { StatusBadge, DifficultyBadge } from '@/components/ui/badge';
@@ -21,10 +21,6 @@ const EMPTY_STATS: UserStats = {
   currentStreak: 0,
   totalPoints: 0,
 };
-
-function isResumableSession(s: LearningSession): boolean {
-  return s.status === 'active' || s.status === 'provisioning' || s.status === 'paused';
-}
 
 function leadCopy(stats: UserStats): string {
   if (stats.currentStreak > 0) {
@@ -51,12 +47,6 @@ export default function DashboardPage() {
     }
   }, [router, user]);
 
-  const { data: sessions } = useQuery({
-    queryKey: ['sessions'],
-    queryFn: sessionsApi.list,
-    staleTime: 30_000,
-  });
-
   const {
     data: databaseCatalog,
     isLoading: databasesLoading,
@@ -80,10 +70,6 @@ export default function DashboardPage() {
   const recentQueries = queryHistory?.items ?? [];
   const featuredDatabases = (databaseCatalog?.items ?? []).slice(0, 3);
 
-  const resumableSession = sessions?.find(isResumableSession);
-  const labHref = resumableSession ? `/lab/${resumableSession.id}` : '/lab';
-  const labCtaLabel = resumableSession ? 'Resume session' : 'Open Lab';
-
   const statsAreEmpty =
     stats.activeSessions === 0 &&
     stats.completedChallenges === 0 &&
@@ -102,24 +88,14 @@ export default function DashboardPage() {
     <div className="page-shell page-stack">
       {/* Hero */}
       <section aria-label="Welcome" className="space-y-1">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm text-on-surface-variant font-body mb-1">{greeting},</p>
-            <h1 className="font-headline text-2xl font-bold text-on-surface sm:text-3xl">
-              {displayName}
-            </h1>
-            <p className="text-sm text-on-surface-variant mt-2 max-w-xl leading-relaxed">
-              {leadCopy(stats)}
-            </p>
-          </div>
-          <Link href={labHref} className="shrink-0">
-            <Button
-              variant="primary"
-              leftIcon={<span className="material-symbols-outlined text-sm">terminal</span>}
-            >
-              {labCtaLabel}
-            </Button>
-          </Link>
+        <div className="min-w-0">
+          <p className="text-sm text-on-surface-variant font-body mb-1">{greeting},</p>
+          <h1 className="font-headline text-2xl font-bold text-on-surface sm:text-3xl">
+            {displayName}
+          </h1>
+          <p className="text-sm text-on-surface-variant mt-2 max-w-xl leading-relaxed">
+            {leadCopy(stats)}
+          </p>
         </div>
       </section>
 
