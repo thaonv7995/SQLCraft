@@ -1,14 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { DifficultyBadge, StatusBadge } from '@/components/ui/badge';
+import { DifficultyBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
-import { Select, Textarea } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -25,7 +24,11 @@ import {
   type ChallengeReviewItem,
   type DatabaseDomain,
 } from '@/lib/api';
-import { DATABASE_DOMAIN_LABELS, DATABASE_DOMAIN_OPTIONS } from '@/lib/database-catalog';
+import {
+  DATABASE_DIFFICULTY_STYLES,
+  DATABASE_DOMAIN_LABELS,
+  DATABASE_DOMAIN_OPTIONS,
+} from '@/lib/database-catalog';
 import { cn, formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -38,27 +41,207 @@ const CATALOG_STATUS_OPTIONS = [
   { value: 'archived', label: 'Archived' },
 ] as const;
 
-const CATALOG_PAGE_SIZE_OPTIONS = [
-  { value: '10', label: '10 / page' },
-  { value: '20', label: '20 / page' },
-  { value: '50', label: '50 / page' },
-];
+const CATALOG_PAGE_LIMIT = 20;
 
-function CatalogCardSkeleton() {
+const DOMAIN_DEFAULT_ICONS: Record<DatabaseDomain, string> = {
+  ecommerce: 'storefront',
+  fintech: 'account_balance',
+  health: 'medical_services',
+  iot: 'sensors',
+  social: 'groups',
+  analytics: 'analytics',
+  other: 'database',
+};
+
+function FilterSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
   return (
-    <div className="rounded-xl border border-transparent bg-surface-container-low p-6">
-      <div className="mb-4 flex items-start justify-between">
-        <div className="h-12 w-12 rounded-lg bg-surface-container-high animate-pulse" />
-        <div className="h-6 w-20 rounded bg-surface-container-high animate-pulse" />
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="appearance-none cursor-pointer rounded-lg border border-outline-variant/20 bg-surface-container-low py-2 pl-3 pr-8 text-xs font-medium text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <span className="material-symbols-outlined pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-base text-outline">
+        expand_more
+      </span>
+    </div>
+  );
+}
+
+function CatalogMetric({ label, value, hint }: { label: string; value: string; hint: string }) {
+  return (
+    <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-outline">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-on-surface">{value}</p>
+      <p className="mt-1 text-xs text-on-surface-variant">{hint}</p>
+    </div>
+  );
+}
+
+function ChallengeCatalogCard({
+  row,
+  domainIcon,
+  publishPending,
+  onPublish,
+}: {
+  row: AdminChallengeCatalogItem;
+  domainIcon: string;
+  publishPending: boolean;
+  onPublish: (versionId: string) => void;
+}) {
+  const difficulty =
+    DATABASE_DIFFICULTY_STYLES[row.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
+  const showPublish =
+    Boolean(row.latestVersionId) &&
+    row.status === 'draft' &&
+    row.latestVersionReviewStatus === 'pending';
+
+  const inner = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest">
+            <span
+              className="material-symbols-outlined text-xl text-tertiary"
+              style={{ fontVariationSettings: "'FILL' 1" }}
+              aria-hidden
+            >
+              {domainIcon}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-on-surface group-hover:text-primary">
+              {row.title}
+            </p>
+            <p className="mt-1 text-xs text-on-surface-variant">
+              {DATABASE_DOMAIN_LABELS[row.catalogDomain]}
+            </p>
+          </div>
+        </div>
+        <span
+          className={cn(
+            'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider',
+            difficulty.badge,
+          )}
+        >
+          {difficulty.label}
+        </span>
       </div>
-      <div className="mb-2 h-4 w-3/4 rounded bg-surface-container-high animate-pulse" />
-      <div className="mb-4 space-y-2">
-        <div className="h-3 w-full rounded bg-surface-container-high animate-pulse" />
-        <div className="h-3 w-5/6 rounded bg-surface-container-high animate-pulse" />
+
+      <p className="mt-4 line-clamp-2 text-sm leading-relaxed text-on-surface-variant">
+        {row.description?.trim() ? row.description : '—'}
+      </p>
+
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-on-surface-variant">
+          {row.status}
+        </span>
+        <span className="max-w-full truncate rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-on-surface-variant">
+          {row.slug}
+        </span>
+        {row.validatorType ? (
+          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider text-on-surface-variant">
+            {row.validatorType}
+          </span>
+        ) : null}
       </div>
-      <div className="grid grid-cols-2 gap-4 border-t border-outline-variant/10 pt-4">
-        <div className="h-8 rounded bg-surface-container-high animate-pulse" />
-        <div className="h-8 rounded bg-surface-container-high animate-pulse" />
+
+      <div className="mt-5 grid grid-cols-3 gap-3 border-t border-outline-variant/10 pt-4">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-outline">Points</p>
+          <p className="mt-1 font-mono text-sm font-semibold text-on-surface">{row.points}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-outline">Database</p>
+          <p className="mt-1 line-clamp-1 font-mono text-sm font-semibold text-on-surface">
+            {row.databaseName ?? '—'}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-outline">Updated</p>
+          <p className="mt-1 font-mono text-sm font-semibold capitalize text-tertiary">
+            {formatDate(row.updatedAt)}
+          </p>
+        </div>
+      </div>
+    </>
+  );
+
+  if (row.status === 'published') {
+    return (
+      <Link
+        href={`/challenges/${row.slug}`}
+        className="group block rounded-xl border border-outline-variant/10 bg-surface-container-low p-5 transition-colors hover:border-outline-variant/30 hover:bg-surface-container"
+      >
+        {inner}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
+      {inner}
+      {showPublish ? (
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-outline-variant/10 pt-4">
+          <Button
+            size="sm"
+            variant="primary"
+            type="button"
+            disabled={publishPending}
+            onClick={() => onPublish(row.latestVersionId!)}
+          >
+            Publish
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChallengeCatalogSkeleton() {
+  return (
+    <div className="rounded-xl bg-surface-container-low p-5">
+      <div className="flex items-start justify-between">
+        <div className="flex gap-3">
+          <div className="h-11 w-11 animate-pulse rounded-lg bg-surface-container-high" />
+          <div className="space-y-2">
+            <div className="h-4 w-36 animate-pulse rounded bg-surface-container-high" />
+            <div className="h-3 w-20 animate-pulse rounded bg-surface-container-high" />
+          </div>
+        </div>
+        <div className="h-5 w-20 animate-pulse rounded-full bg-surface-container-high" />
+      </div>
+      <div className="mt-4 h-4 w-full animate-pulse rounded bg-surface-container-high" />
+      <div className="mt-2 h-4 w-4/5 animate-pulse rounded bg-surface-container-high" />
+      <div className="mt-4 flex gap-2">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-5 w-14 animate-pulse rounded-full bg-surface-container-high"
+          />
+        ))}
+      </div>
+      <div className="mt-5 grid grid-cols-3 gap-3 border-t border-outline-variant/10 pt-4">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div key={index} className="space-y-2">
+            <div className="h-3 w-14 animate-pulse rounded bg-surface-container-high" />
+            <div className="h-4 w-16 animate-pulse rounded bg-surface-container-high" />
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -70,7 +253,8 @@ export default function AdminContentChallengesPage() {
 
   const databasesQuery = useQuery({
     queryKey: ['admin-content-databases'],
-    queryFn: () => databasesApi.list({ limit: 200, page: 1 }),
+    // API enforces limit ≤ 100 (ListDatabasesQuerySchema); higher values fail validation.
+    queryFn: () => databasesApi.list({ limit: 100, page: 1 }),
   });
 
   const reviewQuery = useQuery({
@@ -86,7 +270,6 @@ export default function AdminContentChallengesPage() {
     'all' | 'draft' | 'published' | 'archived'
   >('all');
   const [catalogPage, setCatalogPage] = useState(1);
-  const [catalogLimit, setCatalogLimit] = useState(20);
 
   const catalogDatabaseSelectOptions = useMemo(() => {
     const items = databasesQuery.data?.items ?? [];
@@ -98,6 +281,21 @@ export default function AdminContentChallengesPage() {
       }));
   }, [databasesQuery.data?.items, catalogDomain]);
 
+  const databaseIconByTemplateId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of databasesQuery.data?.items ?? []) {
+      map.set(d.schemaTemplateId ?? d.id, d.domainIcon);
+    }
+    return map;
+  }, [databasesQuery.data?.items]);
+
+  function domainIconForChallenge(row: AdminChallengeCatalogItem): string {
+    if (row.databaseId && databaseIconByTemplateId.has(row.databaseId)) {
+      return databaseIconByTemplateId.get(row.databaseId)!;
+    }
+    return DOMAIN_DEFAULT_ICONS[row.catalogDomain] ?? 'quiz';
+  }
+
   useEffect(() => {
     if (!catalogDatabaseId) return;
     const ok = catalogDatabaseSelectOptions.some((o) => o.value === catalogDatabaseId);
@@ -106,7 +304,7 @@ export default function AdminContentChallengesPage() {
 
   useEffect(() => {
     setCatalogPage(1);
-  }, [catalogDomain, catalogDatabaseId, catalogStatus, catalogLimit]);
+  }, [catalogDomain, catalogDatabaseId, catalogStatus]);
 
   useEffect(() => {
     if (!reviewQueueOpen) return;
@@ -121,7 +319,7 @@ export default function AdminContentChallengesPage() {
     queryKey: [
       'admin-challenges-catalog',
       catalogPage,
-      catalogLimit,
+      CATALOG_PAGE_LIMIT,
       catalogDomain,
       catalogDatabaseId,
       catalogStatus,
@@ -129,7 +327,7 @@ export default function AdminContentChallengesPage() {
     queryFn: () =>
       challengesApi.listAdminCatalog({
         page: catalogPage,
-        limit: catalogLimit,
+        limit: CATALOG_PAGE_LIMIT,
         domain:
           catalogDomain === 'all' ? undefined : (catalogDomain as DatabaseDomain),
         databaseId: catalogDatabaseId || undefined,
@@ -175,12 +373,6 @@ export default function AdminContentChallengesPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const openCatalogChallenge = (row: AdminChallengeCatalogItem) => {
-    if (row.status === 'published') {
-      router.push(`/challenges/${row.slug}`);
-    }
-  };
-
   const reviewRows = reviewQuery.data ?? emptyReview;
   const reviewPendingCount = reviewRows.length;
   const catalog = catalogQuery.data;
@@ -190,15 +382,15 @@ export default function AdminContentChallengesPage() {
 
   return (
     <div className="page-shell-wide page-stack pb-10">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <h1 className="page-title-lg">Challenges</h1>
-          <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">
-            Browse the catalog as learners see it. Add drafts on a separate screen; open the review
-            queue when contributors submit versions for approval.
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
+          <h1 className="page-title">Challenges</h1>
+          <p className="page-lead mt-2">
+            Manage practice challenges like the database catalog: filter the list, open a card to
+            view the live page, or use the review queue for drafts awaiting approval.
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button type="button" onClick={() => router.push('/admin/content/new')}>
             Add new challenge
           </Button>
@@ -222,233 +414,119 @@ export default function AdminContentChallengesPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-        <div className="space-y-6">
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low/40 p-4 sm:p-6">
-            <div className="mb-4">
-              <h2 className="font-headline text-base font-semibold text-on-surface">All challenges</h2>
-              <p className="mt-1 text-xs text-on-surface-variant">
-                Filter by domain, database, and status — same card layout as the learner catalog.
-              </p>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Select
-                label="Domain"
-                value={catalogDomain}
-                onChange={(e) => setCatalogDomain(e.target.value)}
-                options={DATABASE_DOMAIN_OPTIONS}
-              />
-              <Select
-                label="Database"
-                value={catalogDatabaseId}
-                onChange={(e) => setCatalogDatabaseId(e.target.value)}
-                options={[
-                  {
-                    value: '',
-                    label: databasesQuery.isLoading ? 'Loading…' : 'All databases',
-                  },
-                  ...catalogDatabaseSelectOptions,
-                ]}
-              />
-              <Select
-                label="Status"
-                value={catalogStatus}
-                onChange={(e) =>
-                  setCatalogStatus(e.target.value as 'all' | 'draft' | 'published' | 'archived')
-                }
-                options={[...CATALOG_STATUS_OPTIONS]}
-              />
-              <Select
-                label="Page size"
-                value={String(catalogLimit)}
-                onChange={(e) => setCatalogLimit(Number(e.target.value) || 20)}
-                options={CATALOG_PAGE_SIZE_OPTIONS}
-              />
-            </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <CatalogMetric
+          label="Matching challenges"
+          value={catalogQuery.isLoading ? '—' : String(catalogTotal)}
+          hint="Total count for the current filters (all pages)."
+        />
+        <CatalogMetric
+          label="On this page"
+          value={catalogQuery.isLoading ? '—' : String(catalogRows.length)}
+          hint="Challenges shown in the grid below."
+        />
+        <CatalogMetric
+          label="Pending review"
+          value={reviewQuery.isLoading ? '—' : String(reviewPendingCount)}
+          hint="Drafts with a version waiting in the review queue."
+        />
+      </div>
 
-            {catalogQuery.isLoading ? (
-              <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <CatalogCardSkeleton key={i} />
-                ))}
-              </div>
-            ) : catalogQuery.isError ? (
-              <div className="mt-6 rounded-xl bg-surface-container-low p-12 text-center">
-                <span className="material-symbols-outlined mb-2 block text-3xl text-outline">
-                  error
-                </span>
-                <p className="text-sm text-error">Could not load challenge catalog.</p>
-              </div>
-            ) : catalogRows.length === 0 ? (
-              <div className="mt-6 rounded-xl bg-surface-container-low p-12 text-center">
-                <span className="material-symbols-outlined mb-2 block text-3xl text-outline">
-                  search_off
-                </span>
-                <p className="text-sm font-medium text-on-surface">No challenges match these filters</p>
-                <p className="mt-1 text-xs text-on-surface-variant">Try widening domain or status.</p>
-              </div>
-            ) : (
-              <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {catalogRows.map((row) => {
-                  const clickable = row.status === 'published';
-                  return (
-                    <div
-                      key={row.id}
-                      role={clickable ? 'button' : undefined}
-                      tabIndex={clickable ? 0 : undefined}
-                      onClick={() => clickable && openCatalogChallenge(row)}
-                      onKeyDown={(e) => {
-                        if (!clickable) return;
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          openCatalogChallenge(row);
-                        }
-                      }}
-                      aria-label={clickable ? `Open ${row.title}` : undefined}
-                      className={cn(
-                        'group relative overflow-hidden rounded-xl border border-transparent bg-surface-container-low p-6 transition-all duration-200',
-                        clickable &&
-                          'cursor-pointer hover:border-outline-variant/20 hover:bg-surface-container focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-                        !clickable && 'border-outline-variant/10',
-                      )}
-                    >
-                      <div className="mb-4 flex items-start justify-between gap-2">
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-surface-container-highest">
-                          <span
-                            className="material-symbols-outlined text-2xl text-tertiary"
-                            style={{ fontVariationSettings: "'FILL' 1" }}
-                            aria-hidden
-                          >
-                            quiz
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <StatusBadge status={row.status} className="capitalize" />
-                          <DifficultyBadge difficulty={row.difficulty} className="capitalize" />
-                        </div>
-                      </div>
-
-                      <h3
-                        className={cn(
-                          'font-headline mb-1.5 text-base font-bold text-on-surface',
-                          clickable && 'group-hover:text-primary transition-colors',
-                        )}
-                      >
-                        {row.title}
-                      </h3>
-                      <p className="mb-2 font-mono text-[11px] text-on-surface-variant">{row.slug}</p>
-                      <p className="mb-3 line-clamp-2 text-xs leading-relaxed text-outline">
-                        {row.description?.trim() ? row.description : '—'}
-                      </p>
-                      <p className="mb-4 text-[10px] text-on-surface-variant">
-                        {DATABASE_DOMAIN_LABELS[row.catalogDomain] ?? row.catalogDomain}
-                        <span className="mx-1.5 text-outline">·</span>
-                        {formatDate(row.updatedAt)}
-                      </p>
-
-                      <div className="grid grid-cols-2 gap-4 border-t border-outline-variant/10 pt-4">
-                        <div>
-                          <p className="mb-1 text-[9px] font-bold uppercase tracking-widest text-outline">
-                            Points
-                          </p>
-                          <p className="font-mono text-sm font-bold text-on-surface">{row.points} pts</p>
-                        </div>
-                        <div>
-                          <p className="mb-1 text-[9px] font-bold uppercase tracking-widest text-outline">
-                            Database
-                          </p>
-                          <p className="line-clamp-1 font-mono text-sm font-bold text-tertiary">
-                            {row.databaseName ?? '—'}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div
-                        className="mt-4 flex flex-wrap gap-2 border-t border-outline-variant/10 pt-4"
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e: ReactKeyboardEvent) => e.stopPropagation()}
-                      >
-                        {row.status === 'published' ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            type="button"
-                            onClick={() => router.push(`/challenges/${row.slug}`)}
-                          >
-                            View live
-                          </Button>
-                        ) : null}
-                        {row.latestVersionId &&
-                        row.status === 'draft' &&
-                        row.latestVersionReviewStatus === 'pending' ? (
-                          <Button
-                            size="sm"
-                            variant="primary"
-                            type="button"
-                            disabled={publishMutation.isPending}
-                            onClick={() => publishMutation.mutate(row.latestVersionId!)}
-                          >
-                            Publish
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-col gap-3 border-t border-outline-variant/15 pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-on-surface-variant">
-                {catalogTotal === 0
-                  ? 'No results'
-                  : `Showing ${(catalogPage - 1) * catalogLimit + 1}–${Math.min(
-                      catalogPage * catalogLimit,
-                      catalogTotal,
-                    )} of ${catalogTotal}`}
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={catalogPage <= 1 || catalogQuery.isLoading}
-                  onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
-                >
-                  Previous
-                </Button>
-                <span className="px-1 text-sm text-on-surface-variant">
-                  Page {catalogPage} / {catalogTotalPages}
-                </span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  disabled={catalogPage >= catalogTotalPages || catalogQuery.isLoading}
-                  onClick={() => setCatalogPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="page-section-title">Challenge catalog</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            Select a challenge to open its public page, or publish drafts when they are ready.
+          </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterSelect
+            value={catalogDomain}
+            onChange={setCatalogDomain}
+            options={DATABASE_DOMAIN_OPTIONS}
+          />
+          <FilterSelect
+            value={catalogDatabaseId}
+            onChange={setCatalogDatabaseId}
+            options={[
+              {
+                value: '',
+                label: databasesQuery.isLoading ? 'Loading…' : 'All databases',
+              },
+              ...catalogDatabaseSelectOptions.map((o) => ({ value: o.value, label: o.label })),
+            ]}
+          />
+          <FilterSelect
+            value={catalogStatus}
+            onChange={(v) =>
+              setCatalogStatus(v as 'all' | 'draft' | 'published' | 'archived')
+            }
+            options={[...CATALOG_STATUS_OPTIONS]}
+          />
+        </div>
+      </div>
 
-        <aside className="space-y-4">
-          <Card className="border-outline-variant/10 bg-surface-container-low/40">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Related</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2 text-sm">
-              <Link href="/admin/databases" className="text-primary hover:underline">
-                Databases catalog
-              </Link>
-              <Link href="/admin/rankings" className="text-primary hover:underline">
-                Rankings
-              </Link>
-            </CardContent>
-          </Card>
-        </aside>
+      {catalogQuery.isLoading ? (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <ChallengeCatalogSkeleton key={i} />
+          ))}
+        </div>
+      ) : catalogQuery.isError ? (
+        <div className="rounded-xl border border-error/20 bg-error/5 px-5 py-4 text-sm text-error">
+          Could not load challenge catalog.
+        </div>
+      ) : catalogRows.length === 0 ? (
+        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-5 py-8 text-center">
+          <p className="text-sm font-medium text-on-surface">No challenges match these filters</p>
+          <p className="mt-1 text-sm text-on-surface-variant">Try widening domain or status.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {catalogRows.map((row) => (
+            <ChallengeCatalogCard
+              key={row.id}
+              row={row}
+              domainIcon={domainIconForChallenge(row)}
+              publishPending={publishMutation.isPending}
+              onPublish={(versionId) => publishMutation.mutate(versionId)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3 border-t border-outline-variant/15 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-on-surface-variant">
+          {catalogTotal === 0
+            ? 'No results'
+            : `Showing ${(catalogPage - 1) * CATALOG_PAGE_LIMIT + 1}–${Math.min(
+                catalogPage * CATALOG_PAGE_LIMIT,
+                catalogTotal,
+              )} of ${catalogTotal}`}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={catalogPage <= 1 || catalogQuery.isLoading}
+            onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </Button>
+          <span className="px-1 text-sm text-on-surface-variant">
+            Page {catalogPage} / {catalogTotalPages}
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={catalogPage >= catalogTotalPages || catalogQuery.isLoading}
+            onClick={() => setCatalogPage((p) => p + 1)}
+          >
+            Next
+          </Button>
+        </div>
       </div>
 
       {reviewQueueOpen ? (

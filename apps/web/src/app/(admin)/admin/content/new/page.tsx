@@ -32,7 +32,7 @@ export default function AdminNewChallengePage() {
 
   const databasesQuery = useQuery({
     queryKey: ['admin-content-databases'],
-    queryFn: () => databasesApi.list({ limit: 200, page: 1 }),
+    queryFn: () => databasesApi.list({ limit: 100, page: 1 }),
   });
 
   const databaseOptions = useMemo(() => {
