@@ -7,8 +7,10 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn, formatRelativeTime } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
-export default function LabIndexPage() {
+export default function LabIndexPage(props: PageProps<'/lab'>) {
+  useAppPageProps(props);
   const { data: sessions, isLoading } = useQuery({
     queryKey: ['sessions'],
     queryFn: sessionsApi.list,

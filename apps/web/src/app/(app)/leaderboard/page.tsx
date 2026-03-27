@@ -7,6 +7,7 @@ import { DifficultyBadge } from '@/components/ui/badge';
 import { challengesApi, leaderboardApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 type LeaderboardPeriod = 'weekly' | 'monthly' | 'alltime';
 
@@ -22,7 +23,8 @@ function formatPoints(points: number) {
 
 type ChallengeCompletionFilter = 'not_done' | 'done';
 
-export default function LeaderboardPage() {
+export default function LeaderboardPage(props: PageProps<'/leaderboard'>) {
+  useAppPageProps(props);
   const [period, setPeriod] = useState<LeaderboardPeriod>('alltime');
   const { user } = useAuthStore();
   const userId = user?.id ?? null;

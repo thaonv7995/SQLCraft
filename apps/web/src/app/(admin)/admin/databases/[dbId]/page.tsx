@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,7 @@ import {
   DATABASE_SCALE_LABELS,
 } from '@/lib/database-catalog';
 import { cn, formatRelativeTime, formatRows } from '@/lib/utils';
+import { useAppPageProps, searchParamFirst } from '@/lib/next-app-page';
 
 type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'generation-jobs';
 
@@ -408,17 +409,12 @@ function DetailSkeleton() {
   );
 }
 
-export default function AdminDatabaseDetailPage() {
+export default function AdminDatabaseDetailPage(props: PageProps<'/admin/databases/[dbId]'>) {
+  const { params, searchParams } = useAppPageProps(props);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const requestedTab = searchParams.get('tab');
-  const databaseId = useMemo(() => {
-    const segments = pathname.split('/').filter(Boolean);
-    const lastSegment = segments[segments.length - 1];
-    return lastSegment ? decodeURIComponent(lastSegment) : '';
-  }, [pathname]);
+  const requestedTab = searchParamFirst(searchParams, 'tab');
+  const databaseId = params.dbId ?? '';
   const [activeTab, setActiveTab] = useState<DatabaseDetailTab>(
     isDetailTab(requestedTab) ? requestedTab : 'schema-template',
   );

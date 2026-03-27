@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useAppPageProps } from '@/lib/next-app-page';
 
-export default function SubmissionsPage() {
+export default function SubmissionsPage(props: PageProps<'/submissions'>) {
+  useAppPageProps(props);
   return (
     <div className="page-shell page-stack">
       <section className="rounded-[28px] border border-outline-variant/10 bg-surface-container-low px-6 py-8">

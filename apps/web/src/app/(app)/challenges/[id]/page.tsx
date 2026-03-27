@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { DifficultyBadge, StatusBadge } from '@/components/ui/badge';
@@ -12,6 +12,7 @@ import { ChallengePassCriteriaDisplay } from '@/components/challenge/challenge-p
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import { useAuthStore } from '@/stores/auth';
 import { formatRelativeTime } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const DATASET_SCALE_META: Record<
   ChallengeCatalogItem['datasetScale'],
@@ -23,17 +24,11 @@ const DATASET_SCALE_META: Record<
   large: { label: 'Large', desc: '10M+ rows' },
 };
 
-function challengeIdFromPathname(pathname: string): string {
-  const segments = pathname.split('/').filter(Boolean);
-  const lastSegment = segments[segments.length - 1];
-  return lastSegment ? decodeURIComponent(lastSegment) : '';
-}
-
-export default function ChallengeDetailPage() {
-  const pathname = usePathname();
+export default function ChallengeDetailPage(props: PageProps<'/challenges/[id]'>) {
+  const { params } = useAppPageProps(props);
   const router = useRouter();
   const { user } = useAuthStore();
-  const challengeId = challengeIdFromPathname(pathname);
+  const challengeId = params.id ?? '';
   const [isStartingSubmission, setIsStartingSubmission] = useState(false);
 
   const catalogQuery = useQuery({

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatDuration, formatRelativeTime, formatRows, classifyQueryType } from '@/lib/utils';
 import type { QueryExecution } from '@/lib/api';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const STATUS_STRIP: Record<string, string> = {
   success: 'bg-secondary',
@@ -197,7 +198,8 @@ function QueryCardSkeleton() {
   );
 }
 
-export default function HistoryPage() {
+export default function HistoryPage(props: PageProps<'/history'>) {
+  useAppPageProps(props);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'error'>('all');
   const [page, setPage] = useState(1);

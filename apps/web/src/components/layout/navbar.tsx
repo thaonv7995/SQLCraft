@@ -26,6 +26,18 @@ function buildUserMenuItems(user: User) {
   return items;
 }
 
+function buildAdminShellMenuItems(user: User) {
+  const items: { href: string; label: string; icon: string }[] = [
+    { href: '/dashboard', label: 'Back to app', icon: 'home' },
+    { href: '/profile', label: 'Profile', icon: 'person' },
+    { href: '/settings', label: 'Settings', icon: 'settings' },
+  ];
+  if (isAdminUser(user)) {
+    items.push({ href: '/admin', label: 'Admin overview', icon: 'dashboard' });
+  }
+  return items;
+}
+
 function UserAvatar({
   displayName,
   avatarUrl,
@@ -40,7 +52,7 @@ function UserAvatar({
   const [open, setOpen] = useState(false);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const initials = generateInitials(displayName);
-  const menuItems = adminShell ? [] : buildUserMenuItems(user);
+  const menuItems = adminShell ? buildAdminShellMenuItems(user) : buildUserMenuItems(user);
 
   return (
     <div className="relative">
@@ -118,7 +130,7 @@ export function Navbar() {
   const mounted = useMounted();
   const authed = mounted && isAuthenticated();
   const inAdminShell = pathname.startsWith('/admin');
-  const homeHref = authed && user && isAdminUser(user) ? '/admin' : authed ? '/dashboard' : '/';
+  const homeHref = authed ? '/dashboard' : '/';
 
   return (
     <nav

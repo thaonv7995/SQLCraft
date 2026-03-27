@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { databasesApi, queryApi } from '@/lib/api';
 import type { UserStats } from '@/lib/api';
@@ -12,6 +10,7 @@ import { StatusBadge, DifficultyBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { databaseScaleDisplayLabelFromRowCount } from '@/lib/database-catalog';
 import { formatRelativeTime, formatRows, truncateSql } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 // ─── Fallback stats while user data loads ─────────────────────────────────────
 const EMPTY_STATS: UserStats = {
@@ -32,20 +31,9 @@ function leadCopy(stats: UserStats): string {
   return 'Open the Lab to run SQL and see your activity here.';
 }
 
-function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
-  if (!user) return false;
-  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
-}
-
-export default function DashboardPage() {
-  const router = useRouter();
+export default function DashboardPage(props: PageProps<'/dashboard'>) {
+  useAppPageProps(props);
   const { user } = useAuthStore();
-
-  useEffect(() => {
-    if (isAdminUser(user)) {
-      router.replace('/admin');
-    }
-  }, [router, user]);
 
   const {
     data: databaseCatalog,
@@ -79,10 +67,6 @@ export default function DashboardPage() {
   const now = new Date();
   const hour = now.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-
-  if (isAdminUser(user)) {
-    return null;
-  }
 
   return (
     <div className="page-shell page-stack">

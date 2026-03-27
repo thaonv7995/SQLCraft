@@ -12,6 +12,7 @@ import {
   databaseScaleDisplayLabelFromRowCount,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 // ─── Database Card ────────────────────────────────────────────────────────────
 
@@ -138,7 +139,8 @@ function FilterSelect({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function ExplorePage() {
+export default function ExplorePage(props: PageProps<'/explore'>) {
+  useAppPageProps(props);
   const router = useRouter();
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');

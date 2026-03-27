@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useAppPageProps, searchParamFirst } from '@/lib/next-app-page';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { adminApi } from '@/lib/api';
@@ -47,10 +47,10 @@ const SYSTEM_TABS = TAB_OPTIONS.map((tab) => tab.id);
 const isSystemTab = (value: string | null): value is SystemTab =>
   value !== null && SYSTEM_TABS.includes(value as SystemTab);
 
-export default function AdminSystemPage() {
+export default function AdminSystemPage(props: PageProps<'/admin/system'>) {
+  const { searchParams } = useAppPageProps(props);
   const queryClient = useQueryClient();
-  const searchParams = useSearchParams();
-  const requestedTab = searchParams?.get('tab') ?? null;
+  const requestedTab = searchParamFirst(searchParams, 'tab');
   const [activeTab, setActiveTab] = useState<SystemTab>(
     isSystemTab(requestedTab) ? requestedTab : 'health',
   );
@@ -127,20 +127,30 @@ export default function AdminSystemPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Health</p>
-            <div className="mt-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <div className="min-w-[6.25rem] max-w-[10rem] rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+              Health
+            </p>
+            <div className="mt-1">
               <StatusBadge status={health ? health.status : 'pending'} />
             </div>
           </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Queue Backlog</p>
-            <p className="mt-2 text-xl font-semibold text-on-surface">{pendingJobs}</p>
+          <div className="min-w-[6.25rem] max-w-[9rem] rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+              Queue Backlog
+            </p>
+            <p className="mt-1 text-base font-semibold tabular-nums leading-none text-on-surface">
+              {pendingJobs}
+            </p>
           </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Active Sessions</p>
-            <p className="mt-2 text-xl font-semibold text-on-surface">{activeSessions}</p>
+          <div className="min-w-[6.25rem] max-w-[9rem] rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+              Active Sessions
+            </p>
+            <p className="mt-1 text-base font-semibold tabular-nums leading-none text-on-surface">
+              {activeSessions}
+            </p>
           </div>
         </div>
       </div>
@@ -185,22 +195,36 @@ export default function AdminSystemPage() {
             </Button>
           </section>
 
-          <section className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Users</p>
-              <p className="mt-2 text-2xl font-semibold text-on-surface">{totalUsers}</p>
+          <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Users
+              </p>
+              <p className="mt-1 text-lg font-semibold tabular-nums leading-none text-on-surface">
+                {totalUsers}
+              </p>
             </div>
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Tracks</p>
-              <p className="mt-2 text-2xl font-semibold text-on-surface">{totalTracks}</p>
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Tracks
+              </p>
+              <p className="mt-1 text-lg font-semibold tabular-nums leading-none text-on-surface">
+                {totalTracks}
+              </p>
             </div>
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Lessons</p>
-              <p className="mt-2 text-2xl font-semibold text-on-surface">{totalLessons}</p>
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Lessons
+              </p>
+              <p className="mt-1 text-lg font-semibold tabular-nums leading-none text-on-surface">
+                {totalLessons}
+              </p>
             </div>
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Timestamp</p>
-              <p className="mt-2 text-sm text-on-surface">
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Timestamp
+              </p>
+              <p className="mt-1 text-xs leading-snug text-on-surface">
                 {health ? formatRelativeTime(health.timestamp) : 'Awaiting health payload'}
               </p>
             </div>
@@ -213,9 +237,6 @@ export default function AdminSystemPage() {
           <div className="flex flex-col gap-3 border-b border-outline-variant/10 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="page-section-title">Job Queues</h2>
-              <p className="text-xs text-on-surface-variant">
-                Backed by `/admin/system/jobs` and filtered client-side.
-              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {FILTER_OPTIONS.map((filter) => (
@@ -332,37 +353,43 @@ export default function AdminSystemPage() {
             infra telemetry APIs are connected.
           </p>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Session Capacity</p>
-              <p className="mt-2 text-sm text-on-surface">
+          <div className="mt-4 grid grid-cols-1 gap-2 lg:grid-cols-3">
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Session Capacity
+              </p>
+              <p className="mt-1 text-xs leading-snug text-on-surface">
                 {activeSessions} active sessions are currently running.
               </p>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-container-high">
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-container-high">
                 <div
                   className="h-full rounded-full bg-on-surface-variant"
                   style={{ width: `${Math.min((activeSessions / 50) * 100, 100)}%` }}
                 />
               </div>
             </div>
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Queue Pressure</p>
-              <p className="mt-2 text-sm text-on-surface">
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Queue Pressure
+              </p>
+              <p className="mt-1 text-xs leading-snug text-on-surface">
                 {pendingJobs} pending jobs and {queueCounters.running} running workers.
               </p>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-container-high">
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-container-high">
                 <div
                   className="h-full rounded-full bg-tertiary"
                   style={{ width: `${Math.min((pendingJobs / 40) * 100, 100)}%` }}
                 />
               </div>
             </div>
-            <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-4">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Reliability</p>
-              <p className="mt-2 text-sm text-on-surface">
+            <div className="rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-2.5">
+              <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+                Reliability
+              </p>
+              <p className="mt-1 text-xs leading-snug text-on-surface">
                 {queueCounters.failed} failed jobs detected in the latest queue snapshot.
               </p>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-container-high">
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-container-high">
                 <div
                   className="h-full rounded-full bg-error"
                   style={{ width: `${Math.min((queueCounters.failed / 20) * 100, 100)}%` }}

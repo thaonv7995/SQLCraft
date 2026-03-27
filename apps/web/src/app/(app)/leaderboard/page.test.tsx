@@ -1,8 +1,8 @@
+import { Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
 import LeaderboardPage from './page';
 import { useAuthStore } from '@/stores/auth';
 
@@ -35,7 +35,7 @@ vi.mock('@/lib/api', () => ({
   sessionsApi: mocks.sessionsApi,
 }));
 
-function renderLeaderboardPage() {
+async function renderLeaderboardPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -44,11 +44,22 @@ function renderLeaderboardPage() {
     },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <LeaderboardPage />
-    </QueryClientProvider>,
-  );
+  const pageProps: PageProps<'/leaderboard'> = {
+    params: Promise.resolve({}),
+    searchParams: Promise.resolve({}),
+  };
+
+  let result: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={null}>
+          <LeaderboardPage {...pageProps} />
+        </Suspense>
+      </QueryClientProvider>,
+    );
+  });
+  return result!;
 }
 
 describe('LeaderboardPage', () => {
@@ -253,7 +264,7 @@ describe('LeaderboardPage', () => {
   it('renders personalized leaderboard stats and challenge list', async () => {
     const user = userEvent.setup();
 
-    renderLeaderboardPage();
+    await renderLeaderboardPage();
 
     expect(
       await screen.findByRole('heading', {
@@ -293,7 +304,7 @@ describe('LeaderboardPage', () => {
   it.skip('creates submission via popup database selector', async () => {
     const user = userEvent.setup();
 
-    renderLeaderboardPage();
+    await renderLeaderboardPage();
 
     const createBtn = await screen.findByRole('button', {
       name: /tạo submission cho filter active users/i,

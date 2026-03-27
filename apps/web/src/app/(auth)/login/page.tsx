@@ -12,6 +12,7 @@ import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -20,12 +21,8 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
-function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
-  if (!user) return false;
-  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
-}
-
-export default function LoginPage() {
+export default function LoginPage(props: PageProps<'/login'>) {
+  useAppPageProps(props);
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [showPassword, setShowPassword] = useState(false);
@@ -44,7 +41,7 @@ export default function LoginPage() {
       const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
       setAuth(hydratedUser, tokens);
       toast.success('Welcome back!');
-      router.push(isAdminUser(hydratedUser) ? '/admin' : '/dashboard');
+      router.push('/dashboard');
     } catch (err) {
       toastError('Login failed', err);
     }

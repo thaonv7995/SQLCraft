@@ -20,6 +20,7 @@ import {
 import { adminApi, databasesApi, type AdminCreateChallengePayload, type DatasetScale } from '@/lib/api';
 import { CHALLENGE_SLUG_PATTERN, slugifyChallengeTitle } from '@/lib/slugify-challenge';
 import toast from 'react-hot-toast';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const DIFFICULTY_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
@@ -34,7 +35,8 @@ const DATASET_SCALE_OPTIONS: { value: DatasetScale; label: string }[] = [
   { value: 'large', label: 'Large (10M+ rows)' },
 ];
 
-export default function AdminNewChallengePage() {
+export default function AdminNewChallengePage(props: PageProps<'/admin/content/new'>) {
+  useAppPageProps(props);
   const router = useRouter();
   const queryClient = useQueryClient();
 

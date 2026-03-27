@@ -30,6 +30,7 @@ import {
   DATABASE_DOMAIN_OPTIONS,
 } from '@/lib/database-catalog';
 import { cn, formatDate } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 import toast from 'react-hot-toast';
 
 const emptyReview: ChallengeReviewItem[] = [];
@@ -252,7 +253,8 @@ function ChallengeCatalogSkeleton() {
   );
 }
 
-export default function AdminContentChallengesPage() {
+export default function AdminContentChallengesPage(props: PageProps<'/admin/content'>) {
+  useAppPageProps(props);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -275,6 +277,21 @@ export default function AdminContentChallengesPage() {
     'all' | 'draft' | 'published' | 'archived'
   >('all');
   const [catalogPage, setCatalogPage] = useState(1);
+
+  const handleCatalogDomainChange = (value: string) => {
+    setCatalogDomain(value);
+    setCatalogPage(1);
+  };
+
+  const handleCatalogDatabaseIdChange = (value: string) => {
+    setCatalogDatabaseId(value);
+    setCatalogPage(1);
+  };
+
+  const handleCatalogStatusChange = (value: 'all' | 'draft' | 'published' | 'archived') => {
+    setCatalogStatus(value);
+    setCatalogPage(1);
+  };
 
   const catalogDatabaseSelectOptions = useMemo(() => {
     const items = databasesQuery.data?.items ?? [];
@@ -304,12 +321,13 @@ export default function AdminContentChallengesPage() {
   useEffect(() => {
     if (!catalogDatabaseId) return;
     const ok = catalogDatabaseSelectOptions.some((o) => o.value === catalogDatabaseId);
-    if (!ok) setCatalogDatabaseId('');
+    if (!ok) {
+      queueMicrotask(() => {
+        setCatalogDatabaseId('');
+        setCatalogPage(1);
+      });
+    }
   }, [catalogDatabaseSelectOptions, catalogDatabaseId]);
-
-  useEffect(() => {
-    setCatalogPage(1);
-  }, [catalogDomain, catalogDatabaseId, catalogStatus]);
 
   useEffect(() => {
     if (!reviewQueueOpen) return;
@@ -447,12 +465,12 @@ export default function AdminContentChallengesPage() {
         <div className="flex flex-wrap items-center gap-2">
           <FilterSelect
             value={catalogDomain}
-            onChange={setCatalogDomain}
+            onChange={handleCatalogDomainChange}
             options={DATABASE_DOMAIN_OPTIONS}
           />
           <FilterSelect
             value={catalogDatabaseId}
-            onChange={setCatalogDatabaseId}
+            onChange={handleCatalogDatabaseIdChange}
             options={[
               {
                 value: '',
@@ -464,7 +482,7 @@ export default function AdminContentChallengesPage() {
           <FilterSelect
             value={catalogStatus}
             onChange={(v) =>
-              setCatalogStatus(v as 'all' | 'draft' | 'published' | 'archived')
+              handleCatalogStatusChange(v as 'all' | 'draft' | 'published' | 'archived')
             }
             options={[...CATALOG_STATUS_OPTIONS]}
           />

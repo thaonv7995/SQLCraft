@@ -25,6 +25,7 @@ import {
   type UserRole,
 } from '@/lib/api';
 import { formatDate, generateInitials } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 import toast from 'react-hot-toast';
 
 interface AdminUser extends User {
@@ -231,7 +232,8 @@ function UserEditorCard({
   );
 }
 
-export default function AdminUsersPage() {
+export default function AdminUsersPage(props: PageProps<'/admin/users'>) {
+  useAppPageProps(props);
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<AdminRoleFilter>('all');
@@ -339,36 +341,42 @@ export default function AdminUsersPage() {
 
   return (
     <div className="page-shell-wide page-stack">
-      <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-6 lg:p-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
+      <div className="min-w-0 rounded-2xl border border-outline-variant/10 bg-surface-container-low p-6 lg:p-8">
+        <div className="flex min-w-0 flex-col gap-6 lg:flex-row lg:items-start lg:gap-6 xl:gap-8">
+          <div className="min-w-0 flex-1 basis-0">
             <p className="text-[11px] uppercase tracking-[0.24em] text-outline">Admin Directory</p>
             <h1 className="mt-3 page-title">Users</h1>
-            <p className="page-lead mt-2 max-w-2xl">
+            <p className="page-lead mt-2">
               Create accounts, set access levels, disable access, and retire users without losing
               their historical records.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,180px)_auto]">
-            <div className="rounded-2xl border border-outline-variant/10 bg-surface-container px-5 py-4">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-outline">Total Users</p>
-              <p className="mt-3 text-3xl font-semibold text-on-surface">{data?.total ?? 0}</p>
-              <p className="mt-1 text-xs text-on-surface-variant">Accounts currently indexed</p>
+          <div className="flex w-full min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto lg:max-w-full">
+            <div className="w-full shrink-0 rounded-lg border border-outline-variant/10 bg-surface-container px-3.5 py-2 sm:w-auto">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-outline">
+                Total users
+              </p>
+              <p className="mt-0.5 text-2xl font-semibold leading-none tabular-nums text-on-surface">
+                {data?.total ?? 0}
+              </p>
+              <p className="mt-1 text-[11px] leading-tight text-on-surface-variant">
+                In directory
+              </p>
             </div>
 
             <Button
               variant="secondary"
-              size="lg"
+              size="md"
               onClick={() =>
                 setEditorState((current) => (current?.mode === 'create' ? null : { mode: 'create' }))
               }
               leftIcon={
-                <span className="material-symbols-outlined text-[18px]">
+                <span className="material-symbols-outlined text-[18px] leading-none">
                   {editorState?.mode === 'create' ? 'close' : 'person_add'}
                 </span>
               }
-              className="min-h-[88px] min-w-[196px] justify-start border-outline-variant/20 bg-surface-container-high px-5 text-left text-on-surface hover:bg-surface-container-highest"
+              className="w-full border-outline-variant/20 bg-surface-container-high text-on-surface hover:bg-surface-container-highest sm:w-auto sm:shrink-0"
             >
               {editorState?.mode === 'create' ? 'Close Create' : 'Create User'}
             </Button>

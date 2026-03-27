@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
@@ -49,15 +49,7 @@ import {
   writeLabEditorState,
   type LabEditorTab,
 } from '@/lib/lab-editor-tabs';
-
-function sessionIdFromPathname(pathname: string): string {
-  const segments = pathname.split('/').filter(Boolean);
-  const lastSegment = segments[segments.length - 1];
-  if (!lastSegment) {
-    return '';
-  }
-  return decodeURIComponent(lastSegment);
-}
+import { useAppPageProps } from '@/lib/next-app-page';
 
 function normalizeMetric(value: number | null | undefined) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -2114,10 +2106,10 @@ function LabSessionError({
   );
 }
 
-export default function LabPage() {
-  const pathname = usePathname();
+export default function LabPage(props: PageProps<'/lab/[sessionId]'>) {
+  const { params } = useAppPageProps(props);
   const router = useRouter();
-  const sessionId = sessionIdFromPathname(pathname);
+  const sessionId = params.sessionId ?? '';
   const {
     activeTab,
     setActiveTab,
@@ -2243,11 +2235,8 @@ export default function LabPage() {
     onSuccess: (attempt) => {
       if (process.env.NODE_ENV === 'development') {
         const ev = attempt.evaluation;
-        // eslint-disable-next-line no-console -- intentional dev-only submit diagnostics
         console.groupCollapsed('[SQLForge] Challenge submit (see API terminal/Docker for EXPLAIN logs)');
-        // eslint-disable-next-line no-console
         console.log('queryExecutionId', attempt.queryExecutionId);
-        // eslint-disable-next-line no-console
         console.log('evaluation snapshot', {
           queryTotalCost: ev?.queryTotalCost ?? null,
           queryActualTime: ev?.queryActualTime ?? null,
@@ -2256,11 +2245,9 @@ export default function LabPage() {
           passCriterionChecks: ev?.passCriterionChecks ?? [],
           feedbackPreview: ev?.feedbackText?.slice(0, 200) ?? null,
         });
-        // eslint-disable-next-line no-console
         console.info(
           'EXPLAIN / planner-cost traces are logged on the API process (e.g. `docker compose logs -f api`), not in the browser. Set PLANNER_COST_DEBUG=1 in API .env for extra detail.',
         );
-        // eslint-disable-next-line no-console
         console.groupEnd();
       }
       queryClient.invalidateQueries({
@@ -2411,7 +2398,7 @@ export default function LabPage() {
     }
     if (attempt.id === lastChallengeAttemptIdRef.current) return;
     lastChallengeAttemptIdRef.current = attempt.id;
-    setChallengeFeedbackExpanded(attempt.status !== 'passed');
+    queueMicrotask(() => setChallengeFeedbackExpanded(attempt.status !== 'passed'));
   }, [latestChallengeAttempt]);
 
   useEffect(() => {

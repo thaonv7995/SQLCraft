@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
   PassCriteriaEditor,
   type PassCriteriaSchemaState,
@@ -28,6 +28,7 @@ import {
 } from '@/lib/api';
 import { CHALLENGE_SLUG_PATTERN, slugifyChallengeTitle } from '@/lib/slugify-challenge';
 import toast from 'react-hot-toast';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const DIFFICULTY_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
@@ -42,11 +43,13 @@ const DATASET_SCALE_OPTIONS: { value: DatasetScale; label: string }[] = [
   { value: 'large', label: 'Large (10M+ rows)' },
 ];
 
-export default function AdminEditChallengePage() {
+export default function AdminEditChallengePage(
+  props: PageProps<'/admin/content/[challengeId]/edit'>,
+) {
+  const { params } = useAppPageProps(props);
   const router = useRouter();
-  const params = useParams();
   const queryClient = useQueryClient();
-  const challengeId = typeof params.challengeId === 'string' ? params.challengeId : '';
+  const challengeId = params.challengeId ?? '';
   const hydratedRef = useRef(false);
 
   const draftQuery = useQuery({
@@ -107,16 +110,6 @@ export default function AdminEditChallengePage() {
     const v = data.latestVersion;
     const cfg = v.validatorConfig && typeof v.validatorConfig === 'object' ? v.validatorConfig : {};
 
-    setDatabaseId(data.databaseId ?? '');
-    setTitle(data.title);
-    setDescription(data.description ?? '');
-    setDifficulty(data.difficulty as 'beginner' | 'intermediate' | 'advanced');
-    setPoints(data.points);
-    setDatasetScale(data.datasetScale);
-    setSortOrder(data.sortOrder);
-    setProblemStatement(v.problemStatement);
-    setHintText(v.hintText ?? '');
-    setReferenceSolution(v.referenceSolution ?? '');
     let rows = passCriteriaDraftsFromConfig(cfg as Record<string, unknown>);
     const existingCols = v.expectedResultColumns ?? [];
     const hasColCriterion = rows.some((r) => r.type === 'required_output_columns');
@@ -131,8 +124,21 @@ export default function AdminEditChallengePage() {
         },
       ];
     }
-    setPassCriteriaRows(rows);
-    hydratedRef.current = true;
+
+    queueMicrotask(() => {
+      setDatabaseId(data.databaseId ?? '');
+      setTitle(data.title);
+      setDescription(data.description ?? '');
+      setDifficulty(data.difficulty as 'beginner' | 'intermediate' | 'advanced');
+      setPoints(data.points);
+      setDatasetScale(data.datasetScale);
+      setSortOrder(data.sortOrder);
+      setProblemStatement(v.problemStatement);
+      setHintText(v.hintText ?? '');
+      setReferenceSolution(v.referenceSolution ?? '');
+      setPassCriteriaRows(rows);
+      hydratedRef.current = true;
+    });
   }, [draftQuery.data]);
 
   const updateMutation = useMutation({

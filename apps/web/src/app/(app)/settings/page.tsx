@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { useAuthStore } from '@/stores/auth';
 import type { User } from '@/lib/api';
 import { generateInitials } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,8 @@ type PasswordFormData = z.infer<typeof passwordSchema>;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function SettingsPage() {
+export default function SettingsPage(props: PageProps<'/settings'>) {
+  useAppPageProps(props);
   const router = useRouter();
   const { user, clearAuth, isAuthenticated, updateUser } = useAuthStore();
   const authed = isAuthenticated();

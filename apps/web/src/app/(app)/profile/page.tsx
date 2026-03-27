@@ -5,8 +5,10 @@ import { Button } from '@/components/ui/button';
 import { useMounted } from '@/hooks/use-mounted';
 import { useAuthStore } from '@/stores/auth';
 import { generateInitials } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
-export default function ProfilePage() {
+export default function ProfilePage(props: PageProps<'/profile'>) {
+  useAppPageProps(props);
   const { user, isAuthenticated } = useAuthStore();
   const mounted = useMounted();
   const authed = mounted && isAuthenticated();

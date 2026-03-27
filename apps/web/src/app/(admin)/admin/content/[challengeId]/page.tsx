@@ -9,7 +9,7 @@ import {
   ListOrdered,
   Medal,
 } from 'lucide-react';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DifficultyBadge, StatusBadge } from '@/components/ui/badge';
@@ -28,12 +28,13 @@ import { adminApi, challengesApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { cn, formatDate, generateInitials } from '@/lib/utils';
 import toast from 'react-hot-toast';
+import { useAppPageProps } from '@/lib/next-app-page';
 
-export default function AdminChallengeDetailPage() {
-  const params = useParams();
+export default function AdminChallengeDetailPage(props: PageProps<'/admin/content/[challengeId]'>) {
+  const { params } = useAppPageProps(props);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const challengeId = typeof params.challengeId === 'string' ? params.challengeId : '';
+  const challengeId = params.challengeId ?? '';
   const [rankingOpen, setRankingOpen] = useState(false);
 
   const deleteMutation = useMutation({

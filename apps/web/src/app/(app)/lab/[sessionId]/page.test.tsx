@@ -1,6 +1,6 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import LabPage from './page';
 import { useLabStore } from '@/stores/lab';
@@ -30,7 +30,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ sessionId: 'session-1234567890' }),
   useRouter: () => ({ replace: mocks.replace }),
 }));
 
@@ -44,6 +43,12 @@ vi.mock('react-hot-toast', () => ({
 vi.mock('@/hooks/use-query-execution', () => ({
   useExecuteQuery: () => ({ mutate: mocks.executeQuery }),
   useExplainQuery: () => ({ mutate: mocks.explainQuery }),
+  useQueryHistory: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
   useSessionStatus: () => ({
     data: mocks.session,
     isLoading: false,
@@ -99,7 +104,7 @@ function resetLabStore() {
   });
 }
 
-function renderLabPage(options?: { strictMode?: boolean }) {
+async function renderLabPage(options?: { strictMode?: boolean }) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -111,13 +116,24 @@ function renderLabPage(options?: { strictMode?: boolean }) {
     },
   });
 
+  const pageProps: PageProps<'/lab/[sessionId]'> = {
+    params: Promise.resolve({ sessionId: 'session-1234567890' }),
+    searchParams: Promise.resolve({}),
+  };
+
   const tree = (
     <QueryClientProvider client={queryClient}>
-      <LabPage />
+      <Suspense fallback={null}>
+        <LabPage {...pageProps} />
+      </Suspense>
     </QueryClientProvider>
   );
 
-  return render(options?.strictMode ? <StrictMode>{tree}</StrictMode> : tree);
+  let result: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(options?.strictMode ? <StrictMode>{tree}</StrictMode> : tree);
+  });
+  return result!;
 }
 
 describe('LabPage provisioning state', () => {
@@ -146,21 +162,21 @@ describe('LabPage provisioning state', () => {
     vi.clearAllMocks();
   });
 
-  it('keeps the interactive lab visible and does not render the new provisioning overlay', () => {
-    renderLabPage();
+  it('keeps the interactive lab visible and does not render the new provisioning overlay', async () => {
+    await renderLabPage();
 
     expect(screen.queryByRole('heading', { name: /provisioning your sandbox/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('lab-sql-editor')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run/i })).toBeInTheDocument();
   });
 
-  it('does not render the provisioning cancel action', () => {
-    renderLabPage();
+  it('does not render the provisioning cancel action', async () => {
+    await renderLabPage();
 
     expect(screen.queryByRole('button', { name: /cancel provisioning/i })).not.toBeInTheDocument();
   });
 
-  it('treats the session as ready when the sandbox is already ready', () => {
+  it('treats the session as ready when the sandbox is already ready', async () => {
     mocks.session = {
       ...mocks.session,
       status: 'provisioning',
@@ -172,7 +188,7 @@ describe('LabPage provisioning state', () => {
       },
     };
 
-    renderLabPage();
+    await renderLabPage();
 
     expect(screen.getByText('Ready')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run/i })).not.toBeDisabled();
@@ -191,7 +207,7 @@ describe('LabPage provisioning state', () => {
       }),
     );
 
-    renderLabPage({ strictMode: true });
+    await renderLabPage({ strictMode: true });
 
     await waitFor(() => {
       expect(useLabStore.getState().currentQuery).toBe(starterQuery);

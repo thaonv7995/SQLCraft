@@ -12,6 +12,7 @@ import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const registerSchema = z
   .object({
@@ -36,12 +37,8 @@ const registerSchema = z
 
 type RegisterFormData = z.infer<typeof registerSchema>;
 
-function isAdminUser(user: { role?: string; roles?: string[] } | null): boolean {
-  if (!user) return false;
-  return user.role === 'admin' || (user.roles?.includes('admin') ?? false);
-}
-
-export default function RegisterPage() {
+export default function RegisterPage(props: PageProps<'/register'>) {
+  useAppPageProps(props);
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [showPassword, setShowPassword] = useState(false);
@@ -70,7 +67,7 @@ export default function RegisterPage() {
       const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
       setAuth(hydratedUser, tokens);
       toast.success('Account created! Welcome to SQLCraft.');
-      router.push(isAdminUser(hydratedUser) ? '/admin' : '/dashboard');
+      router.push('/dashboard');
     } catch (err) {
       toastError('Registration failed', err);
     }

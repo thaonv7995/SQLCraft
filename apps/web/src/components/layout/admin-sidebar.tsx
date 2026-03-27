@@ -57,6 +57,16 @@ export function AdminSidebar() {
           );
         })}
       </nav>
+
+      <div className="shrink-0 p-4 border-t border-outline-variant/10">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-3 px-3 py-2.5 rounded text-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50 transition-colors duration-200"
+        >
+          <span className="material-symbols-outlined shrink-0 text-lg">arrow_back</span>
+          Back to app
+        </Link>
+      </div>
     </aside>
   );
 }

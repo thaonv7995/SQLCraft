@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { Badge, StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import {
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 const SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
   { value: 'tiny', label: DATABASE_SCALE_LABELS.tiny },
@@ -415,13 +416,9 @@ function ProvisioningModal({
   );
 }
 
-export default function DatabaseDetailPage() {
-  const pathname = usePathname();
-  const dbId = useMemo(() => {
-    const segments = pathname.split('/').filter(Boolean);
-    const lastSegment = segments[segments.length - 1];
-    return lastSegment ? decodeURIComponent(lastSegment) : '';
-  }, [pathname]);
+export default function DatabaseDetailPage(props: PageProps<'/explore/[dbId]'>) {
+  const { params } = useAppPageProps(props);
+  const dbId = params.dbId ?? '';
   return <DatabaseDetail key={dbId} dbId={dbId} />;
 }
 

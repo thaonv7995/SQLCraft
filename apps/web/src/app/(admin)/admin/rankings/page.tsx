@@ -16,6 +16,7 @@ import {
   TableSkeleton,
 } from '@/components/ui/table';
 import { generateInitials } from '@/lib/utils';
+import { useAppPageProps } from '@/lib/next-app-page';
 
 type RankingsTab = 'global' | 'challenge' | 'rules';
 type LeaderboardPeriod = 'weekly' | 'monthly' | 'alltime';
@@ -39,7 +40,8 @@ const EMPTY_GLOBAL: Awaited<ReturnType<typeof adminApi.globalLeaderboard>> = {
 };
 const EMPTY_CHALLENGE_LEADERS: Awaited<ReturnType<typeof challengesApi.getLeaderboard>> = [];
 
-export default function AdminRankingsPage() {
+export default function AdminRankingsPage(props: PageProps<'/admin/rankings'>) {
+  useAppPageProps(props);
   const [activeTab, setActiveTab] = useState<RankingsTab>('global');
   const [period, setPeriod] = useState<LeaderboardPeriod>('alltime');
   const [manualSelectedChallengeId, setManualSelectedChallengeId] = useState<string | null>(null);
@@ -91,23 +93,35 @@ export default function AdminRankingsPage() {
           <p className="text-xs uppercase tracking-[0.2em] text-on-surface-variant">Rankings</p>
           <h1 className="mt-2 page-title-lg">Ranking Control</h1>
           <p className="page-lead mt-2 max-w-3xl">
-            Operate global and challenge-specific leaderboards for SQL practice and competition.
-            This screen is focused on ranking surfaces only.
+            Global and challenge leaderboards for SQL practice. This page is for rankings only.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Global Entries</p>
-            <p className="mt-2 text-xl font-semibold text-on-surface">{globalLeaders.length}</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <div className="min-w-[6.25rem] max-w-[9rem] rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+              Global Entries
+            </p>
+            <p className="mt-1 text-base font-semibold tabular-nums leading-none text-on-surface">
+              {globalLeaders.length}
+            </p>
           </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Ranked Challenges</p>
-            <p className="mt-2 text-xl font-semibold text-on-surface">{challenges.length}</p>
+          <div className="min-w-[6.25rem] max-w-[9rem] rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+              Ranked Challenges
+            </p>
+            <p className="mt-1 text-base font-semibold tabular-nums leading-none text-on-surface">
+              {challenges.length}
+            </p>
           </div>
-          <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-4 py-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-outline">Scoring Rules</p>
-            <p className="mt-2 text-xl font-semibold text-on-surface">
+          <div className="min-w-[6.25rem] max-w-[10rem] rounded-lg border border-outline-variant/10 bg-surface-container-low px-2.5 py-2">
+            <p className="text-[10px] font-medium uppercase leading-tight tracking-wide text-outline">
+              Scoring Rules
+            </p>
+            <p
+              className="mt-1 line-clamp-2 text-sm font-semibold leading-tight text-on-surface"
+              title={rankingConfig ? rankingConfig.tieBreaker : undefined}
+            >
               {rankingConfig ? rankingConfig.tieBreaker : 'Loading'}
             </p>
           </div>
@@ -139,9 +153,6 @@ export default function AdminRankingsPage() {
           <div className="flex flex-col gap-3 border-b border-outline-variant/10 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="page-section-title">Global Ranking</h2>
-              <p className="text-xs text-on-surface-variant">
-                Uses the existing `/leaderboard` API via `adminApi.globalLeaderboard`.
-              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {PERIOD_OPTIONS.map((option) => (

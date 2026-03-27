@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { useAppPageProps, searchParamFirst } from '@/lib/next-app-page';
 import { Button } from '@/components/ui/button';
 import type { Database } from '@/lib/api';
 import { databasesApi } from '@/lib/api';
@@ -164,11 +165,11 @@ function DatabaseCatalogSkeleton() {
   );
 }
 
-export default function AdminDatabasesPage() {
+export default function AdminDatabasesPage(props: PageProps<'/admin/databases'>) {
+  const { searchParams } = useAppPageProps(props);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const requestedView = searchParams.get('view');
-  const requestedTab = searchParams.get('tab');
+  const requestedView = searchParamFirst(searchParams, 'view');
+  const requestedTab = searchParamFirst(searchParams, 'tab');
 
   const [showImportPanel, setShowImportPanel] = useState(
     requestedView === 'import' || requestedTab === 'sql-imports',
