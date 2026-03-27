@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${ROOT_DIR}/.env.production"
-ENV_EXAMPLE_FILE="${ROOT_DIR}/.env.production.example"
-COMPOSE_FILE="${ROOT_DIR}/docker-compose.prod.yml"
+ENV_FILE=""
+ENV_EXAMPLE_FILE=""
+COMPOSE_FILE=""
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,6 +29,12 @@ headline() {
   printf "\n${BOLD}${CYAN}%s${RESET}\n" "$1"
 }
 
+update_paths() {
+  ENV_FILE="${ROOT_DIR}/.env.production"
+  ENV_EXAMPLE_FILE="${ROOT_DIR}/.env.production.example"
+  COMPOSE_FILE="${ROOT_DIR}/docker-compose.prod.yml"
+}
+
 print_logo() {
   printf "\n${BOLD}${GREEN}"
   cat <<'EOF'
@@ -47,6 +53,48 @@ require_cmd() {
     error "Missing required command: $1"
     exit 1
   fi
+}
+
+bootstrap_project_if_needed() {
+  update_paths
+  if [[ -f "$COMPOSE_FILE" && -f "$ENV_EXAMPLE_FILE" ]]; then
+    return
+  fi
+
+  headline "Project files not found. Bootstrapping SQLCraft source"
+  require_cmd curl
+  require_cmd tar
+  require_cmd mktemp
+
+  local repo ref target_dir tmp_dir archive_path src_dir
+  repo="${SQLCRAFT_GITHUB_REPO:-thaonv7995/SQLCraft}"
+  ref="${SQLCRAFT_GITHUB_REF:-main}"
+  target_dir="${SQLCRAFT_INSTALL_DIR:-$HOME/.sqlcraft}"
+
+  tmp_dir="$(mktemp -d)"
+  archive_path="${tmp_dir}/sqlcraft.tar.gz"
+
+  log "Downloading ${repo}@${ref} ..."
+  curl -fsSL "https://codeload.github.com/${repo}/tar.gz/refs/heads/${ref}" -o "$archive_path"
+
+  mkdir -p "${tmp_dir}/src"
+  tar -xzf "$archive_path" -C "${tmp_dir}/src"
+  src_dir="$(find "${tmp_dir}/src" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+
+  if [[ -z "$src_dir" ]]; then
+    error "Failed to extract SQLCraft source."
+    rm -rf "$tmp_dir"
+    exit 1
+  fi
+
+  mkdir -p "$target_dir"
+  rm -rf "${target_dir:?}/"*
+  cp -R "${src_dir}/." "$target_dir/"
+  rm -rf "$tmp_dir"
+
+  ROOT_DIR="$target_dir"
+  update_paths
+  log "Project files installed at: $ROOT_DIR"
 }
 
 get_env_value() {
@@ -199,6 +247,7 @@ print_summary() {
 
 main() {
   headline "SQLCraft installer (production-first)"
+  bootstrap_project_if_needed
   require_cmd docker
   require_cmd openssl
   require_cmd awk

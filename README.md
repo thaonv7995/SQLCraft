@@ -42,12 +42,8 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 ### 1) One-command install (recommended)
 
 ```bash
-git clone https://github.com/thaonv7995/SQLCraft.git
-cd sqlcraft
-./install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/install.sh)
 ```
-
-If needed: `chmod +x install.sh`
 
 What `./install.sh` does:
 
