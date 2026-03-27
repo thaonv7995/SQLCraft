@@ -476,6 +476,7 @@ function ResultsPanel() {
 
 function ExecutionPlanPanel() {
   const { executionPlan, isExplaining, lastExecution } = useLabStore();
+  const [viewMode, setViewMode] = useState<'tree' | 'raw'>('tree');
 
   if (isExplaining) {
     return (
@@ -506,8 +507,50 @@ function ExecutionPlanPanel() {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4">
-      <ExecutionPlanTree executionPlan={executionPlan} queryDurationMs={lastExecution?.durationMs} />
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-outline-variant/10 bg-surface-container-low/60 px-3 py-1.5">
+        <div className="inline-flex items-center gap-1 rounded-lg border border-outline-variant/10 bg-surface-container p-1">
+          <button
+            type="button"
+            onClick={() => setViewMode('tree')}
+            className={cn(
+              'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+              viewMode === 'tree'
+                ? 'bg-surface-container-high text-on-surface'
+                : 'text-on-surface-variant hover:bg-surface-container-high/70 hover:text-on-surface',
+            )}
+          >
+            Tree
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('raw')}
+            className={cn(
+              'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+              viewMode === 'raw'
+                ? 'bg-surface-container-high text-on-surface'
+                : 'text-on-surface-variant hover:bg-surface-container-high/70 hover:text-on-surface',
+            )}
+          >
+            Raw
+          </button>
+        </div>
+        <span className="text-[10px] uppercase tracking-[0.16em] text-outline">Quick</span>
+      </div>
+
+      <div className="flex-1 overflow-auto p-2.5 md:p-3">
+        {viewMode === 'tree' ? (
+          <ExecutionPlanTree
+            executionPlan={executionPlan}
+            queryDurationMs={lastExecution?.durationMs}
+            compact
+          />
+        ) : (
+          <pre className="overflow-auto rounded-xl border border-outline-variant/10 bg-surface-container-lowest p-2.5 text-[10px] font-mono text-on-surface-variant md:p-3">
+            {JSON.stringify(executionPlan.plan, null, 2)}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

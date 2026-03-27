@@ -136,7 +136,7 @@ function getNodeHighlight(node: PgPlanNode, rootActualTime?: number): {
   if (timeShare >= 0.35) {
     return {
       label: 'Bottleneck',
-      reason: `Accounts for ${(timeShare * 100).toFixed(0)}% of EXPLAIN time`,
+      reason: `Chiếm ${(timeShare * 100).toFixed(0)}% thời gian EXPLAIN ANALYZE`,
       tone: 'danger',
     };
   }
@@ -226,11 +226,13 @@ function PlanNodeCard({
   depth,
   rootActualTime,
   rootTotalCost,
+  compact = false,
 }: {
   node: PgPlanNode;
   depth: number;
   rootActualTime?: number;
   rootTotalCost?: number;
+  compact?: boolean;
 }) {
   const children = getChildren(node);
   const nodeType = getNodeType(node);
@@ -251,26 +253,33 @@ function PlanNodeCard({
     : undefined;
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 shadow-sm">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <div className={cn('space-y-3', compact && 'space-y-2')}>
+      <div
+        className={cn(
+          'border border-outline-variant/10 bg-surface-container-lowest shadow-sm',
+          compact ? 'rounded-xl p-3' : 'rounded-2xl p-4',
+        )}
+      >
+        <div className={cn('flex flex-col', compact ? 'gap-2' : 'gap-3')}>
+          <div className={cn('flex flex-col', compact ? 'gap-2' : 'gap-3 lg:flex-row lg:items-start lg:justify-between')}>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-on-surface">{nodeType}</span>
+                <span className={cn('font-semibold text-on-surface', compact ? 'text-xs' : 'text-sm')}>
+                  {nodeType}
+                </span>
                 {node['Parent Relationship'] && (
-                  <span className="rounded-full bg-surface-container px-2 py-1 text-[11px] text-on-surface-variant">
+                  <span className={cn('rounded-full bg-surface-container text-on-surface-variant', compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-[11px]')}>
                     {node['Parent Relationship']}
                   </span>
                 )}
                 {node['Join Type'] && (
-                  <span className="rounded-full bg-surface-container px-2 py-1 text-[11px] text-on-surface-variant">
+                  <span className={cn('rounded-full bg-surface-container text-on-surface-variant', compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-[11px]')}>
                     {node['Join Type']} join
                   </span>
                 )}
               </div>
               {relationLabel && (
-                <p className="mt-1 truncate text-sm font-mono text-on-surface-variant">
+                <p className={cn('mt-1 truncate font-mono text-on-surface-variant', compact ? 'text-xs' : 'text-sm')}>
                   {relationLabel}
                 </p>
               )}
@@ -302,7 +311,7 @@ function PlanNodeCard({
             </div>
           </div>
 
-          {(timeShare != null || costShare != null) && (
+          {!compact && (timeShare != null || costShare != null) && (
             <div className="grid gap-2 md:grid-cols-2">
               {timeShare != null && (
                 <div className="space-y-1">
@@ -330,7 +339,7 @@ function PlanNodeCard({
           )}
 
           {(bufferStats.hits != null || bufferStats.reads != null || conditions.length > 0) && (
-            <div className="space-y-2 border-t border-outline-variant/10 pt-3 text-xs text-on-surface-variant">
+            <div className={cn('border-t border-outline-variant/10 text-xs text-on-surface-variant', compact ? 'space-y-1.5 pt-2' : 'space-y-2 pt-3')}>
               {(bufferStats.hits != null || bufferStats.reads != null) && (
                 <div className="flex flex-wrap gap-3">
                   {bufferStats.hits != null && (
@@ -347,11 +356,16 @@ function PlanNodeCard({
               )}
               {conditions.length > 0 && (
                 <div className="space-y-1">
-                  {conditions.map((condition) => (
+                  {(compact ? conditions.slice(0, 1) : conditions).map((condition) => (
                     <p key={condition} className="font-mono text-[11px] text-on-surface-variant">
                       {condition}
                     </p>
                   ))}
+                  {compact && conditions.length > 1 && (
+                    <p className="text-[10px] text-outline">
+                      +{conditions.length - 1} condition(s)
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -360,7 +374,7 @@ function PlanNodeCard({
       </div>
 
       {children.length > 0 && (
-        <div className="space-y-3 border-l border-dashed border-outline-variant/20 pl-4">
+        <div className={cn('space-y-3 border-l border-dashed border-outline-variant/20', compact ? 'pl-3' : 'pl-4')}>
           {children.map((child, index) => (
             <PlanNodeCard
               key={`${nodeType}-${relationLabel ?? 'node'}-${depth + 1}-${index}`}
@@ -368,6 +382,7 @@ function PlanNodeCard({
               depth={depth + 1}
               rootActualTime={rootActualTime}
               rootTotalCost={rootTotalCost}
+              compact={compact}
             />
           ))}
         </div>
@@ -379,9 +394,11 @@ function PlanNodeCard({
 export function ExecutionPlanTree({
   executionPlan,
   queryDurationMs,
+  compact = false,
 }: {
   executionPlan: QueryExecutionPlan;
   queryDurationMs?: number;
+  compact?: boolean;
 }) {
   const rootNode = getPlanRoot(executionPlan.plan);
 
@@ -425,25 +442,25 @@ export function ExecutionPlanTree({
   const scannedRows = getScannedRows(rootNode);
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 xl:grid-cols-5 md:grid-cols-2">
-        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">Plan mode</p>
-          <p className="mt-2 text-sm font-semibold text-on-surface">
+    <div className={cn('space-y-4', compact && 'space-y-3')}>
+      <div className={cn('grid gap-2 md:grid-cols-2 xl:grid-cols-5', compact && 'xl:grid-cols-5')}>
+        <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
+          <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>Plan mode</p>
+          <p className={cn('font-semibold text-on-surface', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
             {executionPlan.mode === 'explain' ? 'EXPLAIN' : 'EXPLAIN ANALYZE'}
           </p>
         </div>
-        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">Estimated cost</p>
-          <p className="mt-2 text-sm font-semibold text-on-surface font-mono">
+        <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
+          <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>Estimated cost</p>
+          <p className={cn('font-semibold text-on-surface font-mono', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
             {rootTotalCost != null ? rootTotalCost.toFixed(1) : '—'}
           </p>
         </div>
-        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">
+        <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
+          <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>
             {rootActualTime != null ? 'Postgres executor time' : 'Planned rows'}
           </p>
-          <p className="mt-2 text-sm font-semibold text-on-surface font-mono">
+          <p className={cn('font-semibold text-on-surface font-mono', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
             {rootActualTime != null
               ? formatDuration(rootActualTime)
               : scannedRows != null
@@ -451,15 +468,15 @@ export function ExecutionPlanTree({
                 : '—'}
           </p>
         </div>
-        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">End-to-end query time</p>
-          <p className="mt-2 text-sm font-semibold text-on-surface font-mono">
+        <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
+          <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>End-to-end query time</p>
+          <p className={cn('font-semibold text-on-surface font-mono', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
             {queryDurationMs != null ? formatDuration(queryDurationMs) : '—'}
           </p>
         </div>
-        <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-4">
-          <p className="text-xs uppercase tracking-wide text-outline">Access path</p>
-          <p className="mt-2 text-sm font-semibold text-on-surface">
+        <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
+          <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>Access path</p>
+          <p className={cn('font-semibold text-on-surface', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
             <span className="font-mono text-secondary">{indexScans}</span> index scan
             {' / '}
             <span className="font-mono text-tertiary">{sequentialScans}</span> seq scan
@@ -467,6 +484,7 @@ export function ExecutionPlanTree({
         </div>
       </div>
 
+      {!compact && (
       <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 text-xs text-on-surface-variant">
         <p>
           <span className="font-semibold text-on-surface">Postgres executor time</span>
@@ -481,18 +499,28 @@ export function ExecutionPlanTree({
           {' '}counts index scan nodes versus sequential scan nodes. It is not a cache hit/miss metric.
         </p>
       </div>
+      )}
 
       {bottlenecks.length > 0 && (
-        <div className="rounded-2xl border border-tertiary/20 bg-tertiary/5 p-4">
-          <p className="text-xs uppercase tracking-wide text-tertiary">Potential bottlenecks</p>
-          <div className="mt-3 space-y-2">
-            {bottlenecks.map(({ node, highlight }, index) => (
-              <div key={`${getNodeType(node)}-${index}`} className="flex flex-wrap items-center gap-2 text-sm">
+        <div className={cn('border border-tertiary/20 bg-tertiary/5', compact ? 'rounded-xl p-3' : 'rounded-2xl p-4')}>
+          <p className={cn('uppercase tracking-wide text-tertiary', compact ? 'text-[10px]' : 'text-xs')}>Potential bottlenecks</p>
+          <div className={cn('space-y-2', compact ? 'mt-2' : 'mt-3')}>
+            {bottlenecks.slice(0, compact ? 2 : 3).map(({ node, highlight }, index) => (
+              <div
+                key={`${getNodeType(node)}-${index}`}
+                className={cn('flex flex-wrap items-center gap-2', compact ? 'text-xs' : 'text-sm')}
+              >
                 <span className="font-semibold text-on-surface">{getNodeType(node)}</span>
                 {getRelationLabel(node) && (
                   <span className="font-mono text-on-surface-variant">{getRelationLabel(node)}</span>
                 )}
-                <span className={cn('rounded-full border px-2 py-0.5 text-[11px]', getBadgeClasses(highlight.tone))}>
+                <span
+                  className={cn(
+                    'rounded-full border',
+                    compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-[11px]',
+                    getBadgeClasses(highlight.tone),
+                  )}
+                >
                   {highlight.reason}
                 </span>
               </div>
@@ -506,6 +534,7 @@ export function ExecutionPlanTree({
         depth={0}
         rootActualTime={rootActualTime}
         rootTotalCost={rootTotalCost}
+        compact={compact}
       />
     </div>
   );
