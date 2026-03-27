@@ -38,17 +38,18 @@ SQLCraft is an open-source SQL platform for sandboxed query execution, realistic
 ### Prerequisites
 
 - Docker + Docker Compose
-- `make` (preinstalled on most macOS/Linux)
 
-### 1) Clone and start production stack
+### 1) One-command install (recommended)
 
 ```bash
 git clone https://github.com/thaonv7995/SQLCraft.git
 cd sqlcraft
-make prod-build
+./install.sh
 ```
 
-What `make prod-build` does:
+If needed: `chmod +x install.sh`
+
+What `./install.sh` does:
 
 - Generates/updates `.env.production` from `.env.production.example`
 - Auto-generates secrets (`JWT_SECRET`, DB/storage/sandbox passwords)
@@ -71,6 +72,14 @@ make prod-stop    # Stop production stack
 make prod-logs    # Tail production logs
 make prod-clean   # Stop + remove production volumes
 make release-docker  # Build production images only
+```
+
+### 3) Manual path (without installer)
+
+If you prefer manual setup:
+
+```bash
+make prod-build
 ```
 
 ### Development (optional)
@@ -103,15 +112,15 @@ This brings up **postgres**, **redis**, **minio**, **api**, **web**, and **worke
 
 Optimized images (no bind mounts) are defined in **`docker-compose.prod.yml`** with **`apps/api/Dockerfile`**, **`apps/web/Dockerfile`**, and **`services/worker/Dockerfile`**. The API container runs **migrations on startup** (`drizzle-kit migrate`) via `apps/api/docker-entrypoint.sh`.
 
-1. Run:
+1. Run installer:
 
    ```bash
-   make prod-build
+   ./install.sh
    ```
 
-2. `make prod-build` will auto-create/update `.env.production`, auto-generate secrets, prompt for first admin, migrate + seed DB, then start services.
+2. The installer auto-creates/updates `.env.production`, ensures secrets, prompts first admin, migrates + seeds DB, then starts services.
 
-3. Other targets: **`make prod`** (no rebuild), **`make prod-stop`**, **`make prod-logs`**, **`make prod-clean`** (removes volumes), **`make release-docker`** (images only).
+3. Optional make targets: **`make prod`** (no rebuild), **`make prod-stop`**, **`make prod-logs`**, **`make prod-clean`** (removes volumes), **`make release-docker`** (images only).
 
 **CI:** [`.github/workflows/docker.yml`](.github/workflows/docker.yml) runs `docker compose … build` on pushes/PRs. Tag a release as **`v*`** (e.g. `v0.1.0`) to push **`api`**, **`web`**, and **`worker`** images to **GHCR** ([`.github/workflows/release.yml`](.github/workflows/release.yml)). Pull them as `ghcr.io/<owner>/sqlcraft-api:<tag>` (same pattern for `sqlcraft-web`, `sqlcraft-worker`). Package visibility may need to be set to public in GitHub for unauthenticated pulls.
 
