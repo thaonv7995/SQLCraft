@@ -174,6 +174,18 @@ configure_admin() {
   fi
 }
 
+configure_domain() {
+  headline "Domain setup"
+  local current_domain input_domain
+  current_domain="$(get_env_value "PUBLIC_DOMAIN" "$ENV_FILE")"
+  if [[ -z "$current_domain" ]]; then
+    current_domain="localhost"
+  fi
+  printf "PUBLIC_DOMAIN [%s]: " "$current_domain"
+  read -r input_domain
+  set_env_value "PUBLIC_DOMAIN" "${input_domain:-$current_domain}" "$ENV_FILE"
+}
+
 ensure_core_env() {
   local current_stack desired_stack
   current_stack="$(get_env_value "STACK_NAME" "$ENV_FILE")"
@@ -197,15 +209,32 @@ ensure_core_env() {
   ensure_or_generate_secret "STORAGE_SECRET_KEY" 16
   ensure_or_generate_secret "SANDBOX_DB_PASSWORD" 16
 
-  local postgres_password web_port api_port
+  local postgres_password web_port api_port minio_api_port public_domain
   postgres_password="$(get_env_value "POSTGRES_PASSWORD" "$ENV_FILE")"
   web_port="$(get_env_value "WEB_PORT" "$ENV_FILE")"
   api_port="$(get_env_value "API_PORT" "$ENV_FILE")"
+  minio_api_port="$(get_env_value "MINIO_API_PORT" "$ENV_FILE")"
+  public_domain="$(get_env_value "PUBLIC_DOMAIN" "$ENV_FILE")"
+  if [[ -z "$public_domain" ]]; then
+    public_domain="localhost"
+  fi
 
   set_env_value "DATABASE_URL" "postgresql://sqlcraft:${postgres_password}@postgres:5432/sqlcraft" "$ENV_FILE"
-  set_env_value "NEXT_PUBLIC_APP_URL" "http://localhost:${web_port}" "$ENV_FILE"
-  set_env_value "ALLOWED_ORIGINS" "http://localhost:${web_port}" "$ENV_FILE"
-  set_env_value "NEXT_PUBLIC_API_URL" "http://localhost:${api_port}/v1" "$ENV_FILE"
+  if [[ "$public_domain" == "localhost" || "$public_domain" == "127.0.0.1" ]]; then
+    set_env_value "NEXT_PUBLIC_APP_URL" "http://localhost:${web_port}" "$ENV_FILE"
+    set_env_value "ALLOWED_ORIGINS" "http://localhost:${web_port}" "$ENV_FILE"
+    set_env_value "NEXT_PUBLIC_API_URL" "/v1" "$ENV_FILE"
+    set_env_value "NEXT_INTERNAL_API_ORIGIN" "http://api:4000" "$ENV_FILE"
+    set_env_value "API_DOMAIN" "localhost" "$ENV_FILE"
+    set_env_value "STORAGE_PUBLIC_URL" "http://localhost:${minio_api_port}" "$ENV_FILE"
+  else
+    set_env_value "NEXT_PUBLIC_APP_URL" "https://${public_domain}" "$ENV_FILE"
+    set_env_value "ALLOWED_ORIGINS" "https://${public_domain},http://localhost:${web_port}" "$ENV_FILE"
+    set_env_value "NEXT_PUBLIC_API_URL" "/v1" "$ENV_FILE"
+    set_env_value "NEXT_INTERNAL_API_ORIGIN" "http://api:4000" "$ENV_FILE"
+    set_env_value "API_DOMAIN" "${public_domain}" "$ENV_FILE"
+    set_env_value "STORAGE_PUBLIC_URL" "https://${public_domain}" "$ENV_FILE"
+  fi
 }
 
 wait_for_docker() {
@@ -332,6 +361,7 @@ main() {
 
   ensure_env_file
   configure_admin
+  configure_domain
   ensure_core_env
   bootstrap_stack
   print_summary

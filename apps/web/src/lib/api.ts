@@ -1304,7 +1304,8 @@ function normalizeSqlDumpImportResult(payload: unknown): SqlDumpImportResult {
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 
 const api: AxiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/v1',
+  // Same-origin by default: works for localhost and domain+reverse-proxy setups.
+  baseURL: process.env.NEXT_PUBLIC_API_URL ?? '/v1',
   timeout: 30_000,
   headers: {
     'Content-Type': 'application/json',

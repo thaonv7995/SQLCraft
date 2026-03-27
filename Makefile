@@ -116,7 +116,8 @@ prod-setup: ## Generate .env.production with auto secrets + first admin (interac
 	set_kv "FIRST_ADMIN_PASSWORD" "$$admin_password" ".env.production"; \
 	set_kv "NEXT_PUBLIC_APP_URL" "http://localhost:13029" ".env.production"; \
 	set_kv "ALLOWED_ORIGINS" "http://localhost:13029" ".env.production"; \
-	set_kv "NEXT_PUBLIC_API_URL" "http://localhost:4000/v1" ".env.production"; \
+	set_kv "NEXT_PUBLIC_API_URL" "/v1" ".env.production"; \
+	set_kv "NEXT_INTERNAL_API_ORIGIN" "http://api:4000" ".env.production"; \
 	echo ""; \
 	echo "Saved .env.production (secrets ensured)."; \
 	echo "First admin:"; \

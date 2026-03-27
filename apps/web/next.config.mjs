@@ -20,8 +20,9 @@ const nextConfig = {
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/:path*`,
+        // Keep browser calls on same-origin (/v1/*), proxy internally to API service.
+        source: '/v1/:path*',
+        destination: `${process.env.NEXT_INTERNAL_API_ORIGIN || 'http://localhost:4000'}/v1/:path*`,
       },
     ];
   },

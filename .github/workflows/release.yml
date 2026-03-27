@@ -49,7 +49,8 @@ jobs:
           file: apps/web/Dockerfile
           push: true
           build-args: |
-            NEXT_PUBLIC_API_URL=http://localhost:4000/v1
+            NEXT_PUBLIC_API_URL=/v1
+            NEXT_INTERNAL_API_ORIGIN=http://api:4000
           tags: |
             ${{ env.IMAGE_PREFIX }}/sqlcraft-web:${{ github.ref_name }}
             ${{ env.IMAGE_PREFIX }}/sqlcraft-web:latest

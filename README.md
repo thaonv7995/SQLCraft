@@ -49,8 +49,18 @@ What `./install.sh` does:
 - Generates/updates `.env.production` from `.env.production.example`
 - Auto-generates secrets (`JWT_SECRET`, DB/storage/sandbox passwords)
 - Prompts for first admin (or uses defaults)
+- Prompts for `PUBLIC_DOMAIN` and configures app/API URLs for reverse proxy
 - Bootstraps DB (`migrate` + `seed`)
 - Builds and starts production images (`api`, `web`, `worker`)
+
+Reverse proxy note (single-domain):
+
+- Point the public domain to the **web service** (`localhost:13029`)
+- Keep API on same domain via path routing: `https://your-domain/v1/*` -> `localhost:4000`
+- Route storage objects for presigned URLs: `https://your-domain/sqlcraft/*` -> `localhost:9000/sqlcraft/*`
+- Keep the storage route **above** `/` catch-all in your proxy config.
+  (`sqlcraft` comes from `STORAGE_BUCKET`; if you change bucket name, update this route accordingly.)
+- Frontend API base is `/v1` (same-origin), so both `localhost:13029` and domain reverse-proxy setups work without rebuild.
 
 After startup:
 

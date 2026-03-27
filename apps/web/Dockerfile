@@ -12,8 +12,10 @@ COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile
 
 FROM base AS build
-ARG NEXT_PUBLIC_API_URL=http://localhost:4000/v1
+ARG NEXT_PUBLIC_API_URL=/v1
+ARG NEXT_INTERNAL_API_ORIGIN=http://api:4000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_INTERNAL_API_ORIGIN=$NEXT_INTERNAL_API_ORIGIN
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY packages ./packages
