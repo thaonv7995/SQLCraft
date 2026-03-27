@@ -31,6 +31,7 @@ interface LabState {
   addEditorTab: () => void;
   renameEditorTab: (tabId: string, name: string) => void;
   closeEditorTab: (tabId: string) => void;
+  moveEditorTab: (tabId: string, targetTabId: string) => void;
   setQuery: (sql: string) => void;
 
   // Dataset scale context
@@ -151,6 +152,24 @@ export const useLabStore = create<LabState>()(
           : state.activeEditorTabId;
 
       return deriveEditorState(nextTabs, nextActiveTabId);
+    }),
+  moveEditorTab: (tabId, targetTabId) =>
+    set((state) => {
+      if (tabId === targetTabId) {
+        return state;
+      }
+
+      const fromIndex = state.editorTabs.findIndex((tab) => tab.id === tabId);
+      const toIndex = state.editorTabs.findIndex((tab) => tab.id === targetTabId);
+      if (fromIndex < 0 || toIndex < 0) {
+        return state;
+      }
+
+      const nextTabs = [...state.editorTabs];
+      const [moved] = nextTabs.splice(fromIndex, 1);
+      nextTabs.splice(toIndex, 0, moved);
+
+      return deriveEditorState(nextTabs, state.activeEditorTabId);
     }),
   setQuery: (sql) =>
     set((state) => {

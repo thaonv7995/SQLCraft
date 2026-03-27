@@ -147,7 +147,11 @@ function DatasetScaleSelector({
 }) {
   const scales = availableScales.length > 0 ? availableScales : (Object.keys(DATASET_SCALE_META) as DatasetScale[]);
   const isDisabled = sessionStatus !== 'active' || isSwitching;
-  const sourceScaleLabel = sourceScale ? DATASET_SCALE_META[sourceScale].label : 'Unknown';
+  const sourceScaleLabel = sourceScale ? DATASET_SCALE_META[sourceScale].label : null;
+  const sourceSummary =
+    typeof sourceRowCount === 'number'
+      ? `${formatRows(sourceRowCount)} rows`
+      : sourceScaleLabel ?? 'Unknown';
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -174,8 +178,8 @@ function DatasetScaleSelector({
         ))}
       </div>
       <p className="text-[10px] text-outline">
-        Source {sourceScaleLabel}
-        {typeof sourceRowCount === 'number' ? ` (${formatRows(sourceRowCount)} rows)` : ''}
+        Source {sourceSummary}
+        {sourceScaleLabel && typeof sourceRowCount === 'number' ? ` (${sourceScaleLabel})` : ''}
         {selectedScale ? ` · Selected ${DATASET_SCALE_META[selectedScale].label}` : ''}
       </p>
     </div>
@@ -191,8 +195,11 @@ function EditorTabsBar() {
   const setActiveEditorTab = useLabStore((state) => state.setActiveEditorTab);
   const renameEditorTab = useLabStore((state) => state.renameEditorTab);
   const closeEditorTab = useLabStore((state) => state.closeEditorTab);
+  const moveEditorTab = useLabStore((state) => state.moveEditorTab);
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [draftTabName, setDraftTabName] = useState('');
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const tabsStripRef = useRef<HTMLDivElement | null>(null);
 
   const beginRename = useCallback((tab: LabEditorTab) => {
     setEditingTabId(tab.id);
@@ -215,9 +222,24 @@ function EditorTabsBar() {
     [draftTabName, renameEditorTab, stopRenaming],
   );
 
+  const handleTabsWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const container = tabsStripRef.current;
+    if (!container) return;
+    if (container.scrollWidth <= container.clientWidth) return;
+
+    const horizontalDelta =
+      Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    container.scrollLeft += horizontalDelta;
+    event.preventDefault();
+  }, []);
+
   return (
     <div className="flex min-w-0 flex-1 items-stretch overflow-hidden">
-      <div className="scrollbar-none flex min-w-0 flex-1 items-stretch overflow-x-auto">
+      <div
+        ref={tabsStripRef}
+        className="scrollbar-none flex min-w-0 flex-1 items-stretch overflow-x-auto"
+        onWheel={handleTabsWheel}
+      >
         {editorTabs.map((tab) => {
           const isActive = tab.id === activeEditorTabId;
           const isEditing = tab.id === editingTabId;
@@ -226,8 +248,29 @@ function EditorTabsBar() {
           return (
             <div
               key={tab.id}
+              draggable={!isEditing}
+              onDragStart={(event) => {
+                if (isEditing) return;
+                setDraggingTabId(tab.id);
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', tab.id);
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const sourceTabId = draggingTabId ?? event.dataTransfer.getData('text/plain');
+                if (sourceTabId && sourceTabId !== tab.id) {
+                  moveEditorTab(sourceTabId, tab.id);
+                }
+                setDraggingTabId(null);
+              }}
+              onDragEnd={() => setDraggingTabId(null)}
               className={cn(
                 'group flex shrink-0 items-center gap-1 border-r border-outline-variant/10 px-2 py-2 transition-colors',
+                draggingTabId === tab.id ? 'opacity-60' : '',
                 isActive ? 'bg-surface-container text-on-surface' : 'bg-surface-container-low/60 text-on-surface-variant',
               )}
             >
@@ -262,33 +305,34 @@ function EditorTabsBar() {
                   >
                     {tab.name}
                   </button>
-                  {canClose ? (
-                    <button
-                      type="button"
-                      onClick={() => closeEditorTab(tab.id)}
-                      className="rounded p-0.5 text-outline transition-colors hover:text-on-surface"
-                      title="Close tab"
-                      aria-label={`Close ${tab.name}`}
-                    >
-                      <span className="material-symbols-outlined text-sm">close</span>
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => closeEditorTab(tab.id)}
+                    disabled={!canClose}
+                    className={cn(
+                      'rounded p-0.5 text-outline transition-colors',
+                      canClose ? 'hover:text-on-surface' : 'opacity-0 pointer-events-none',
+                    )}
+                    title={canClose ? 'Close tab' : undefined}
+                    aria-label={canClose ? `Close ${tab.name}` : undefined}
+                  >
+                    <span className="material-symbols-outlined text-sm">close</span>
+                  </button>
                 </>
               )}
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={() => addEditorTab()}
+          className="shrink-0 border-l border-outline-variant/10 px-3 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
+          title="Add SQL tab"
+          aria-label="Add SQL tab"
+        >
+          <span className="material-symbols-outlined text-lg">add</span>
+        </button>
       </div>
-
-      <button
-        type="button"
-        onClick={() => addEditorTab()}
-        className="shrink-0 border-l border-outline-variant/10 px-3 text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface"
-        title="Add SQL tab"
-        aria-label="Add SQL tab"
-      >
-        <span className="material-symbols-outlined text-lg">add</span>
-      </button>
     </div>
   );
 }
@@ -1856,24 +1900,21 @@ export default function LabPage() {
           className="flex flex-col overflow-hidden"
           style={{ width: `${leftWidth}%` }}
         >
-          <div className="flex items-center border-b border-outline-variant/10 bg-surface-container-low/80">
-            <div className="flex shrink-0 items-center gap-2 border-r border-outline-variant/10 bg-surface-container px-4 py-2">
-              <span className="material-symbols-outlined text-base text-tertiary" style={{ fontVariationSettings: "'FILL' 1" }}>
+          <div className="flex min-w-0 items-center border-b border-outline-variant/10 bg-surface-container-low/70 px-2">
+            <div className="mr-2 flex shrink-0 items-center gap-1.5 border-r border-outline-variant/10 px-3 py-2 text-on-surface-variant">
+              <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
                 terminal
               </span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-outline">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em]">
                 SQL
               </span>
             </div>
             <EditorTabsBar />
-            <div className="ml-auto flex items-center gap-2 px-3">
-              <span className="hidden max-w-40 truncate font-mono text-[10px] uppercase text-outline lg:inline">
-                {currentEditorTabName}
+            <div className="shrink-0 flex items-center gap-2 px-2">
+              <span className="font-mono text-[10px] text-outline">
+                Ln {currentQuery.split('\n').length}
               </span>
-              <span className="font-mono text-[10px] uppercase text-outline">
-                {currentQuery.split('\n').length} lines
-              </span>
-              <kbd className="hidden rounded border border-outline-variant/20 bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface-variant sm:inline">
+              <kbd className="hidden rounded-md border border-outline-variant/20 bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface-variant sm:inline">
                 Ctrl+Enter
               </kbd>
             </div>
