@@ -44,6 +44,22 @@ export function errorHandler(
     });
   }
 
+  // Multipart upload errors (@fastify/multipart)
+  const multipartCode = (error as FastifyError).code;
+  if (
+    multipartCode === 'FST_REQ_FILE_TOO_LARGE' ||
+    multipartCode === 'FST_FILES_LIMIT' ||
+    multipartCode === 'FST_PARTS_LIMIT'
+  ) {
+    request.log.warn({ err: error }, 'Multipart upload rejected');
+    return reply.status(413).send({
+      success: false,
+      code: ApiCode.VALIDATION_ERROR,
+      message: 'Avatar file is too large. Maximum allowed size is 5 MB.',
+      data: null,
+    });
+  }
+
   // JWT errors
   if (error.message?.includes('jwt') || error.message?.includes('JWT')) {
     if (error.message.includes('expired')) {

@@ -220,8 +220,19 @@ ensure_core_env() {
   ensure_or_generate_secret "JWT_SECRET" 32
   ensure_or_generate_secret "POSTGRES_PASSWORD" 16
   ensure_or_generate_secret "MINIO_ROOT_PASSWORD" 16
-  ensure_or_generate_secret "STORAGE_SECRET_KEY" 16
   ensure_or_generate_secret "SANDBOX_DB_PASSWORD" 16
+
+  # Storage client credentials must match MinIO root credentials unless a dedicated user is provisioned.
+  # SQLCraft installer does not provision a separate MinIO user, so keep them aligned by default.
+  local minio_root_user minio_root_password
+  minio_root_user="$(get_env_value "MINIO_ROOT_USER" "$ENV_FILE")"
+  minio_root_password="$(get_env_value "MINIO_ROOT_PASSWORD" "$ENV_FILE")"
+  if [[ -z "$minio_root_user" ]]; then
+    minio_root_user="minioadmin"
+    set_env_value "MINIO_ROOT_USER" "$minio_root_user" "$ENV_FILE"
+  fi
+  set_env_value "STORAGE_ACCESS_KEY" "$minio_root_user" "$ENV_FILE"
+  set_env_value "STORAGE_SECRET_KEY" "$minio_root_password" "$ENV_FILE"
 
   local postgres_password web_port api_port minio_api_port public_domain
   postgres_password="$(get_env_value "POSTGRES_PASSWORD" "$ENV_FILE")"

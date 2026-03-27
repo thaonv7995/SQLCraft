@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 import { usersRepository } from '../../db/repositories/users.repository';
 import { queriesRepository } from '../../db/repositories/queries.repository';
 import { getDb, schema } from '../../db/index';
-import { NotFoundError, ValidationError } from '../../lib/errors';
+import { AppError, NotFoundError, ValidationError } from '../../lib/errors';
+import { ApiCode } from '@sqlcraft/types';
 import { uploadFile, getPresignedUrl, resolvePublicAvatarUrl } from '../../lib/storage';
 import type {
   UserProfileResponse,
@@ -82,13 +83,31 @@ export async function uploadAvatar(
 
   const ext = mimeType.split('/')[1].replace('jpeg', 'jpg');
   const objectName = `avatars/${userId}.${ext}`;
-  await uploadFile(objectName, buffer, mimeType);
+  try {
+    await uploadFile(objectName, buffer, mimeType);
+  } catch (error) {
+    throw new AppError(
+      503,
+      ApiCode.INTERNAL_ERROR,
+      'Avatar storage service is unavailable. Please try again in a moment.',
+      process.env.NODE_ENV === 'development' ? { message: (error as Error)?.message } : undefined,
+    );
+  }
 
   // Store the object name in DB (not a URL); presign on every read
   const updated = await usersRepository.update(userId, { avatarUrl: objectName });
   if (!updated) throw new NotFoundError('User not found');
 
-  return { avatarUrl: await getPresignedUrl(objectName) };
+  try {
+    return { avatarUrl: await getPresignedUrl(objectName) };
+  } catch (error) {
+    throw new AppError(
+      503,
+      ApiCode.INTERNAL_ERROR,
+      'Avatar was uploaded but preview URL could not be generated. Please refresh and try again.',
+      process.env.NODE_ENV === 'development' ? { message: (error as Error)?.message } : undefined,
+    );
+  }
 }
 
 export async function changePassword(
