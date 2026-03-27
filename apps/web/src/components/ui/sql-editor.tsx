@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { schemaCompletionSource, sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { Prec } from '@codemirror/state';
+import { cn } from '@/lib/utils';
 
 // ─── Design System Theme ──────────────────────────────────────────────────────
 const sqlForgeTheme = EditorView.theme(
@@ -337,6 +338,9 @@ export interface SqlEditorProps {
   onCopy?: () => void;
   onClear?: () => void;
   notice?: 'success' | 'error' | 'info' | null;
+  /** Shown when notice is error; click icon to expand */
+  noticeMessage?: string | null;
+  onDismissErrorNotice?: () => void;
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
@@ -352,6 +356,8 @@ export function SqlEditor({
   onCopy,
   onClear,
   notice = null,
+  noticeMessage = null,
+  onDismissErrorNotice,
   placeholder = '-- Write your SQL query here...',
   readOnly = false,
   className,
@@ -359,7 +365,32 @@ export function SqlEditor({
   schema,
 }: SqlEditorProps) {
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const errorPanelRef = useRef<HTMLDivElement>(null);
+  const [errorDetailOpen, setErrorDetailOpen] = useState(false);
   const completionSchema = buildCompletionSchema(schema);
+
+  useEffect(() => {
+    if (!errorDetailOpen) {
+      return;
+    }
+    const onDocMouseDown = (event: MouseEvent) => {
+      const el = errorPanelRef.current;
+      if (el && !el.contains(event.target as Node)) {
+        setErrorDetailOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setErrorDetailOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [errorDetailOpen]);
 
   const extensions = useCallback(() => {
     const exts = [
@@ -398,6 +429,10 @@ export function SqlEditor({
   }, [completionSchema, onExecute]);
 
   const hasActions = onFormat || onCopy || onClear;
+
+  if (notice !== 'error' && errorDetailOpen) {
+    setErrorDetailOpen(false);
+  }
 
   return (
     <div data-testid={testId} className={`relative h-full overflow-hidden bg-[#1a1a1a] ${className ?? ''}`}>
@@ -475,22 +510,77 @@ export function SqlEditor({
       )}
 
       {notice && (
-        <div className="pointer-events-none absolute right-3 top-3 z-10">
-          <span
-            className={[
-              'inline-flex h-5 w-5 items-center justify-center rounded-full border backdrop-blur-sm',
-              notice === 'success'
-                ? 'border-green-500/40 bg-green-500/20 text-green-400'
-                : notice === 'error'
-                  ? 'border-error/30 bg-error/15 text-error'
+        <div
+          className={cn(
+            'absolute right-3 top-3 z-20 flex flex-col items-end gap-1.5',
+            notice === 'error' ? 'pointer-events-auto' : 'pointer-events-none',
+          )}
+        >
+          {notice === 'error' ? (
+            <div ref={errorPanelRef} className="flex flex-col items-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setErrorDetailOpen((open) => !open)}
+                className={[
+                  'inline-flex h-5 w-5 items-center justify-center rounded-full border backdrop-blur-sm transition-colors',
+                  'border-error/30 bg-error/15 text-error hover:bg-error/25',
+                ].join(' ')}
+                aria-label={errorDetailOpen ? 'Ẩn chi tiết lỗi' : 'Xem chi tiết lỗi'}
+                aria-expanded={errorDetailOpen}
+              >
+                <span className="material-symbols-outlined text-[12px]">error</span>
+              </button>
+              {errorDetailOpen ? (
+                <div
+                  role="region"
+                  aria-label="Thông báo lỗi"
+                  className="w-[min(100vw-2rem,22rem)] max-h-48 overflow-auto rounded-lg border border-error/25 bg-[#252525] p-3 text-left shadow-[0_12px_40px_rgba(0,0,0,0.45)]"
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-error/90">
+                    Lỗi thực thi
+                  </p>
+                  <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-red-100/90">
+                    {noticeMessage?.trim() || 'Không có chi tiết lỗi.'}
+                  </pre>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setErrorDetailOpen(false)}
+                      className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/70 hover:bg-white/10"
+                    >
+                      Thu gọn
+                    </button>
+                    {onDismissErrorNotice ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setErrorDetailOpen(false);
+                          onDismissErrorNotice();
+                        }}
+                        className="rounded-md border border-error/30 bg-error/10 px-2 py-1 text-[11px] text-error hover:bg-error/20"
+                      >
+                        Ẩn icon
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <span
+              className={[
+                'inline-flex h-5 w-5 items-center justify-center rounded-full border backdrop-blur-sm',
+                notice === 'success'
+                  ? 'border-green-500/40 bg-green-500/20 text-green-400'
                   : 'border-outline-variant/30 bg-surface-container/80 text-on-surface-variant',
-            ].join(' ')}
-            aria-label={notice}
-          >
-            <span className="material-symbols-outlined text-[12px]">
-              {notice === 'success' ? 'check' : notice === 'error' ? 'error' : 'info'}
+              ].join(' ')}
+              aria-label={notice}
+            >
+              <span className="material-symbols-outlined text-[12px]">
+                {notice === 'success' ? 'check' : 'info'}
+              </span>
             </span>
-          </span>
+          )}
         </div>
       )}
     </div>

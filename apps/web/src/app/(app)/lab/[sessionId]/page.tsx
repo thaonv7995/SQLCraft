@@ -293,6 +293,7 @@ function SqlEditorPanel({
   onCopy,
   onClear,
   notice,
+  onDismissErrorNotice,
 }: {
   sessionId: string;
   schemaTables?: SessionSchemaTable[];
@@ -300,10 +301,18 @@ function SqlEditorPanel({
   onCopy: () => void;
   onClear: () => void;
   notice: 'success' | 'error' | 'info' | null;
+  onDismissErrorNotice: () => void;
 }) {
   const currentQuery = useLabStore((state) => state.currentQuery);
   const setQuery = useLabStore((state) => state.setQuery);
+  const error = useLabStore((state) => state.error);
+  const lastExecution = useLabStore((state) => state.lastExecution);
   const { mutate: executeQuery } = useExecuteQuery();
+
+  const noticeMessage =
+    notice === 'error'
+      ? (error ?? lastExecution?.errorMessage ?? 'Query failed')
+      : null;
 
   const handleExecute = useCallback(() => {
     if (currentQuery.trim()) {
@@ -320,6 +329,8 @@ function SqlEditorPanel({
       onCopy={onCopy}
       onClear={onClear}
       notice={notice}
+      noticeMessage={noticeMessage}
+      onDismissErrorNotice={onDismissErrorNotice}
       schema={schemaTables}
       placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
       testId="lab-sql-editor"
@@ -2528,6 +2539,9 @@ export default function LabPage() {
     if (!editorNotice) {
       return;
     }
+    if (editorNotice === 'error') {
+      return;
+    }
 
     if (editorNoticeTimeoutRef.current) {
       clearTimeout(editorNoticeTimeoutRef.current);
@@ -2768,6 +2782,7 @@ export default function LabPage() {
             onCopy={handleCopyQuery}
             onClear={handleClearEditor}
             notice={editorNotice}
+            onDismissErrorNotice={() => setEditorNotice(null)}
           />
         </div>
 
