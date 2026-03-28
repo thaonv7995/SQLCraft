@@ -10,6 +10,7 @@ import {
   runPsqlInSandboxContainer,
   runSqlcmdInSandboxContainer,
 } from './docker';
+import { sanitizeSqlServerDumpPayload } from './sqlserver-dump-sanitize';
 
 function quoteMysqlIdentifier(name: string): string {
   return '`' + name.replace(/`/g, '``') + '`';
@@ -571,7 +572,7 @@ async function restoreFromArtifact(params: {
         containerRef,
         saPassword: mssqlSaPassword,
         dbName,
-        sql: inlineSql,
+        sql: sanitizeSqlServerDumpPayload(inlineSql),
       });
     } else {
       return false;
@@ -605,7 +606,7 @@ async function restoreFromArtifact(params: {
         containerRef,
         saPassword: mssqlSaPassword,
         dbName,
-        sql: bytes,
+        sql: sanitizeSqlServerDumpPayload(bytes),
       });
     } else {
       return false;
@@ -632,7 +633,7 @@ async function restoreFromArtifact(params: {
         containerRef,
         saPassword: mssqlSaPassword,
         dbName,
-        sql: sqlBuf,
+        sql: sanitizeSqlServerDumpPayload(sqlBuf),
       });
     } else {
       return false;

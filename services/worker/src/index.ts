@@ -37,7 +37,9 @@ import {
   sandboxContainerName,
   waitForSandboxEngine,
   initSqlServerDatabase,
+  runSqlcmdInSandboxContainer,
 } from './docker';
+import { buildCreateTableDdlSqlServer } from './sqlserver-schema-ddl';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
 
 const logger = pino({
@@ -56,8 +58,33 @@ const sandboxHost = process.env.SANDBOX_DB_HOST ?? 'localhost';
 const sandboxPort = process.env.SANDBOX_DB_PORT ?? '5433';
 const sandboxUser = process.env.SANDBOX_DB_USER ?? 'sandbox';
 const sandboxPassword = process.env.SANDBOX_DB_PASSWORD ?? 'sandbox';
-/** SQL Server `sa` password inside the container; must meet complexity policy. Defaults to sandbox password. */
-const mssqlSaPassword = process.env.SANDBOX_MSSQL_SA_PASSWORD ?? sandboxPassword;
+
+/** SQL Server enforces strong SA passwords; default `sandbox` (7 chars) prevents the engine from starting. */
+function mssqlSaPasswordMeetsPolicy(p: string): boolean {
+  return (
+    p.length >= 8 &&
+    /[a-z]/.test(p) &&
+    /[A-Z]/.test(p) &&
+    /[0-9]/.test(p) &&
+    /[^A-Za-z0-9]/.test(p)
+  );
+}
+
+const mssqlSaPassword = (() => {
+  const fromEnv = process.env.SANDBOX_MSSQL_SA_PASSWORD?.trim();
+  if (fromEnv && mssqlSaPasswordMeetsPolicy(fromEnv)) {
+    return fromEnv;
+  }
+  if (fromEnv) {
+    console.warn(
+      '[worker] SANDBOX_MSSQL_SA_PASSWORD does not meet SQL Server SA complexity; using dev fallback SqlForge1!Sb',
+    );
+  }
+  if (mssqlSaPasswordMeetsPolicy(sandboxPassword)) {
+    return sandboxPassword;
+  }
+  return 'SqlForge1!Sb';
+})();
 
 // Session TTL: 2 hours
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -202,33 +229,57 @@ async function applySchemaAndDataset(params: {
   let schemaApplied = false;
 
   const ensureSchemaApplied = async (): Promise<void> => {
-    if (schemaApplied || !schemaDef?.tables?.length || engine !== 'postgresql') {
+    if (schemaApplied || !schemaDef?.tables?.length) {
       return;
     }
 
     const schemaStartedAt = Date.now();
-    const ddlStatements = buildCreateTableDdl(schemaDef.tables);
-    const sandboxPool = new Pool({
-      connectionString: sandboxConnStr(containerRef, dbName),
-      max: 1,
-    });
 
-    try {
-      for (const ddl of ddlStatements) {
-        await sandboxPool.query(ddl);
+    if (engine === 'postgresql') {
+      const ddlStatements = buildCreateTableDdl(schemaDef.tables);
+      const sandboxPool = new Pool({
+        connectionString: sandboxConnStr(containerRef, dbName),
+        max: 1,
+      });
+
+      try {
+        for (const ddl of ddlStatements) {
+          await sandboxPool.query(ddl);
+        }
+        schemaApplied = true;
+        logger.info(
+          {
+            sandboxInstanceId,
+            dbName,
+            tableCount: ddlStatements.length,
+            durationMs: Date.now() - schemaStartedAt,
+          },
+          'Schema DDL applied',
+        );
+      } finally {
+        await sandboxPool.end();
       }
+      return;
+    }
+
+    if (engine === 'sqlserver') {
+      const sql = buildCreateTableDdlSqlServer(schemaDef.tables);
+      await runSqlcmdInSandboxContainer({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+        sql,
+      });
       schemaApplied = true;
       logger.info(
         {
           sandboxInstanceId,
           dbName,
-          tableCount: ddlStatements.length,
+          tableCount: schemaDef.tables.length,
           durationMs: Date.now() - schemaStartedAt,
         },
-        'Schema DDL applied',
+        'SQL Server schema DDL applied from template',
       );
-    } finally {
-      await sandboxPool.end();
     }
   };
 
@@ -317,13 +368,6 @@ const sandboxProvisioningWorker = new Worker(
         sandboxId: sandboxInstanceId,
         mssqlSaPassword,
       });
-      if (spec.engine === 'sqlserver') {
-        await initSqlServerDatabase({
-          containerRef,
-          saPassword: mssqlSaPassword,
-          dbName,
-        });
-      }
       await waitForSandboxEngine({
         engine: spec.engine,
         containerRef,
@@ -332,6 +376,13 @@ const sandboxProvisioningWorker = new Worker(
         dbPassword: sandboxPassword,
         mssqlSaPassword,
       });
+      if (spec.engine === 'sqlserver') {
+        await initSqlServerDatabase({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+        });
+      }
       await waitForSandboxDbReady({
         engine: spec.engine,
         containerRef,
@@ -468,13 +519,6 @@ const sandboxResetWorker = new Worker(
         sandboxId: sandboxInstanceId,
         mssqlSaPassword,
       });
-      if (spec.engine === 'sqlserver') {
-        await initSqlServerDatabase({
-          containerRef,
-          saPassword: mssqlSaPassword,
-          dbName,
-        });
-      }
       await waitForSandboxEngine({
         engine: spec.engine,
         containerRef,
@@ -483,6 +527,13 @@ const sandboxResetWorker = new Worker(
         dbPassword: sandboxPassword,
         mssqlSaPassword,
       });
+      if (spec.engine === 'sqlserver') {
+        await initSqlServerDatabase({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+        });
+      }
       await waitForSandboxDbReady({
         engine: spec.engine,
         containerRef,

@@ -71,6 +71,7 @@ services:
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
       SANDBOX_DB_PASSWORD: sandbox
+      SANDBOX_MSSQL_SA_PASSWORD: SqlForge1!Sb
     command: sh -c "pnpm db:migrate && pnpm dev"
     ports:
       - "4000:4000"
@@ -126,6 +127,7 @@ services:
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
       SANDBOX_DB_PASSWORD: sandbox
+      SANDBOX_MSSQL_SA_PASSWORD: SqlForge1!Sb
       SANDBOX_DOCKER_NETWORK: sqlcraft-dev
     volumes:
       - ./services/worker:/app/services/worker

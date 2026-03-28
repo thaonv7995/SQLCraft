@@ -34,6 +34,18 @@ async function runDocker(args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+/**
+ * Exit 127 inside `docker exec` means the executable path in the container was not found.
+ * `execFile` surfaces this as `error.code === 127`; our `spawn` wrapper puts "code 127" in the message.
+ */
+function isDockerExecBinaryMissing(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { message?: string; code?: number | string; status?: number };
+  if (e.code === 127 || e.status === 127) return true;
+  if (typeof e.message === 'string' && /\bcode\s+127\b/i.test(e.message)) return true;
+  return false;
+}
+
 async function runDockerWithInput(args: string[], input: string | Buffer): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const child = spawn('docker', args, {
@@ -60,7 +72,10 @@ async function runDockerWithInput(args: string[], input: string | Buffer): Promi
         resolve(stdout.trim());
         return;
       }
-      reject(new Error(`docker ${args.join(' ')} failed with code ${code}: ${stderr.trim()}`));
+      const errText = stderr.trim() || stdout.trim();
+      const detail =
+        errText.length > 2000 ? `${errText.slice(0, 2000)}…` : errText || '(no output)';
+      reject(new Error(`docker ${args.join(' ')} failed with code ${code}: ${detail}`));
     });
 
     child.stdin.write(input);
@@ -175,9 +190,15 @@ export async function ensureSandboxContainerRemoved(containerRef: string): Promi
 /**
  * Official mysql:5.x images are amd64-only (no linux/arm64 manifest). On ARM64 hosts,
  * pull/run via QEMU with explicit platform so provisioning does not fail.
+ *
+ * Microsoft SQL Server Linux containers are also published for amd64 only; without an
+ * explicit platform on Apple Silicon the engine often exits immediately and `docker exec` fails.
  */
 function sandboxDockerRunPlatform(params: { engine: SchemaSqlEngine; dockerImage: string }): string | undefined {
   if (process.arch !== 'arm64') return undefined;
+  if (params.engine === 'sqlserver') {
+    return 'linux/amd64';
+  }
   if (params.engine !== 'mysql') return undefined;
   const full = params.dockerImage.trim().toLowerCase();
   const repoTag = full.includes('/') ? full.slice(full.lastIndexOf('/') + 1) : full;
@@ -406,7 +427,10 @@ export async function waitForSandboxSqlServer(params: {
     try {
       try {
         await sqlcmdSelectOne(containerRef, saPassword, 'tools18');
-      } catch {
+      } catch (error) {
+        if (!isDockerExecBinaryMissing(error)) {
+          throw error;
+        }
         await sqlcmdSelectOne(containerRef, saPassword, 'tools');
       }
       return;
@@ -440,7 +464,10 @@ export async function initSqlServerDatabase(params: {
   };
   try {
     await tryRun('tools18');
-  } catch {
+  } catch (error) {
+    if (!isDockerExecBinaryMissing(error)) {
+      throw error;
+    }
     await tryRun('tools');
   }
 }
@@ -544,55 +571,37 @@ export async function runSqlcmdInSandboxContainer(params: {
   sql: string | Buffer;
 }): Promise<void> {
   const { containerRef, saPassword, dbName, sql } = params;
+  const tmpFile = `/tmp/sqlforge_restore_${Date.now()}_${Math.random().toString(36).slice(2, 14)}.sql`;
+  const qTmp = shQuote(tmpFile);
+  const qDb = shQuote(dbName);
+
   const tryRun = async (toolsPath: 'tools18' | 'tools'): Promise<void> => {
     const bin =
       toolsPath === 'tools18'
         ? '/opt/mssql-tools18/bin/sqlcmd'
         : '/opt/mssql-tools/bin/sqlcmd';
-    const args =
-      toolsPath === 'tools18'
-        ? [
-            'exec',
-            '-i',
-            '-e',
-            `SQLCMDPASSWORD=${saPassword}`,
-            containerRef,
-            bin,
-            '-C',
-            '-S',
-            'localhost',
-            '-U',
-            'sa',
-            '-d',
-            dbName,
-            '-b',
-            '-I',
-            '-i',
-            '-',
-          ]
-        : [
-            'exec',
-            '-i',
-            '-e',
-            `SQLCMDPASSWORD=${saPassword}`,
-            containerRef,
-            bin,
-            '-S',
-            'localhost',
-            '-U',
-            'sa',
-            '-d',
-            dbName,
-            '-b',
-            '-I',
-            '-i',
-            '-',
-          ];
-    await runDockerWithInput(args, sql);
+    const trust = toolsPath === 'tools18' ? '-C ' : '';
+    const inner = `tmp=${qTmp} && cat >"$tmp" && ${bin} ${trust}-S localhost -U sa -d ${qDb} -b -I -i "$tmp"; e=$?; rm -f "$tmp"; exit $e`;
+    await runDockerWithInput(
+      [
+        'exec',
+        '-i',
+        '-e',
+        `SQLCMDPASSWORD=${saPassword}`,
+        containerRef,
+        'sh',
+        '-lc',
+        inner,
+      ],
+      sql,
+    );
   };
   try {
     await tryRun('tools18');
-  } catch {
+  } catch (error) {
+    if (!isDockerExecBinaryMissing(error)) {
+      throw error;
+    }
     await tryRun('tools');
   }
 }

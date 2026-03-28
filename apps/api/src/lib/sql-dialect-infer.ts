@@ -40,6 +40,8 @@ export function inferSqlDialectFromDump(rawUtf8: string): {
 
   if (/--\s*Microsoft SQL Server/i.test(window)) mssql += 14;
   if (/\bSET\s+ANSI_NULLS\s+ON\b/i.test(window) && /\bGO\b/.test(window)) mssql += 4;
+  if (/\bSET\s+NOCOUNT\s+ON\b/i.test(window) && /^\s*GO\s*$/im.test(window)) mssql += 8;
+  if (/\bsysobjects\b/i.test(window) && /\bobject_id\s*\(/i.test(window)) mssql += 6;
 
   const ranked = [
     { dialect: 'postgresql' as const, score: pg },

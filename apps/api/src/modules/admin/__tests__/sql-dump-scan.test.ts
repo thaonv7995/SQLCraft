@@ -157,6 +157,61 @@ describe('parseSqlDumpBuffer()', () => {
     expect(result.inferredDialect).toBe('mysql');
   });
 
+  it('treats GO with a trailing -- comment as a batch separator (SSMS style)', () => {
+    const sql = `
+SET ANSI_NULLS ON
+GO -- batch
+
+/* header */
+CREATE TABLE [dbo].[t1] ([id] int NOT NULL)
+GO
+`;
+    const result = parseSqlDumpBuffer(Buffer.from(sql, 'utf8'), 'x.sql', '66666666-6666-4666-8666-666666666666');
+    expect(result.totalTables).toBe(1);
+    expect(result.tables[0]!.name).toBe('t1');
+  });
+
+  it('parses Microsoft SQL Server scripts that use GO batch separators (no semicolons)', () => {
+    const sql = `
+SET NOCOUNT ON
+GO
+
+if exists (select * from sysobjects where id = object_id(N'[dbo].[domains]') and OBJECTPROPERTY(id, N'IsUserTable') = 1)
+drop table [dbo].[domains]
+GO
+
+CREATE TABLE [dbo].[domains] (
+  [id] int IDENTITY (1, 1) NOT NULL,
+  [name] nvarchar(255) NOT NULL,
+  CONSTRAINT [PK_domains] PRIMARY KEY CLUSTERED ([id] ASC)
+) ON [PRIMARY]
+GO
+
+INSERT INTO [dbo].[domains] ([name]) VALUES (N'a.example.com'), (N'b.example.com')
+GO
+`;
+
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'mssql_dump.sql',
+      '55555555-5555-4555-8555-555555555555',
+    );
+
+    expect(result.inferredDialect).toBe('sqlserver');
+    expect(result.totalTables).toBe(1);
+    expect(result.tables[0]!.name).toBe('domains');
+    expect(result.tables[0]!.rowCount).toBe(2);
+    expect(result.tables[0]!.columns.map((c) => c.name)).toEqual(['id', 'name']);
+    expect(result.tables[0]!.columns[0]!.isPrimary).toBe(true);
+  });
+
+  it('strips UTF-8 BOM and leading block comment before CREATE TABLE', () => {
+    const sql = '\uFEFF/* export */\nCREATE TABLE dbo.z (a int NULL);\n';
+    const result = parseSqlDumpBuffer(Buffer.from(sql, 'utf8'), 'bom.sql', '77777777-7777-4777-8777-777777777777');
+    expect(result.totalTables).toBe(1);
+    expect(result.tables[0]!.name).toBe('z');
+  });
+
   it('ignores MySQL KEY and UNIQUE KEY lines inside CREATE TABLE (not columns named KEY)', () => {
     const sql = `
       CREATE TABLE \`domains\` (

@@ -104,6 +104,25 @@ export function normalizeDatasetRowCounts(
   );
 }
 
+/**
+ * Canonical import requires at least one positive row count. DDL-only dumps (or dialects we do not
+ * count yet) yield all zeros — use one row per known table so publish/metadata stay consistent.
+ */
+export function ensurePositiveDatasetRowCounts(
+  rowCounts: Record<string, unknown>,
+  tableNames: string[],
+): Record<string, number> {
+  const normalized = normalizeDatasetRowCounts(rowCounts);
+  if (sumDatasetRowCounts(normalized) > 0) {
+    return normalized;
+  }
+  const names = tableNames.map((n) => n.trim()).filter((n) => n.length > 0);
+  if (names.length === 0) {
+    return normalized;
+  }
+  return Object.fromEntries(names.map((name) => [name, 1]));
+}
+
 export function scaleDatasetRowCounts(
   rowCounts: Record<string, unknown>,
   targetTotalRows: number,

@@ -14,6 +14,7 @@ import {
 import {
   buildDerivedDatasetRowCounts,
   classifyDatasetScaleFromTotalRows,
+  ensurePositiveDatasetRowCounts,
   normalizeDatasetRowCounts,
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
@@ -746,10 +747,16 @@ export async function importCanonicalDatabase(
     throw new NotFoundError('SQL dump scan not found or has expired');
   }
 
+  const tableNamesForRowCounts = storedScan.definition.tables.map((t) => t.name);
+  const rowCountsForImport = ensurePositiveDatasetRowCounts(
+    storedScan.rowCounts,
+    tableNamesForRowCounts,
+  );
+
   const sourceScale =
     body.datasetScale ??
     storedScan.inferredScale ??
-    classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(storedScan.rowCounts));
+    classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(rowCountsForImport));
 
   const reviewedDialect = body.dialect ?? storedScan.inferredDialect ?? 'postgresql';
   const reviewedEngineVersion =
@@ -772,7 +779,7 @@ export async function importCanonicalDatabase(
 
   try {
     if (allowDerivedMaterialization) {
-      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, storedScan.rowCounts);
+      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, rowCountsForImport);
       if (requestedDerivedDatasets.length > 0) {
         const [{ readFile, uploadFile }, { config }] = await Promise.all([
           import('../../lib/storage'),
@@ -821,7 +828,7 @@ export async function importCanonicalDatabase(
     }),
     canonicalDataset: {
       name: `${body.schemaName} Canonical`,
-      rowCounts: storedScan.rowCounts,
+      rowCounts: rowCountsForImport,
       artifactUrl: storedScan.artifactUrl,
     },
     generateDerivedDatasets: allowDerivedMaterialization,

@@ -400,6 +400,157 @@ function splitStatements(input: string): string[] {
   return statements;
 }
 
+/**
+ * T-SQL batch separator (SSMS / sqlcmd). Semicolons are often omitted; without splitting on GO,
+ * the whole script is one "statement" and CREATE TABLE never matches at ^.
+ */
+function splitSqlServerBatches(input: string): string[] {
+  const batches: string[] = [];
+  let current = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let i = 0;
+
+  while (i < input.length) {
+    const atLineStart = i === 0 || input[i - 1] === '\n';
+
+    if (atLineStart && !inSingleQuote && !inDoubleQuote) {
+      let j = i;
+      while (j < input.length && (input[j] === ' ' || input[j] === '\t')) {
+        j += 1;
+      }
+      if (j + 1 < input.length && input.slice(j, j + 2).toLowerCase() === 'go') {
+        const afterGo = j + 2;
+        const wordBoundary =
+          afterGo >= input.length || !/[A-Za-z0-9_]/.test(input[afterGo]!);
+        if (wordBoundary) {
+          let k = afterGo;
+          while (k < input.length && (input[k] === ' ' || input[k] === '\t')) {
+            k += 1;
+          }
+          if (k < input.length && input[k] === ';') {
+            k += 1;
+            while (k < input.length && (input[k] === ' ' || input[k] === '\t')) {
+              k += 1;
+            }
+          }
+          if (k + 1 < input.length && input[k] === '-' && input[k + 1] === '-') {
+            while (k < input.length && input[k] !== '\n' && input[k] !== '\r') {
+              k += 1;
+            }
+          }
+          if (k >= input.length || input[k] === '\n' || input[k] === '\r') {
+            const batch = current.trim();
+            if (batch.length > 0) {
+              batches.push(batch);
+            }
+            current = '';
+            i = k;
+            if (i < input.length && input[i] === '\r') {
+              i += 1;
+            }
+            if (i < input.length && input[i] === '\n') {
+              i += 1;
+            }
+            continue;
+          }
+        }
+      }
+    }
+
+    const char = input[i]!;
+
+    if (char === "'" && !inDoubleQuote) {
+      current += char;
+      if (inSingleQuote && input[i + 1] === "'") {
+        current += "'";
+        i += 2;
+        continue;
+      }
+      inSingleQuote = !inSingleQuote;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"' && !inSingleQuote) {
+      current += char;
+      if (inDoubleQuote && input[i + 1] === '"') {
+        current += '"';
+        i += 2;
+        continue;
+      }
+      inDoubleQuote = !inDoubleQuote;
+      i += 1;
+      continue;
+    }
+
+    current += char;
+    i += 1;
+  }
+
+  const trailing = current.trim();
+  if (trailing.length > 0) {
+    batches.push(trailing);
+  }
+
+  return batches;
+}
+
+function looksLikeSqlServerGoBatches(sql: string): boolean {
+  for (const line of sql.split(/\r\n|\r|\n/)) {
+    if (/^[ \t]*GO\b[ \t]*(?:;[ \t]*)?(?:--.*)?$/i.test(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function shouldSplitOnGoSeparators(inferredDialect: SchemaSqlDialect, rawSql: string): boolean {
+  if (inferredDialect === 'sqlserver') return true;
+  return looksLikeSqlServerGoBatches(rawSql);
+}
+
+/** BOM / leading block & line comments before CREATE TABLE (common in SSMS exports). */
+function stripLeadingSqlJunkForDdlStatement(statement: string): string {
+  let s = statement;
+  for (let guard = 0; guard < 10_000; guard += 1) {
+    s = s.trimStart();
+    if (!s) {
+      return '';
+    }
+    if (s.startsWith('/*')) {
+      const end = s.indexOf('*/');
+      if (end === -1) {
+        return s.trim();
+      }
+      s = s.slice(end + 2);
+      continue;
+    }
+    if (s.startsWith('--')) {
+      const line = s.match(/^--[^\r\n]*/)?.[0]?.length ?? 0;
+      s = s.slice(line);
+      s = s.replace(/^(\r\n|\r|\n)+/, '');
+      continue;
+    }
+    break;
+  }
+  return s.trim();
+}
+
+function splitStatementsForDump(rawSql: string, inferredDialect: SchemaSqlDialect): string[] {
+  const useGo = shouldSplitOnGoSeparators(inferredDialect, rawSql);
+  const chunks = useGo ? splitSqlServerBatches(rawSql) : [rawSql];
+  const out: string[] = [];
+  for (const chunk of chunks) {
+    out.push(...splitStatements(chunk));
+  }
+  return out.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+function stripTsqlColumnSortSuffix(raw: string): string {
+  return raw.trim().replace(/\s+(?:ASC|DESC)\s*$/i, '');
+}
+
 function findMatchingParen(input: string, startIndex: number): number {
   let depth = 0;
   let inSingleQuote = false;
@@ -667,23 +818,24 @@ function detectSchemaName(tables: ParsedTable[]): string | null {
 }
 
 function parseCreateTable(statement: string): ParsedTable | null {
-  const match = statement.match(/^create\s+table\s+(?:if\s+not\s+exists\s+)?(.+?)\s*\(/is);
+  const cleaned = stripLeadingSqlJunkForDdlStatement(statement);
+  const match = cleaned.match(/^create\s+table\s+(?:if\s+not\s+exists\s+)?(.+?)\s*\(/is);
   if (!match) {
     return null;
   }
 
-  const firstParenIndex = statement.indexOf('(', match[0].length - 1);
+  const firstParenIndex = cleaned.indexOf('(', match[0].length - 1);
   if (firstParenIndex < 0) {
     return null;
   }
 
-  const closingParenIndex = findMatchingParen(statement, firstParenIndex);
+  const closingParenIndex = findMatchingParen(cleaned, firstParenIndex);
   if (closingParenIndex < 0) {
     return null;
   }
 
   const identifier = parseQualifiedIdentifier(match[1]);
-  const tableBody = statement.slice(firstParenIndex + 1, closingParenIndex);
+  const tableBody = cleaned.slice(firstParenIndex + 1, closingParenIndex);
   const columns: ParsedColumn[] = [];
   const primaryKeyColumns = new Set<string>();
   const foreignKeyConstraints = new Map<string, string>();
@@ -699,11 +851,13 @@ function parseCreateTable(statement: string): ParsedTable | null {
 
     const primaryKeyMatch =
       upper.startsWith('PRIMARY KEY') || upper.startsWith('CONSTRAINT')
-        ? segment.match(/primary\s+key\s*\(([^)]+)\)/i)
+        ? segment.match(
+            /primary\s+key(?:\s+(?:clustered|nonclustered))?\s*\(([^)]+)\)/i,
+          )
         : null;
     if (primaryKeyMatch) {
       for (const columnName of splitTopLevelList(primaryKeyMatch[1])) {
-        primaryKeyColumns.add(unquoteIdentifier(columnName));
+        primaryKeyColumns.add(unquoteIdentifier(stripTsqlColumnSortSuffix(columnName)));
       }
       continue;
     }
@@ -713,9 +867,13 @@ function parseCreateTable(statement: string): ParsedTable | null {
         ? segment.match(/foreign\s+key\s*\(([^)]+)\)\s+references\s+([^\s(]+)\s*\(([^)]+)\)/i)
         : null;
     if (foreignKeyMatch) {
-      const localColumns = splitTopLevelList(foreignKeyMatch[1]).map((value) => unquoteIdentifier(value));
+      const localColumns = splitTopLevelList(foreignKeyMatch[1]).map((value) =>
+        unquoteIdentifier(stripTsqlColumnSortSuffix(value)),
+      );
       const targetTable = parseQualifiedIdentifier(foreignKeyMatch[2]).name;
-      const targetColumns = splitTopLevelList(foreignKeyMatch[3]).map((value) => unquoteIdentifier(value));
+      const targetColumns = splitTopLevelList(foreignKeyMatch[3]).map((value) =>
+        unquoteIdentifier(stripTsqlColumnSortSuffix(value)),
+      );
 
       localColumns.forEach((localColumn, index) => {
         const targetColumn = targetColumns[index] ?? targetColumns[0];
@@ -732,6 +890,11 @@ function parseCreateTable(statement: string): ParsedTable | null {
           buildImplicitUniqueIndexName(identifier.name, uniqueConstraint.columns),
         columns: uniqueConstraint.columns,
       });
+      continue;
+    }
+
+    // SQL Server: CONSTRAINT ... CHECK / DEFAULT, etc. (not column definitions)
+    if (/^\s*CONSTRAINT\b/i.test(segment)) {
       continue;
     }
 
@@ -860,14 +1023,21 @@ export function parseSqlDumpBuffer(
     throw new ValidationError('Uploaded SQL dump is empty');
   }
 
-  const utf8 = buffer.toString('utf8');
+  const utf8 = buffer.toString('utf8').replace(/^\uFEFF/, '');
   const { inferredDialect, dialectConfidence } = inferSqlDialectFromDump(utf8);
   const inferredEngineVersion = inferEngineVersionFromDump(utf8, inferredDialect);
   const rawSql = normalizeSql(utf8);
-  const statements = splitStatements(rawSql);
-  const tables = statements
+  let statements = splitStatementsForDump(rawSql, inferredDialect);
+  let tables = statements
     .map((statement) => parseCreateTable(statement))
     .filter((table): table is ParsedTable => table !== null);
+
+  if (tables.length === 0 && /\bcreate\s+table\b/i.test(rawSql)) {
+    statements = splitStatementsForDump(rawSql, 'sqlserver');
+    tables = statements
+      .map((statement) => parseCreateTable(statement))
+      .filter((table): table is ParsedTable => table !== null);
+  }
 
   if (tables.length === 0) {
     throw new ValidationError('No CREATE TABLE statements were detected in the SQL dump');
@@ -885,13 +1055,14 @@ export function parseSqlDumpBuffer(
   }, {});
 
   for (const statement of statements) {
-    const insertMatch = statement.match(/^insert\s+into\s+([^\s(]+)/i);
+    const cleanedInsert = stripLeadingSqlJunkForDdlStatement(statement);
+    const insertMatch = cleanedInsert.match(/^insert\s+into\s+([^\s(]+)/i);
     if (!insertMatch) {
       continue;
     }
 
     const tableName = parseQualifiedIdentifier(insertMatch[1]).name;
-    rowCounts[tableName] = (rowCounts[tableName] ?? 0) + countInsertValueGroups(statement);
+    rowCounts[tableName] = (rowCounts[tableName] ?? 0) + countInsertValueGroups(cleanedInsert);
   }
 
   collectCopyRowCounts(rawSql, rowCounts);
