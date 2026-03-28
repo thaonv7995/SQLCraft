@@ -172,6 +172,21 @@ export async function ensureSandboxContainerRemoved(containerRef: string): Promi
   }
 }
 
+/**
+ * Official mysql:5.x images are amd64-only (no linux/arm64 manifest). On ARM64 hosts,
+ * pull/run via QEMU with explicit platform so provisioning does not fail.
+ */
+function sandboxDockerRunPlatform(params: { engine: SchemaSqlEngine; dockerImage: string }): string | undefined {
+  if (process.arch !== 'arm64') return undefined;
+  if (params.engine !== 'mysql') return undefined;
+  const full = params.dockerImage.trim().toLowerCase();
+  const repoTag = full.includes('/') ? full.slice(full.lastIndexOf('/') + 1) : full;
+  if (/^mysql:5(\.|$)/.test(repoTag)) {
+    return 'linux/amd64';
+  }
+  return undefined;
+}
+
 export async function createSandboxEngineContainer(params: {
   containerRef: string;
   engine: SchemaSqlEngine;
@@ -197,9 +212,11 @@ export async function createSandboxEngineContainer(params: {
 
   await ensureSandboxContainerRemoved(containerRef);
 
+  const platform = sandboxDockerRunPlatform({ engine, dockerImage });
   const baseArgs = [
     'run',
     '-d',
+    ...(platform ? ['--platform', platform] : []),
     '--name',
     containerRef,
     '--network',
@@ -318,13 +335,24 @@ export async function waitForSandboxPostgres(params: {
   throw new Error(`Sandbox container ${containerRef} did not become ready within ${timeoutMs}ms`);
 }
 
+/** Official MariaDB 11+ images ship `mariadb-admin` / `mariadb`, not `mysqladmin` / `mysql`. */
+function sandboxMysqlFamilyAdminBin(engine: 'mysql' | 'mariadb'): string {
+  return engine === 'mariadb' ? 'mariadb-admin' : 'mysqladmin';
+}
+
+function sandboxMysqlFamilyClientBin(engine: 'mysql' | 'mariadb'): string {
+  return engine === 'mariadb' ? 'mariadb' : 'mysql';
+}
+
 export async function waitForSandboxMysql(params: {
+  engine: 'mysql' | 'mariadb';
   containerRef: string;
   dbUser: string;
   dbPassword: string;
   timeoutMs?: number;
 }): Promise<void> {
-  const { containerRef, dbUser, dbPassword, timeoutMs = 90_000 } = params;
+  const { engine, containerRef, dbUser, dbPassword, timeoutMs = 90_000 } = params;
+  const adminBin = sandboxMysqlFamilyAdminBin(engine);
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -334,7 +362,7 @@ export async function waitForSandboxMysql(params: {
         '-e',
         `MYSQL_PWD=${dbPassword}`,
         containerRef,
-        'mysqladmin',
+        adminBin,
         'ping',
         '-h',
         '127.0.0.1',
@@ -432,7 +460,7 @@ export async function waitForSandboxEngine(params: {
     return;
   }
   if (engine === 'mysql' || engine === 'mariadb') {
-    await waitForSandboxMysql({ containerRef, dbUser, dbPassword, timeoutMs });
+    await waitForSandboxMysql({ engine, containerRef, dbUser, dbPassword, timeoutMs });
     return;
   }
   if (engine === 'sqlserver') {
@@ -482,15 +510,17 @@ export async function runPgRestoreInSandboxContainer(params: {
   );
 }
 
-/** Run mysql client in container (MySQL / MariaDB sandboxes). Uses MYSQL_PWD to avoid shell quoting issues. */
+/** Run mysql/mariadb CLI in container (MySQL / MariaDB sandboxes). Uses MYSQL_PWD to avoid shell quoting issues. */
 export async function runMysqlInSandboxContainer(params: {
+  engine: 'mysql' | 'mariadb';
   containerRef: string;
   dbUser: string;
   dbPassword: string;
   dbName: string;
   sql: string | Buffer;
 }): Promise<void> {
-  const { containerRef, dbUser, dbPassword, dbName, sql } = params;
+  const { engine, containerRef, dbUser, dbPassword, dbName, sql } = params;
+  const clientBin = sandboxMysqlFamilyClientBin(engine);
   await runDockerWithInput(
     [
       'exec',
@@ -498,7 +528,7 @@ export async function runMysqlInSandboxContainer(params: {
       '-e',
       `MYSQL_PWD=${dbPassword}`,
       containerRef,
-      'mysql',
+      clientBin,
       '--default-character-set=utf8mb4',
       `-u${dbUser}`,
       dbName,

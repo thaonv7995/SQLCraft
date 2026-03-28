@@ -551,6 +551,7 @@ async function restoreFromArtifact(params: {
 }): Promise<boolean> {
   const { logger, containerRef, dbUser, dbPassword, dbName, artifactUrl, engine, mssqlSaPassword } =
     params;
+  const mysqlFamilyEngine = engine === 'mariadb' ? 'mariadb' : 'mysql';
   const inlineSql = maybeExtractInlineSql(artifactUrl);
 
   if (inlineSql) {
@@ -558,6 +559,7 @@ async function restoreFromArtifact(params: {
       await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: inlineSql });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
+        engine: mysqlFamilyEngine,
         containerRef,
         dbUser,
         dbPassword,
@@ -591,6 +593,7 @@ async function restoreFromArtifact(params: {
       await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: bytes });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
+        engine: mysqlFamilyEngine,
         containerRef,
         dbUser,
         dbPassword,
@@ -617,6 +620,7 @@ async function restoreFromArtifact(params: {
       await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: sqlBuf });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
+        engine: mysqlFamilyEngine,
         containerRef,
         dbUser,
         dbPassword,
