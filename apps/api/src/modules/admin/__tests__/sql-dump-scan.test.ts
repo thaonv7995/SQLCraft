@@ -171,6 +171,26 @@ GO
     expect(result.tables[0]!.name).toBe('t1');
   });
 
+  it('counts rows for T-SQL INSERT without INTO (InstPubs-style)', () => {
+    const sql = `
+CREATE TABLE authors (au_id varchar(11) NOT NULL)
+GO
+insert authors
+   values('409-56-7008')
+insert authors
+   values('213-46-8915')
+GO
+`;
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'instpubs_snippet.sql',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    );
+    expect(result.tables[0]!.name).toBe('authors');
+    expect(result.rowCounts.authors).toBe(2);
+    expect(result.totalRows).toBe(2);
+  });
+
   it('parses Microsoft SQL Server scripts that use GO batch separators (no semicolons)', () => {
     const sql = `
 SET NOCOUNT ON

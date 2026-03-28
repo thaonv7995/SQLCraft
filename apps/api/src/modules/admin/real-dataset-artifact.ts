@@ -514,7 +514,7 @@ function parseInsertSegment(
   schemaTables: Map<string, SchemaTable>,
   rowIdCounter: { value: number },
 ): InsertSegment | null {
-  const withoutPrefix = statement.replace(/^insert\s+into\s+/i, '').trim();
+  const withoutPrefix = statement.replace(/^insert\s+(?:into\s+)?/i, '').trim();
   const { identifier, remainder } = consumeLeadingIdentifier(withoutPrefix);
   const targetSql = identifier.trim();
   const tableName = parseQualifiedIdentifier(targetSql).name;

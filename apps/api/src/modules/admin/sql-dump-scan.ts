@@ -1056,7 +1056,8 @@ export function parseSqlDumpBuffer(
 
   for (const statement of statements) {
     const cleanedInsert = stripLeadingSqlJunkForDdlStatement(statement);
-    const insertMatch = cleanedInsert.match(/^insert\s+into\s+([^\s(]+)/i);
+    // T-SQL / SSMS samples (e.g. InstPubs) use `INSERT authors` without `INTO`; PostgreSQL/MySQL use `INSERT INTO`.
+    const insertMatch = cleanedInsert.match(/^insert\s+(?:into\s+)?([^\s(]+)/i);
     if (!insertMatch) {
       continue;
     }

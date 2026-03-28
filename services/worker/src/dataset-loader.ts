@@ -698,6 +698,20 @@ export async function loadDatasetIntoSandbox(params: {
         mssqlSaPassword,
       });
       if (restored) {
+        if (engine === 'sqlserver' && schema?.tables?.length) {
+          try {
+            await ensureSchemaApplied?.();
+          } catch (gapErr) {
+            logger.warn(
+              {
+                err: gapErr,
+                datasetTemplateId: datasetTemplate.id,
+                containerRef,
+              },
+              'SQL Server template DDL after restore failed (continuing with artifact only)',
+            );
+          }
+        }
         return;
       }
       logger.warn(
