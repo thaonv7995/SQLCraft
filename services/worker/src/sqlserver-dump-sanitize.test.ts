@@ -40,14 +40,23 @@ test('replaces sysdatabases with sys.databases for InstPubs-style scripts after 
   assert.ok(!/\bsysdatabases\b/i.test(out));
 });
 
-test('rewrites sp_addtype to CREATE TYPE (InstPubs id/tid/empid)', () => {
+test('bootstrap dbo id/tid/empid and strip sp_addtype (InstPubs)', () => {
   const out = sanitizeSqlServerDumpScript(
     "execute sp_addtype id      ,'varchar(11)' ,'NOT NULL'\n" +
       "execute sp_addtype tid     ,'varchar(6)'  ,'NOT NULL'\n" +
       "execute sp_addtype empid   ,'char(9)'     ,'NOT NULL'\n",
   );
   assert.ok(!/\bsp_addtype\b/i.test(out));
-  assert.match(out, /CREATE TYPE \[id\] FROM varchar\(11\) NOT NULL;/i);
-  assert.match(out, /CREATE TYPE \[tid\] FROM varchar\(6\) NOT NULL;/i);
-  assert.match(out, /CREATE TYPE \[empid\] FROM char\(9\) NOT NULL;/i);
+  assert.match(out, /TYPE_ID\(N'id'\)/i);
+  assert.match(out, /TYPE_ID\(N'tid'\)/i);
+  assert.match(out, /TYPE_ID\(N'empid'\)/i);
+  assert.match(out, /CREATE TYPE \[dbo\]\.\[tid\]/i);
+});
+
+test('quoted sp_addtype type name is stripped', () => {
+  const out = sanitizeSqlServerDumpScript(
+    "EXEC sp_addtype 'tid', 'varchar(6)', 'NOT NULL'\r\nGO\r\n",
+  );
+  assert.ok(!/\bsp_addtype\b/i.test(out));
+  assert.match(out, /TYPE_ID\(N'tid'\)/i);
 });

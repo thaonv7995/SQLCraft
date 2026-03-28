@@ -32,24 +32,36 @@ export function modernizeLegacySqlServerCatalogViews(sql: string): string {
   return s;
 }
 
+/** InstPubs / legacy Pubs alias types (dbo schema). */
+const INST_PUBS_DBO_TYPES_BOOTSTRAP = `/* SQLForge: ensure dbo.id / dbo.tid / dbo.empid before CREATE TABLE (InstPubs-style) */
+IF TYPE_ID(N'id') IS NULL EXEC (N'CREATE TYPE [dbo].[id] FROM varchar(11) NOT NULL');
+IF TYPE_ID(N'tid') IS NULL EXEC (N'CREATE TYPE [dbo].[tid] FROM varchar(6) NOT NULL');
+IF TYPE_ID(N'empid') IS NULL EXEC (N'CREATE TYPE [dbo].[empid] FROM char(9) NOT NULL');
+GO
+
+`;
+
 /**
- * Legacy samples (InstPubs, Northwind) call {@code sp_addtype} to define alias types ({@code id}, {@code tid}, …).
- * On modern SQL Server in Linux containers that path often does not materialize types before {@code CREATE TABLE},
- * producing "Cannot find data type tid". {@code CREATE TYPE ... FROM ...} is the supported replacement.
- *
- * Matches: {@code execute sp_addtype id ,'varchar(11)' ,'NOT NULL'} (flexible whitespace, optional trailing ;).
+ * Detect scripts that rely on legacy alias UDTs so we prepend a bootstrap batch.
+ * Covers quoted/unquoted {@code sp_addtype} variants we strip, and common InstPubs column lines.
  */
-export function expandSqlServerSpAddtypeToCreateType(sql: string): string {
-  return sql.replace(
-    /^\s*(?:execute|exec)\s+sp_addtype\s+(\[[^\]]+\]|[A-Za-z_][\w]*)\s*,\s*'([^']*)'\s*,\s*'([^']*)'(?:\s*;)?\s*(?:--[^\r\n]*)?\s*$/gim,
-    (_m, rawTypeName: string, physType: string, nullClause: string) => {
-      const name = rawTypeName.trim();
-      const bracketed =
-        name.startsWith('[') && name.endsWith(']') ? name : `[${name.replace(/^\[|\]$/g, '')}]`;
-      const nn = /\bnot\s+null\b/i.test(nullClause ?? '') ? ' NOT NULL' : ' NULL';
-      return `CREATE TYPE ${bracketed} FROM ${physType.trim()}${nn};`;
-    },
-  );
+export function needsInstPubsStyleAliasTypes(sql: string): boolean {
+  if (/\bsp_addtype\b/i.test(sql)) return true;
+  if (/\btitle_id\s+tid\b/i.test(sql)) return true;
+  if (/\bau_id\s+id\b/i.test(sql)) return true;
+  if (/\bemp_id\s+empid\b/i.test(sql)) return true;
+  if (/\([^)]*\w+\s+tid\s*[\n\r,)]/i.test(sql)) return true;
+  return false;
+}
+
+/**
+ * Remove {@code EXEC/EXECUTE sp_addtype} lines so bootstrap (or prior types) are the single source of truth.
+ * Matches unquoted names, bracketed names, and quoted / N-quoted names; flexible whitespace.
+ */
+export function stripSqlServerSpAddtypeStatements(sql: string): string {
+  const line =
+    /^\s*(?:execute|exec)\s+sp_addtype\s+(?:N?'([^']*)'|(\[[^\]]+\])|([A-Za-z_][\w]*))\s*,\s*N?'([^']*)'\s*,\s*N?'([^']*)'(?:\s*;)?\s*(?:--[^\r\n]*)?\s*$/gim;
+  return sql.replace(line, '');
 }
 
 /**
@@ -57,9 +69,12 @@ export function expandSqlServerSpAddtypeToCreateType(sql: string): string {
  * Conservative: only `Order` and `User` (high-signal, low risk of touching keywords like GROUP BY).
  */
 export function sanitizeSqlServerDumpScript(sql: string): string {
-  let s = modernizeLegacySqlServerCatalogViews(
-    expandSqlServerSpAddtypeToCreateType(stripSqlServerUseStatements(stripBom(sql))),
-  );
+  let s = stripSqlServerUseStatements(stripBom(sql));
+  if (needsInstPubsStyleAliasTypes(s)) {
+    s = INST_PUBS_DBO_TYPES_BOOTSTRAP + s;
+  }
+  s = stripSqlServerSpAddtypeStatements(s);
+  s = modernizeLegacySqlServerCatalogViews(s);
   const R = RESERVED_AS_OBJECT_NAME;
 
   s = s.replace(
