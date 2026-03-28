@@ -11,6 +11,162 @@ import {
   runSqlcmdInSandboxContainer,
 } from './docker';
 
+function quoteMysqlIdentifier(name: string): string {
+  return '`' + name.replace(/`/g, '``') + '`';
+}
+
+/** mysqldump conditional / versioned comments between keywords and identifiers. */
+const MYSQL_DUMP_COMMENT_GAP = String.raw`(?:/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*)*`;
+
+/**
+ * Collect every database name that appears as `db`.`tbl` in mysqldump-style statements.
+ * `USE` may name a different DB (e.g. mysql) than qualified CREATE/INSERT (e.g. pdns).
+ */
+function collectMysqlQualifierDatabaseNames(sql: string): Set<string> {
+  const names = new Set<string>();
+  const patterns = [
+    new RegExp(
+      String.raw`CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${MYSQL_DUMP_COMMENT_GAP}` +
+        String.raw`\`([^\`]+)\`\s*\.\s*\``,
+      'gi',
+    ),
+    new RegExp(
+      String.raw`CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?${MYSQL_DUMP_COMMENT_GAP}` +
+        String.raw`\`([^\`]+)\`\s*\.\s*([a-zA-Z0-9_$]+)\s*\(`,
+      'gi',
+    ),
+    /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?`([^`]+)`\s*\.\s*`/gi,
+    /LOCK\s+TABLES\s+`([^`]+)`\s*\.\s*`/gi,
+    /INSERT\s+INTO\s+`([^`]+)`\s*\.\s*`/gi,
+    /INSERT\s+INTO\s+`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\b/gi,
+    /REPLACE\s+INTO\s+`([^`]+)`\s*\.\s*`/gi,
+    /REPLACE\s+INTO\s+`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\b/gi,
+    /ALTER\s+TABLE\s+`([^`]+)`\s*\.\s*`/gi,
+    /ALTER\s+TABLE\s+`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\b/gi,
+    /CREATE\s+VIEW\s+`([^`]+)`\s*\.\s*`/gi,
+    /DROP\s+VIEW\s+(?:IF\s+EXISTS\s+)?`([^`]+)`\s*\.\s*`/gi,
+    /TRUNCATE\s+TABLE\s+`([^`]+)`\s*\.\s*`/gi,
+  ];
+  for (const re of patterns) {
+    const r = new RegExp(re.source, re.flags);
+    let m: RegExpExecArray | null;
+    while ((m = r.exec(sql)) !== null) {
+      names.add(m[1]);
+    }
+  }
+  for (const m of sql.matchAll(
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_$]+)\.([a-zA-Z0-9_$]+)\s*\(/gi,
+  )) {
+    names.add(m[1]);
+  }
+  return names;
+}
+
+/** First USE in dump (comment or line); may differ from qualified table prefixes. */
+function extractMysqlSourceDatabase(sql: string): string | null {
+  const mComment = sql.match(/\/\*![0-9]*\s*USE\s+`([^`]+)`/i);
+  if (mComment) return mComment[1];
+
+  const mUseBt = sql.match(/^\s*USE\s+`([^`]+)`\s*;/im);
+  if (mUseBt) return mUseBt[1];
+
+  const mUsePlain = sql.match(/^\s*USE\s+([^;\s]+)\s*;/im);
+  if (mUsePlain) {
+    const raw = mUsePlain[1].replace(/^`|`$/g, '');
+    if (raw.length > 0) return raw;
+  }
+
+  return null;
+}
+
+/**
+ * `CREATE TABLE `orig`.`t`` targets database orig even after USE sandbox; rewrite to sandbox.
+ */
+function rewriteMysqlQualifiedDbPrefix(sql: string, sourceDb: string, targetDb: string): string {
+  if (!sourceDb || sourceDb === targetDb) return sql;
+  const srcLit = quoteMysqlIdentifier(sourceDb);
+  const dstLit = quoteMysqlIdentifier(targetDb);
+  const escaped = srcLit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reBt = new RegExp(escaped + '\\.(`[^`]*`)', 'g');
+  let out = sql.replace(reBt, `${dstLit}.$1`);
+
+  if (/^[a-zA-Z0-9_$]+$/.test(sourceDb)) {
+    const escPlain = sourceDb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rePlain = new RegExp('(?<=[\\s(,])' + escPlain + '\\s*\\.\\s*(`[^`]*`)', 'g');
+    out = out.replace(rePlain, `${dstLit}.$1`);
+  }
+
+  // `db`.tablename (backticks on database only — common in some dumps)
+  const reBareTbl = new RegExp(escaped + '\\.([a-zA-Z0-9_$]+)(?![a-zA-Z0-9_$`])', 'g');
+  out = out.replace(reBareTbl, (_m, tbl) => `${dstLit}.${quoteMysqlIdentifier(tbl)}`);
+
+  return out;
+}
+
+/** CREATE TABLE pdns.domains (…) without backticks on the database name. */
+function rewriteUnquotedMysqlCreateDbTable(
+  sql: string,
+  sourceDbs: Set<string>,
+  targetDb: string,
+): string {
+  const dst = quoteMysqlIdentifier(targetDb);
+  let out = sql;
+  for (const src of Array.from(sourceDbs).sort((a, b) => b.length - a.length)) {
+    if (src === targetDb || !/^[a-zA-Z0-9_$]+$/.test(src)) continue;
+    const esc = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(
+      `CREATE\\s+TABLE\\s+((?:IF\\s+NOT\\s+EXISTS\\s+)?)${esc}\\.([a-zA-Z0-9_$]+)(\\s*\\()`,
+      'gi',
+    );
+    out = out.replace(re, (_m, ifNe, tbl, paren) => {
+      return `CREATE TABLE ${ifNe}${dst}.${quoteMysqlIdentifier(tbl)}${paren}`;
+    });
+  }
+  return out;
+}
+
+/**
+ * mysqldump often includes `USE originaldb` / `CREATE DATABASE`, so piping into
+ * `mysql -u user sandbox_db` still creates objects in another database. Force the
+ * session database to the sandbox MYSQL_DATABASE name.
+ */
+export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8: string): string {
+  let s = sqlUtf8.replace(/^\uFEFF/, '');
+
+  const qualifierDbs = collectMysqlQualifierDatabaseNames(s);
+  const useDb = extractMysqlSourceDatabase(s);
+  if (useDb) qualifierDbs.add(useDb);
+  qualifierDbs.delete(dbName);
+
+  // /*!40101 USE `dbname` */; (mysqldump)
+  s = s.replace(/\/\*![0-9]*\s*USE\b[^*]*\*\/\s*;?/gi, '');
+  s = s.replace(/^\s*USE\b[^;]*;/gim, '');
+  s = s.replace(/\/\*![0-9]*\s*DROP\s+DATABASE\b[^*]*\*\/\s*;?/gi, '');
+  s = s.replace(/\/\*![0-9]*\s*CREATE\s+DATABASE\b[^*]*\*\/\s*;?/gi, '');
+  s = s.replace(/^\s*DROP\s+DATABASE\b[^;]*;/gim, '');
+  s = s.replace(/^\s*CREATE\s+DATABASE\b[^;]*;/gim, '');
+  s = s.replace(/\/\*![0-9]*\s*DROP\s+SCHEMA\b[^*]*\*\/\s*;?/gi, '');
+  s = s.replace(/\/\*![0-9]*\s*CREATE\s+SCHEMA\b[^*]*\*\/\s*;?/gi, '');
+  s = s.replace(/^\s*DROP\s+SCHEMA\b[^;]*;/gim, '');
+  s = s.replace(/^\s*CREATE\s+SCHEMA\b[^;]*;/gim, '');
+
+  // MySQL 4.0 mysqldump used TYPE=InnoDB; TYPE was removed (use ENGINE) — rejects on MySQL 8+.
+  s = s.replace(/\bTYPE\s*=\s*([A-Za-z0-9_]+)\b/gi, 'ENGINE=$1');
+
+  for (const srcDb of Array.from(qualifierDbs).sort((a, b) => b.length - a.length)) {
+    s = rewriteMysqlQualifiedDbPrefix(s, srcDb, dbName);
+  }
+  s = rewriteUnquotedMysqlCreateDbTable(s, qualifierDbs, dbName);
+
+  const q = quoteMysqlIdentifier(dbName);
+  return `SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\n`;
+}
+
+function prepareMysqlRestorePayload(dbName: string, sql: string | Buffer): Buffer {
+  const utf8 = typeof sql === 'string' ? sql : sql.toString('utf8');
+  return Buffer.from(rewriteMysqlRestoreSqlForTargetDatabase(dbName, utf8), 'utf8');
+}
+
 interface ColumnMeta {
   name: string;
   type: string;
@@ -406,7 +562,7 @@ async function restoreFromArtifact(params: {
         dbUser,
         dbPassword,
         dbName,
-        sql: inlineSql,
+        sql: prepareMysqlRestorePayload(dbName, inlineSql),
       });
     } else if (engine === 'sqlserver') {
       await runSqlcmdInSandboxContainer({
@@ -439,7 +595,7 @@ async function restoreFromArtifact(params: {
         dbUser,
         dbPassword,
         dbName,
-        sql: bytes,
+        sql: prepareMysqlRestorePayload(dbName, bytes),
       });
     } else if (engine === 'sqlserver') {
       await runSqlcmdInSandboxContainer({
@@ -465,7 +621,7 @@ async function restoreFromArtifact(params: {
         dbUser,
         dbPassword,
         dbName,
-        sql: sqlBuf,
+        sql: prepareMysqlRestorePayload(dbName, sqlBuf),
       });
     } else if (engine === 'sqlserver') {
       await runSqlcmdInSandboxContainer({
@@ -571,4 +727,5 @@ export const __private__ = {
   normalizeRowCounts,
   parseSchemaTables,
   inferColumnExpression,
+  rewriteMysqlRestoreSqlForTargetDatabase,
 };

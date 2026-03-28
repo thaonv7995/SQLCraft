@@ -156,4 +156,26 @@ describe('parseSqlDumpBuffer()', () => {
     expect(result.rowCounts).toEqual({ [SQL_DUMP_ARTIFACT_ONLY_PLACEHOLDER_TABLE]: 1 });
     expect(result.inferredDialect).toBe('mysql');
   });
+
+  it('ignores MySQL KEY and UNIQUE KEY lines inside CREATE TABLE (not columns named KEY)', () => {
+    const sql = `
+      CREATE TABLE \`domains\` (
+        \`id\` int(11) NOT NULL AUTO_INCREMENT,
+        \`name\` varchar(255) NOT NULL,
+        \`type\` varchar(6) NOT NULL,
+        KEY \`rec_name_index\` (\`name\`),
+        UNIQUE KEY \`nametype_index\` (\`name\`,\`type\`),
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    `;
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'pdns.sql',
+      '44444444-4444-4444-8444-444444444444',
+    );
+    const domains = result.tables.find((t) => t.name === 'domains');
+    expect(domains).toBeDefined();
+    expect(domains!.columns.map((c) => c.name)).toEqual(['id', 'name', 'type']);
+    expect(domains!.columns.some((c) => c.name === 'KEY')).toBe(false);
+  });
 });

@@ -133,3 +133,64 @@ test('maps BOOLEAN columns to boolean seed expressions', () => {
 
   assert.equal(expression, '(((i) % 2) = 0)');
 });
+
+test('rewriteMysqlRestoreSqlForTargetDatabase strips USE and forces sandbox database', () => {
+  const input =
+    "/*!40101 USE `legacy_prod` */;\nUSE `other`;\nCREATE TABLE domains (id INT PRIMARY KEY);\n";
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_ab7fe6ef05634bf5', input);
+  assert.match(out, /USE `s_ab7fe6ef05634bf5`;/);
+  assert.doesNotMatch(out, /legacy_prod/);
+  assert.doesNotMatch(out, /\bUSE `other`;/);
+  assert.match(out, /CREATE TABLE domains/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase rewrites qualified db.table into sandbox database', () => {
+  const input = 'CREATE TABLE `pdns`.`domains` (`id` int NOT NULL);\n';
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_cacfe0b2fe7543b5', input);
+  assert.match(out, /USE `s_cacfe0b2fe7543b5`/);
+  assert.match(out, /CREATE TABLE `s_cacfe0b2fe7543b5`\.`domains`/);
+  assert.doesNotMatch(out, /`pdns`/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase rewrites qualified names when source DB only appears in CREATE', () => {
+  const input = 'CREATE TABLE IF NOT EXISTS `myapp`.`users` (`id` int);\n';
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_x', input);
+  assert.match(out, /CREATE TABLE IF NOT EXISTS `s_x`\.`users`/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase rewrites qualified pdns even when USE points at mysql', () => {
+  const input =
+    "/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE */;\n/*!40101 USE `mysql` */;\n" +
+    'CREATE TABLE `pdns`.`domains` (`id` int NOT NULL);\n' +
+    "INSERT INTO `pdns`.`domains` VALUES (1);\n";
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_8bd364cebaef43c2', input);
+  assert.doesNotMatch(out, /`pdns`/);
+  assert.match(out, /CREATE TABLE `s_8bd364cebaef43c2`\.`domains`/);
+  assert.match(out, /INSERT INTO `s_8bd364cebaef43c2`\.`domains`/);
+  assert.doesNotMatch(out, /USE `mysql`/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase handles mysqldump comments before qualified CREATE', () => {
+  const input =
+    'CREATE TABLE IF NOT EXISTS /*!40101 some comment */ `pdns`.`domains` (`id` int);\n';
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_x', input);
+  assert.doesNotMatch(out, /`pdns`/);
+  assert.match(out, /`s_x`\.`domains`/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase rewrites backtick-db with unquoted table name', () => {
+  const input = 'CREATE TABLE `pdns`.domains (`id` int NOT NULL);\n';
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_x', input);
+  assert.doesNotMatch(out, /`pdns`/);
+  assert.match(out, /CREATE TABLE `s_x`\.`domains`/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase upgrades MySQL 4 TYPE= storage to ENGINE=', () => {
+  const input =
+    "CREATE TABLE `domains` (`id` int(11) NOT NULL auto_increment) TYPE=InnoDB;\n" +
+    'CREATE TABLE `supermasters` (`ip` varchar(25)) TYPE=MyISAM;\n';
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_x', input);
+  assert.match(out, /ENGINE=InnoDB/i);
+  assert.match(out, /ENGINE=MyISAM/i);
+  assert.doesNotMatch(out, /\bTYPE\s*=/i);
+});

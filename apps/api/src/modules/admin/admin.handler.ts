@@ -157,6 +157,7 @@ export async function deleteDatabaseHandler(
     payload: {
       name: result.name,
       deletedDatasetTemplates: result.deletedDatasetTemplates,
+      reclaimedSandboxInstances: result.reclaimedSandboxInstances,
     },
     ipAddress: clientIpForAudit(request),
     userAgent: clientUserAgentForAudit(request),

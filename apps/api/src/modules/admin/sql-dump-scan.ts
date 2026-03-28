@@ -735,6 +735,14 @@ function parseCreateTable(statement: string): ParsedTable | null {
       continue;
     }
 
+    // MySQL / MariaDB: KEY, UNIQUE KEY, FULLTEXT KEY, SPATIAL KEY, INDEX are table-level — not columns.
+    if (
+      /^\s*(?:FULLTEXT\s+|SPATIAL\s+)?(?:UNIQUE\s+)?KEY\b/i.test(segment) ||
+      /^\s*INDEX\b/i.test(segment)
+    ) {
+      continue;
+    }
+
     const { identifier: columnIdentifier, remainder } = consumeLeadingIdentifier(segment);
     const columnName = unquoteIdentifier(columnIdentifier);
     if (!columnName || !remainder) {

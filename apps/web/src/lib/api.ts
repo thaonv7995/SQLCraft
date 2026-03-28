@@ -1056,6 +1056,7 @@ export interface DeleteDatabaseResult {
   id: string;
   name: string;
   deletedDatasetTemplates: number;
+  reclaimedSandboxInstances: number;
 }
 
 // ─── Leaderboard ──────────────────────────────────────────────────────────────

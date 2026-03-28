@@ -358,18 +358,28 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
   }
 
   const datasetTemplates = await adminRepository.listDatasetTemplatesBySchemaTemplateId(id);
-  const referenceSummary = await adminRepository.getDatabaseReferenceSummary(
-    id,
-    datasetTemplates.map((datasetTemplate) => datasetTemplate.id),
-  );
+  const datasetTemplateIds = datasetTemplates.map((datasetTemplate) => datasetTemplate.id);
+  const referenceSummary = await adminRepository.getDatabaseReferenceSummary(id, datasetTemplateIds);
 
-  if (
-    referenceSummary.challengeCount > 0 ||
-    referenceSummary.sandboxInstanceCount > 0
-  ) {
+  if (referenceSummary.challengeCount > 0) {
     throw new ConflictError(
-      `Delete blocked: ${referenceSummary.challengeCount} challenge(s) and ${referenceSummary.sandboxInstanceCount} sandbox instance(s) still reference this database.`,
+      `Delete blocked: ${referenceSummary.challengeCount} challenge(s) still reference this database. Remove or reassign challenges first.`,
     );
+  }
+
+  const sandboxes = await adminRepository.listSandboxInstancesForDatabase(id, datasetTemplateIds);
+  await Promise.all(
+    sandboxes
+      .filter((sandbox) => sandbox.status !== 'destroyed')
+      .map((sandbox) =>
+        enqueueDestroySandbox({
+          sandboxInstanceId: sandbox.id,
+          learningSessionId: sandbox.learningSessionId,
+        }),
+      ),
+  );
+  if (sandboxes.length > 0) {
+    await adminRepository.clearSandboxTemplateRefsForDatabase(id, datasetTemplateIds);
   }
 
   await adminRepository.deleteDatasetTemplatesBySchemaTemplateId(id);
@@ -383,6 +393,7 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
     id: deletedSchemaTemplate.id,
     name: schemaTemplate.name,
     deletedDatasetTemplates: datasetTemplates.length,
+    reclaimedSandboxInstances: sandboxes.length,
   };
 }
 

@@ -25,6 +25,18 @@ export type InsertSystemJob = InferInsertModel<typeof schema.systemJobs>;
 export type InsertAdminConfig = InferInsertModel<typeof schema.adminConfigs>;
 export type InsertAuditLog = InferInsertModel<typeof schema.auditLogs>;
 
+function sandboxInstancesForDatabaseWhere(
+  schemaTemplateId: string,
+  datasetTemplateIds: string[],
+): SQL {
+  return datasetTemplateIds.length > 0
+    ? or(
+        eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId),
+        inArray(schema.sandboxInstances.datasetTemplateId, datasetTemplateIds),
+      )!
+    : eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId);
+}
+
 export class AdminRepository {
   private get db() {
     return getDb();
@@ -114,34 +126,55 @@ export class AdminRepository {
     schemaTemplateId: string,
     datasetTemplateIds: string[],
   ): Promise<DatabaseReferenceSummary> {
-    const challengeFilter =
-      datasetTemplateIds.length > 0
-        ? or(
-            eq(schema.challenges.databaseId, schemaTemplateId),
-            inArray(schema.sandboxInstances.datasetTemplateId, datasetTemplateIds),
-          )
-        : eq(schema.challenges.databaseId, schemaTemplateId);
+    // Challenges only reference schema_templates via database_id (not dataset_templates rows).
+    const challengeFilter = eq(schema.challenges.databaseId, schemaTemplateId);
 
-    const sandboxInstanceFilter =
-      datasetTemplateIds.length > 0
-        ? or(
-            eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId),
-            inArray(schema.sandboxInstances.datasetTemplateId, datasetTemplateIds),
-          )
-        : eq(schema.sandboxInstances.schemaTemplateId, schemaTemplateId);
+    const sandboxWhere = sandboxInstancesForDatabaseWhere(
+      schemaTemplateId,
+      datasetTemplateIds,
+    );
 
     const [challengeCount, sandboxInstanceCount] = await Promise.all([
       this.db.select({ count: count() }).from(schema.challenges).where(challengeFilter),
-      this.db
-        .select({ count: count() })
-        .from(schema.sandboxInstances)
-        .where(sandboxInstanceFilter),
+      this.db.select({ count: count() }).from(schema.sandboxInstances).where(sandboxWhere),
     ]);
 
     return {
       challengeCount: challengeCount[0]?.count ?? 0,
       sandboxInstanceCount: sandboxInstanceCount[0]?.count ?? 0,
     };
+  }
+
+  async listSandboxInstancesForDatabase(
+    schemaTemplateId: string,
+    datasetTemplateIds: string[],
+  ): Promise<Array<{ id: string; learningSessionId: string; status: string }>> {
+    const whereClause = sandboxInstancesForDatabaseWhere(
+      schemaTemplateId,
+      datasetTemplateIds,
+    );
+    return this.db
+      .select({
+        id: schema.sandboxInstances.id,
+        learningSessionId: schema.sandboxInstances.learningSessionId,
+        status: schema.sandboxInstances.status,
+      })
+      .from(schema.sandboxInstances)
+      .where(whereClause);
+  }
+
+  async clearSandboxTemplateRefsForDatabase(
+    schemaTemplateId: string,
+    datasetTemplateIds: string[],
+  ): Promise<void> {
+    const whereClause = sandboxInstancesForDatabaseWhere(
+      schemaTemplateId,
+      datasetTemplateIds,
+    );
+    await this.db
+      .update(schema.sandboxInstances)
+      .set({ schemaTemplateId: null, datasetTemplateId: null })
+      .where(whereClause);
   }
 
   async createDatasetTemplate(

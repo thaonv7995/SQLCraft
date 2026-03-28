@@ -52,10 +52,10 @@ function resolvePostgresImage(engineVersion: string | null): string {
 function resolveMysqlTag(engineVersion: string | null): string {
   const pinned = process.env.SANDBOX_MYSQL_IMAGE?.trim();
   if (pinned) return pinned;
-  const minor = parseMajor(engineVersion);
-  if (minor === 5) return '5.7';
-  if (minor === 8 || minor == null) return '8.0';
-  return `${minor}`;
+  const major = parseMajor(engineVersion);
+  // Docker Hub only ships well-known tags (e.g. 5.7, 8.0). Unknown majors (typos, bad headers) must not become mysql:4 etc.
+  if (major === 5) return '5.7';
+  return '8.0';
 }
 
 function resolveMariadbTag(engineVersion: string | null): string {
@@ -64,7 +64,8 @@ function resolveMariadbTag(engineVersion: string | null): string {
   const major = parseMajor(engineVersion);
   if (major === 10) return '10.11';
   if (major === 11 || major == null) return '11';
-  return `${major}`;
+  if (major >= 12) return `${major}`;
+  return '11';
 }
 
 function resolveSqlServerImage(engineVersion: string | null): string {

@@ -75,6 +75,8 @@ export interface DeleteDatabaseResult {
   id: string;
   name: string;
   deletedDatasetTemplates: number;
+  /** Sandboxes that were detached from this DB; destroy jobs enqueued when not already torn down. */
+  reclaimedSandboxInstances: number;
 }
 
 export interface ClearStaleSessionsResult {
