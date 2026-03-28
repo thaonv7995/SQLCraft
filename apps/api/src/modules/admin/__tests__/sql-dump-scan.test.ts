@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseSqlDumpBuffer } from '../sql-dump-scan';
+import {
+  SQL_DUMP_ARTIFACT_ONLY_PLACEHOLDER_TABLE,
+  parseSqlDumpBuffer,
+  parseSqlDumpBufferArtifactOnly,
+} from '../sql-dump-scan';
 
 describe('parseSqlDumpBuffer()', () => {
   it('extracts tables, columns, keys, and row counts from a postgres-style dump', () => {
@@ -128,5 +132,28 @@ describe('parseSqlDumpBuffer()', () => {
         }),
       ]),
     );
+  });
+
+  it('parseSqlDumpBufferArtifactOnly stores dump metadata without CREATE TABLE parsing', () => {
+    const sql = `
+      /*!40101 SET NAMES utf8 */;
+      CREATE TABLE \`users\` (
+        \`id\` int NOT NULL,
+        \`name\` varchar(64)
+      ) ENGINE=InnoDB;
+    `;
+    const result = parseSqlDumpBufferArtifactOnly(
+      Buffer.from(sql, 'utf8'),
+      'mysql_app.sql',
+      '33333333-3333-4333-8333-333333333333',
+    );
+
+    expect(result.scanId).toBe('33333333-3333-4333-8333-333333333333');
+    expect(result.totalTables).toBe(0);
+    expect(result.tables).toEqual([]);
+    expect(result.definition.tables).toEqual([]);
+    expect(result.definition.metadata.artifactOnly).toBe(true);
+    expect(result.rowCounts).toEqual({ [SQL_DUMP_ARTIFACT_ONLY_PLACEHOLDER_TABLE]: 1 });
+    expect(result.inferredDialect).toBe('mysql');
   });
 });

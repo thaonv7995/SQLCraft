@@ -98,4 +98,18 @@ describe('materializeDerivedSqlDumpArtifacts()', () => {
     expect(dump).toContain("('item-2', 'order-2', 'sku-2')");
     expect(dump).not.toContain("('item-3', 'order-3', 'sku-3')");
   });
+
+  it('returns no artifacts when schema definition has no tables', () => {
+    const out = materializeDerivedSqlDumpArtifacts({
+      sourceSql: Buffer.from('SELECT 1;', 'utf8'),
+      definition: { tables: [] },
+      derivedDatasets: [
+        {
+          size: 'tiny',
+          rowCounts: { a: 1 },
+        },
+      ],
+    });
+    expect(out).toEqual([]);
+  });
 });

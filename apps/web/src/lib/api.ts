@@ -1014,6 +1014,8 @@ export interface SqlDumpScanResult {
   detectedPrimaryKeys: number;
   detectedForeignKeys: number;
   tables: SqlDumpTableSummary[];
+  /** Server stored the file without parsing CREATE TABLE (canonical SQL only). */
+  artifactOnly?: boolean;
 }
 
 export interface SqlDumpImportPayload {
@@ -2039,9 +2041,12 @@ export const databasesApi = {
       )
       .then((r) => normalizeLearningSession(r.data.session)),
 
-  scanSqlDump: (file: File) => {
+  scanSqlDump: (file: File, options?: { artifactOnly?: boolean }) => {
     const form = new FormData();
     form.append('dump', file);
+    if (options?.artifactOnly) {
+      form.append('artifactOnly', 'true');
+    }
     return api
       .post<SqlDumpScanResult>('/admin/databases/scan', form, {
         headers: { 'Content-Type': 'multipart/form-data' },

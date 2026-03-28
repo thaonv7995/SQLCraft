@@ -924,6 +924,10 @@ export function materializeDerivedSqlDumpArtifacts(params: {
     return [];
   }
 
+  if (!definition.tables?.length) {
+    return [];
+  }
+
   const normalizedSourceSql = normalizeSql(sourceSql.toString('utf8'));
   const { segments, rowsByTable, schemaTables } = parseDumpSegments(normalizedSourceSql, definition);
 

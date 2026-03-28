@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
 import {
   adminDeleteChallenge,
   adminUpdateChallenge,
@@ -700,12 +701,13 @@ async function persistCanonicalDatabaseImport(
 export async function scanSqlDump(
   fileName: string,
   buffer: Buffer,
+  options?: { artifactOnly?: boolean },
 ): Promise<SqlDumpScanResult> {
   if (!/\.sql$/i.test(fileName)) {
     throw new ValidationError('Only .sql dump files are supported');
   }
 
-  return createStoredSqlDumpScan(buffer, fileName);
+  return createStoredSqlDumpScan(buffer, fileName, options);
 }
 
 export async function listPendingScans(query: ListPendingScansQuery) {
@@ -742,6 +744,13 @@ export async function importCanonicalDatabase(
   const reviewedEngineVersion =
     body.engineVersion ?? storedScan.inferredEngineVersion ?? null;
 
+  const normalizedEngine = normalizeSchemaSqlEngine(reviewedDialect);
+  const isArtifactOnlyScan = Boolean(
+    storedScan.artifactOnly ?? storedScan.definition.metadata.artifactOnly,
+  );
+  const allowDerivedMaterialization =
+    normalizedEngine === 'postgresql' && !isArtifactOnlyScan;
+
   let materializedDerivedDatasets:
     | Array<{
         size: 'tiny' | 'small' | 'medium' | 'large';
@@ -751,32 +760,34 @@ export async function importCanonicalDatabase(
     | undefined;
 
   try {
-    const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, storedScan.rowCounts);
-    if (requestedDerivedDatasets.length > 0) {
-      const [{ readFile, uploadFile }, { config }] = await Promise.all([
-        import('../../lib/storage'),
-        import('../../lib/config'),
-      ]);
-      const sourceSql = await readFile(storedScan.artifactObjectName);
-      const derivedArtifacts = materializeDerivedSqlDumpArtifacts({
-        sourceSql,
-        definition: storedScan.definition,
-        derivedDatasets: requestedDerivedDatasets,
-      });
+    if (allowDerivedMaterialization) {
+      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, storedScan.rowCounts);
+      if (requestedDerivedDatasets.length > 0) {
+        const [{ readFile, uploadFile }, { config }] = await Promise.all([
+          import('../../lib/storage'),
+          import('../../lib/config'),
+        ]);
+        const sourceSql = await readFile(storedScan.artifactObjectName);
+        const derivedArtifacts = materializeDerivedSqlDumpArtifacts({
+          sourceSql,
+          definition: storedScan.definition,
+          derivedDatasets: requestedDerivedDatasets,
+        });
 
-      materializedDerivedDatasets = (
-        await Promise.all(
-          derivedArtifacts.map(async (artifact) => {
-            const objectName = makeDerivedSqlArtifactObjectName(storedScan.scanId, artifact.size);
-            await uploadFile(objectName, artifact.buffer, 'application/gzip');
-            return {
-              size: artifact.size,
-              rowCounts: artifact.rowCounts,
-              artifactUrl: `s3://${config.STORAGE_BUCKET}/${objectName}`,
-            };
-          }),
-        )
-      ).filter((artifact) => sumDatasetRowCounts(artifact.rowCounts) > 0);
+        materializedDerivedDatasets = (
+          await Promise.all(
+            derivedArtifacts.map(async (artifact) => {
+              const objectName = makeDerivedSqlArtifactObjectName(storedScan.scanId, artifact.size);
+              await uploadFile(objectName, artifact.buffer, 'application/gzip');
+              return {
+                size: artifact.size,
+                rowCounts: artifact.rowCounts,
+                artifactUrl: `s3://${config.STORAGE_BUCKET}/${objectName}`,
+              };
+            }),
+          )
+        ).filter((artifact) => sumDatasetRowCounts(artifact.rowCounts) > 0);
+      }
     }
   } catch (error) {
     console.warn('Failed to materialize derived SQL dump artifacts from scan import', {
@@ -802,7 +813,7 @@ export async function importCanonicalDatabase(
       rowCounts: storedScan.rowCounts,
       artifactUrl: storedScan.artifactUrl,
     },
-    generateDerivedDatasets: true,
+    generateDerivedDatasets: allowDerivedMaterialization,
     status: 'published',
     dialect: reviewedDialect,
     engineVersion: reviewedEngineVersion,

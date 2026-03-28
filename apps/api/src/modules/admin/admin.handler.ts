@@ -255,22 +255,35 @@ export async function scanSqlDumpHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const file = await request.file({
-    limits: {
-      fileSize: 400 * 1024 * 1024,
-    },
-  });
+  const multipartLimits = {
+    limits: { fileSize: 400 * 1024 * 1024 },
+  };
 
-  if (!file) {
+  let dumpBuffer: Buffer | null = null;
+  let dumpFileName = '';
+  let artifactOnly = false;
+
+  for await (const part of request.parts(multipartLimits)) {
+    if (part.type === 'file') {
+      if (!dumpBuffer) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of part.file) {
+          chunks.push(chunk);
+        }
+        dumpBuffer = Buffer.concat(chunks);
+        dumpFileName = part.filename;
+      }
+    } else if (part.type === 'field' && part.fieldname === 'artifactOnly') {
+      const raw = String(part.value).trim().toLowerCase();
+      artifactOnly = raw === 'true' || raw === '1' || raw === 'yes';
+    }
+  }
+
+  if (!dumpBuffer || !dumpFileName) {
     throw new ValidationError('No SQL dump uploaded');
   }
 
-  const chunks: Buffer[] = [];
-  for await (const chunk of file.file) {
-    chunks.push(chunk);
-  }
-
-  const result = await scanSqlDump(file.filename, Buffer.concat(chunks));
+  const result = await scanSqlDump(dumpFileName, dumpBuffer, { artifactOnly });
   reply.send(success(result, 'SQL dump scanned successfully'));
 }
 

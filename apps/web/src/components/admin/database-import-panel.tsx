@@ -69,6 +69,8 @@ export function DatabaseImportPanel({
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeLoading, setResumeLoading] = useState(false);
+  /** When true, next scan skips strict CREATE TABLE parsing (MySQL/SQL Server dumps, odd DDL). */
+  const [skipStrictSchemaScan, setSkipStrictSchemaScan] = useState(false);
 
   const applyScanResult = useCallback((result: SqlDumpScanResult) => {
     setScanResult(result);
@@ -82,6 +84,7 @@ export function DatabaseImportPanel({
     setTags('');
     setImportSuccess(null);
     setSelectedFile(null);
+    setSkipStrictSchemaScan(Boolean(result.artifactOnly));
   }, []);
 
   useEffect(() => {
@@ -112,7 +115,8 @@ export function DatabaseImportPanel({
   }, [resumeScanId, applyScanResult, onResumeConsumed]);
 
   const scanMutation = useMutation({
-    mutationFn: (file: File) => databasesApi.scanSqlDump(file),
+    mutationFn: ({ file, artifactOnly }: { file: File; artifactOnly: boolean }) =>
+      databasesApi.scanSqlDump(file, { artifactOnly }),
     onSuccess(result) {
       applyScanResult(result);
     },
@@ -141,6 +145,7 @@ export function DatabaseImportPanel({
     setDescription('');
     setTags('');
     setImportSuccess(null);
+    setSkipStrictSchemaScan(false);
   };
 
   const tablePreview = useMemo(
@@ -159,7 +164,7 @@ export function DatabaseImportPanel({
       return;
     }
 
-    scanMutation.mutate(selectedFile);
+    scanMutation.mutate({ file: selectedFile, artifactOnly: skipStrictSchemaScan });
   };
 
   const handleImport = () => {
@@ -228,6 +233,20 @@ export function DatabaseImportPanel({
             />
           </label>
 
+          <label className="flex cursor-pointer items-start gap-2 text-sm text-on-surface">
+            <input
+              type="checkbox"
+              checked={skipStrictSchemaScan}
+              onChange={(e) => setSkipStrictSchemaScan(e.target.checked)}
+              className="mt-0.5 size-4 rounded border-outline-variant"
+            />
+            <span>
+              Skip strict schema scan — store the file as the canonical SQL artifact only (no table
+              graph). Choose the correct SQL dialect below before publishing. Use for MySQL, SQL Server,
+              or dumps our parser does not understand.
+            </span>
+          </label>
+
           <div className="flex justify-end">
             <Button
               variant="secondary"
@@ -247,6 +266,13 @@ export function DatabaseImportPanel({
 
           {scanResult ? (
             <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-4">
+              {scanResult.artifactOnly ? (
+                <p className="mb-3 rounded-lg border border-secondary/30 bg-secondary/5 px-3 py-2 text-xs text-on-surface">
+                  Artifact-only scan: schema was not parsed. The full dump will be restored in the
+                  sandbox; confirm dialect and engine version before publishing. Derived tiny/small
+                  datasets are not generated for non-PostgreSQL or artifact-only imports.
+                </p>
+              ) : null}
               <p className="text-xs uppercase tracking-[0.35em] text-outline">Scan Summary</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div>

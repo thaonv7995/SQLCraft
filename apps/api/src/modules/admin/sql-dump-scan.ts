@@ -29,6 +29,9 @@ export interface SqlDumpTableSummary {
   columns: SqlDumpColumnSummary[];
 }
 
+/** Placeholder row-count key when strict CREATE TABLE parsing is skipped (canonical still valid). */
+export const SQL_DUMP_ARTIFACT_ONLY_PLACEHOLDER_TABLE = '__artifact_only__';
+
 export interface SqlDumpScanResult {
   scanId: string;
   fileName: string;
@@ -47,6 +50,8 @@ export interface SqlDumpScanResult {
   detectedPrimaryKeys: number;
   detectedForeignKeys: number;
   tables: SqlDumpTableSummary[];
+  /** True when upload was stored without parsing CREATE TABLE (canonical SQL artifact only). */
+  artifactOnly?: boolean;
 }
 
 export interface StoredSqlDumpScan extends SqlDumpScanResult {
@@ -79,6 +84,8 @@ export interface StoredSqlDumpScan extends SqlDumpScanResult {
       dialectConfidence: SqlDialectConfidence;
       inferredEngineVersion: string | null;
       scannedAt: string;
+      /** When true, {@link definition.tables} is empty; sandbox relies on self-contained SQL restore. */
+      artifactOnly?: boolean;
     };
   };
   rowCounts: Record<string, number>;
@@ -964,11 +971,87 @@ export function parseSqlDumpBuffer(
   };
 }
 
+/**
+ * Persist the raw dump without strict CREATE TABLE parsing. Dialect/version heuristics still run.
+ * Catalog schema graph stays empty until a future parser or manual definition; sandbox restores the file.
+ */
+export function parseSqlDumpBufferArtifactOnly(
+  buffer: Buffer,
+  fileName: string,
+  scanId: string = randomUUID(),
+): StoredSqlDumpScan {
+  if (buffer.length === 0) {
+    throw new ValidationError('Uploaded SQL dump is empty');
+  }
+
+  const utf8 = buffer.toString('utf8');
+  const { inferredDialect, dialectConfidence } = inferSqlDialectFromDump(utf8);
+  const inferredEngineVersion = inferEngineVersionFromDump(utf8, inferredDialect);
+  const rawSql = normalizeSql(utf8);
+  const databaseName = detectDatabaseName(rawSql);
+  const baseLabel = databaseName ?? fileName.replace(/\.sql$/i, '');
+  const inferredDomain = inferDomain(baseLabel, '');
+  const scannedAt = new Date().toISOString();
+  const artifactObjectName = makeScanSqlObjectName(scanId);
+  const placeholderKey = SQL_DUMP_ARTIFACT_ONLY_PLACEHOLDER_TABLE;
+
+  return {
+    scanId,
+    fileName,
+    databaseName,
+    schemaName: null,
+    domain: inferredDomain,
+    inferredScale: null,
+    inferredDialect,
+    dialectConfidence,
+    inferredEngineVersion,
+    totalTables: 0,
+    totalRows: 1,
+    columnCount: 0,
+    detectedPrimaryKeys: 0,
+    detectedForeignKeys: 0,
+    tables: [],
+    rowCounts: { [placeholderKey]: 1 },
+    artifactObjectName,
+    artifactUrl: '',
+    artifactOnly: true,
+    definition: {
+      tables: [],
+      indexes: [],
+      metadata: {
+        source: 'sql_dump',
+        fileName,
+        databaseName,
+        schemaName: null,
+        totalRows: 1,
+        totalTables: 0,
+        columnCount: 0,
+        detectedPrimaryKeys: 0,
+        detectedForeignKeys: 0,
+        inferredDomain,
+        inferredScale: null,
+        inferredDialect,
+        dialectConfidence,
+        inferredEngineVersion,
+        scannedAt,
+        artifactOnly: true,
+      },
+    },
+  };
+}
+
+export interface CreateStoredSqlDumpScanOptions {
+  artifactOnly?: boolean;
+}
+
 export async function createStoredSqlDumpScan(
   buffer: Buffer,
   fileName: string,
+  options?: CreateStoredSqlDumpScanOptions,
 ): Promise<SqlDumpScanResult> {
-  const scan = parseSqlDumpBuffer(buffer, fileName);
+  const scan = options?.artifactOnly
+    ? parseSqlDumpBufferArtifactOnly(buffer, fileName)
+    : parseSqlDumpBuffer(buffer, fileName);
   const [{ uploadFile }, { config }] = await Promise.all([
     import('../../lib/storage'),
     import('../../lib/config'),
@@ -991,6 +1074,9 @@ export async function createStoredSqlDumpScan(
 
 /** API-safe subset of a stored scan (same shape as POST …/scan). */
 export function toSqlDumpScanResult(persisted: StoredSqlDumpScan): SqlDumpScanResult {
+  const artifactOnly =
+    Boolean(persisted.artifactOnly) ||
+    Boolean(persisted.definition.metadata.artifactOnly);
   return {
     scanId: persisted.scanId,
     fileName: persisted.fileName,
@@ -1007,6 +1093,7 @@ export function toSqlDumpScanResult(persisted: StoredSqlDumpScan): SqlDumpScanRe
     detectedPrimaryKeys: persisted.detectedPrimaryKeys,
     detectedForeignKeys: persisted.detectedForeignKeys,
     tables: persisted.tables,
+    artifactOnly: artifactOnly || undefined,
   };
 }
 
