@@ -1,6 +1,8 @@
+import type { SchemaSqlDialect } from '@sqlcraft/types';
 import type { DatabaseDomain } from '../../lib/infer-database-domain';
 
 export type { DatabaseDomain } from '../../lib/infer-database-domain';
+export type { SchemaSqlDialect } from '@sqlcraft/types';
 
 export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
@@ -35,6 +37,8 @@ export interface DatabaseItem {
   scale: DatabaseScale;
   sourceScale: DatabaseScale;
   difficulty: DatabaseDifficulty;
+  /** Stored template target engine (from import or admin). */
+  dialect: SchemaSqlDialect;
   engine: string;
   domainIcon: string;
   tags: string[];

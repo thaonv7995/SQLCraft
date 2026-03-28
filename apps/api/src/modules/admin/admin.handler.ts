@@ -15,6 +15,8 @@ import type {
   ListSystemJobsQuery,
   ListAuditLogsQuery,
   AdminIdParams,
+  ListPendingScansQuery,
+  SqlDumpScanIdParams,
 } from './admin.schema';
 import {
   AdminConfigSchema,
@@ -23,6 +25,7 @@ import {
   ImportCanonicalDatabaseSchema,
   ListSystemJobsQuerySchema,
   ListAuditLogsQuerySchema,
+  ListPendingScansQuerySchema,
   UpdateAdminUserSchema,
 } from './admin.schema';
 import {
@@ -46,6 +49,8 @@ import {
   recordAuditLog,
   resetAdminConfig,
   scanSqlDump,
+  listPendingScans,
+  getAdminSqlDumpScan,
   updateAdminConfig,
 } from './admin.service';
 
@@ -267,6 +272,23 @@ export async function scanSqlDumpHandler(
 
   const result = await scanSqlDump(file.filename, Buffer.concat(chunks));
   reply.send(success(result, 'SQL dump scanned successfully'));
+}
+
+export async function listPendingScansHandler(
+  request: FastifyRequest<{ Querystring: ListPendingScansQuery }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const query = ListPendingScansQuerySchema.parse(request.query);
+  const result = await listPendingScans(query);
+  reply.send(success(result, 'Pending SQL dump scans retrieved'));
+}
+
+export async function getSqlDumpScanHandler(
+  request: FastifyRequest<{ Params: SqlDumpScanIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await getAdminSqlDumpScan(request.params.scanId);
+  reply.send(success(result, 'SQL dump scan retrieved'));
 }
 
 export async function listSystemJobsHandler(

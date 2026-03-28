@@ -64,6 +64,20 @@
       "when": 1774508403000,
       "tag": "0008_challenges_dataset_scale",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1774508404000,
+      "tag": "0009_schema_templates_dialect",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1774508405000,
+      "tag": "0010_schema_engines_and_sandbox_columns",
+      "breakpoints": true
     }
   ]
 }

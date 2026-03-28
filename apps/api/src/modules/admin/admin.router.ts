@@ -11,6 +11,8 @@ import type {
   ListSystemJobsQuery,
   ListAuditLogsQuery,
   AdminIdParams,
+  ListPendingScansQuery,
+  SqlDumpScanIdParams,
 } from './admin.schema';
 import {
   createAdminUserHandler,
@@ -32,6 +34,8 @@ import {
   listAuditLogsHandler,
   resetAdminConfigHandler,
   scanSqlDumpHandler,
+  listPendingScansHandler,
+  getSqlDumpScanHandler,
   updateAdminConfigHandler,
 } from './admin.handler';
 
@@ -318,6 +322,44 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
 
   // ─── Database Imports ───────────────────────────────────────────────────────
 
+  fastify.get<{ Querystring: ListPendingScansQuery }>(
+    '/v1/admin/databases/pending-scans',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List SQL dumps scanned in storage but not necessarily imported yet',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 50, default: 12 },
+          },
+        },
+      },
+    },
+    listPendingScansHandler,
+  );
+
+  fastify.get<{ Params: SqlDumpScanIdParams }>(
+    '/v1/admin/databases/scans/:scanId',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Load a stored SQL dump scan result by id (same shape as POST …/scan)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['scanId'],
+          properties: { scanId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    getSqlDumpScanHandler,
+  );
+
   fastify.delete<{ Params: AdminIdParams }>(
     '/v1/admin/databases/:id',
     {
@@ -387,6 +429,28 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
                   type: 'string',
                   enum: ['draft', 'published', 'archived'],
                 },
+                dialect: {
+                  type: 'string',
+                  enum: [
+                    'postgresql',
+                    'mysql',
+                    'mariadb',
+                    'sqlserver',
+                    'sqlite',
+                    'postgresql-16',
+                    'mysql-8',
+                    'sqlite-3',
+                  ],
+                  description:
+                    'SQL engine family; legacy values like postgresql-16 are normalized server-side',
+                },
+                engineVersion: {
+                  type: 'string',
+                  nullable: true,
+                  maxLength: 64,
+                  description:
+                    'Server version from dump (e.g. 16.2) or override; null uses platform default for sandbox image',
+                },
               },
             },
             {
@@ -407,6 +471,26 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
                 tags: {
                   type: 'array',
                   items: { type: 'string' },
+                },
+                dialect: {
+                  type: 'string',
+                  enum: [
+                    'postgresql',
+                    'mysql',
+                    'mariadb',
+                    'sqlserver',
+                    'sqlite',
+                    'postgresql-16',
+                    'mysql-8',
+                    'sqlite-3',
+                  ],
+                  description: 'Overrides inferred dialect from SQL dump scan when set',
+                },
+                engineVersion: {
+                  type: 'string',
+                  nullable: true,
+                  maxLength: 64,
+                  description: 'Overrides inferred engine version from dump header when set',
                 },
               },
             },

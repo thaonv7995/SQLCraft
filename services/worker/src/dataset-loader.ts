@@ -2,10 +2,13 @@ import { gunzipSync } from 'node:zlib';
 import { readFile } from 'node:fs/promises';
 import pino from 'pino';
 import type { DatasetTemplateDefinition, SchemaDefinition } from './db';
+import type { SchemaSqlEngine } from '@sqlcraft/types';
 import {
   readS3ObjectViaMinioContainer,
+  runMysqlInSandboxContainer,
   runPgRestoreInSandboxContainer,
   runPsqlInSandboxContainer,
+  runSqlcmdInSandboxContainer,
 } from './docker';
 
 interface ColumnMeta {
@@ -384,13 +387,37 @@ async function restoreFromArtifact(params: {
   logger: pino.Logger;
   containerRef: string;
   dbUser: string;
+  dbPassword: string;
   dbName: string;
   artifactUrl: string;
+  engine: SchemaSqlEngine;
+  mssqlSaPassword: string;
 }): Promise<boolean> {
-  const { logger, containerRef, dbUser, dbName, artifactUrl } = params;
+  const { logger, containerRef, dbUser, dbPassword, dbName, artifactUrl, engine, mssqlSaPassword } =
+    params;
   const inlineSql = maybeExtractInlineSql(artifactUrl);
+
   if (inlineSql) {
-    await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: inlineSql });
+    if (engine === 'postgresql') {
+      await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: inlineSql });
+    } else if (engine === 'mysql' || engine === 'mariadb') {
+      await runMysqlInSandboxContainer({
+        containerRef,
+        dbUser,
+        dbPassword,
+        dbName,
+        sql: inlineSql,
+      });
+    } else if (engine === 'sqlserver') {
+      await runSqlcmdInSandboxContainer({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+        sql: inlineSql,
+      });
+    } else {
+      return false;
+    }
     logger.info('Dataset restored from inline SQL artifact');
     return true;
   }
@@ -404,24 +431,61 @@ async function restoreFromArtifact(params: {
   const bytes = await readArtifactBytes(artifactRef);
 
   if (extension === '.sql') {
-    await runPsqlInSandboxContainer({
-      containerRef,
-      dbUser,
-      dbName,
-      sql: bytes,
-    });
+    if (engine === 'postgresql') {
+      await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: bytes });
+    } else if (engine === 'mysql' || engine === 'mariadb') {
+      await runMysqlInSandboxContainer({
+        containerRef,
+        dbUser,
+        dbPassword,
+        dbName,
+        sql: bytes,
+      });
+    } else if (engine === 'sqlserver') {
+      await runSqlcmdInSandboxContainer({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+        sql: bytes,
+      });
+    } else {
+      return false;
+    }
     logger.info({ artifactRef }, 'Dataset restored from .sql artifact');
     return true;
   }
 
   if (extension === '.sql.gz') {
-    const sql = gunzipSync(bytes);
-    await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql });
+    const sqlBuf = gunzipSync(bytes);
+    if (engine === 'postgresql') {
+      await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: sqlBuf });
+    } else if (engine === 'mysql' || engine === 'mariadb') {
+      await runMysqlInSandboxContainer({
+        containerRef,
+        dbUser,
+        dbPassword,
+        dbName,
+        sql: sqlBuf,
+      });
+    } else if (engine === 'sqlserver') {
+      await runSqlcmdInSandboxContainer({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+        sql: sqlBuf,
+      });
+    } else {
+      return false;
+    }
     logger.info({ artifactRef }, 'Dataset restored from .sql.gz artifact');
     return true;
   }
 
   if (extension === '.dump' || extension === '.backup' || extension === '.tar') {
+    if (engine !== 'postgresql') {
+      logger.warn({ artifactRef, engine }, 'pg_restore artifacts require PostgreSQL sandbox');
+      return false;
+    }
     await runPgRestoreInSandboxContainer({
       containerRef,
       dbUser,
@@ -439,12 +503,26 @@ export async function loadDatasetIntoSandbox(params: {
   logger: pino.Logger;
   containerRef: string;
   dbUser: string;
+  dbPassword: string;
   dbName: string;
+  engine: SchemaSqlEngine;
+  mssqlSaPassword: string;
   datasetTemplate: DatasetTemplateDefinition;
   schema: SchemaDefinition | null;
   ensureSchemaApplied?: () => Promise<void>;
 }): Promise<void> {
-  const { logger, containerRef, dbUser, dbName, datasetTemplate, schema, ensureSchemaApplied } = params;
+  const {
+    logger,
+    containerRef,
+    dbUser,
+    dbPassword,
+    dbName,
+    engine,
+    mssqlSaPassword,
+    datasetTemplate,
+    schema,
+    ensureSchemaApplied,
+  } = params;
 
   if (datasetTemplate.artifactUrl) {
     try {
@@ -452,8 +530,11 @@ export async function loadDatasetIntoSandbox(params: {
         logger,
         containerRef,
         dbUser,
+        dbPassword,
         dbName,
         artifactUrl: datasetTemplate.artifactUrl,
+        engine,
+        mssqlSaPassword,
       });
       if (restored) {
         return;
@@ -472,14 +553,18 @@ export async function loadDatasetIntoSandbox(params: {
 
   await ensureSchemaApplied?.();
 
-  await applySyntheticSeedFromRowCounts({
-    logger,
-    containerRef,
-    dbUser,
-    dbName,
-    schema,
-    rowCounts: datasetTemplate.rowCounts,
-  });
+  if (engine === 'postgresql') {
+    await applySyntheticSeedFromRowCounts({
+      logger,
+      containerRef,
+      dbUser,
+      dbName,
+      schema,
+      rowCounts: datasetTemplate.rowCounts,
+    });
+  } else {
+    logger.info({ engine }, 'Skipping synthetic rowCounts seed (PostgreSQL-only)');
+  }
 }
 
 export const __private__ = {

@@ -1,3 +1,4 @@
+import type { SchemaSqlDialect } from '@sqlcraft/types';
 import axios, {
   type AxiosError,
   type AxiosInstance,
@@ -5,6 +6,8 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios';
 import { getExplainPlanMode } from './utils';
+
+export type { SchemaSqlDialect } from '@sqlcraft/types';
 
 declare module 'axios' {
   // Preserve Axios generics while extending request config with a local flag.
@@ -759,7 +762,7 @@ export interface ClearStaleSessionsResult {
 
 export interface AdminConfig {
   platform: {
-    defaultDialect: 'postgresql-16' | 'mysql-8' | 'sqlite-3';
+    defaultDialect: SchemaSqlDialect;
     defaultChallengePoints: string;
     sessionTimeoutMinutes: string;
     dailyQueryBudget: string;
@@ -923,6 +926,7 @@ export interface Database {
   domain: DatabaseDomain;
   scale: DatabaseScale;
   difficulty: DatabaseDifficulty;
+  dialect?: SchemaSqlDialect;
   engine: string;
   domainIcon: string;
   tags: string[];
@@ -991,6 +995,8 @@ export interface SqlDumpTableSummary {
   columns: SqlDumpColumnSummary[];
 }
 
+export type SqlDialectConfidence = 'high' | 'medium' | 'low';
+
 export interface SqlDumpScanResult {
   scanId: string;
   fileName: string;
@@ -998,6 +1004,10 @@ export interface SqlDumpScanResult {
   schemaName?: string | null;
   domain: DatabaseDomain;
   inferredScale?: DatasetScale | null;
+  inferredDialect: SchemaSqlDialect;
+  dialectConfidence: SqlDialectConfidence;
+  /** From dump header when present; used for sandbox Postgres image major. */
+  inferredEngineVersion?: string | null;
   totalTables: number;
   totalRows: number;
   columnCount: number;
@@ -1013,12 +1023,31 @@ export interface SqlDumpImportPayload {
   datasetScale?: DatasetScale | null;
   description?: string | null;
   tags?: string[];
+  /** Overrides scan {@link SqlDumpScanResult.inferredDialect} when the heuristic was wrong. */
+  dialect?: SchemaSqlDialect;
+  /** Non-empty string overrides {@link SqlDumpScanResult.inferredEngineVersion}. Omit to use scan value. */
+  engineVersion?: string | null;
 }
 
 export interface SqlDumpImportResult {
   schemaTemplateId: string;
   datasetTemplateId?: string | null;
   databaseId?: string;
+}
+
+export interface PendingSqlDumpScanItem {
+  scanId: string;
+  fileName: string;
+  lastModified: string | null;
+  imported: boolean;
+}
+
+export interface PendingSqlDumpScansPage {
+  items: PendingSqlDumpScanItem[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
 }
 
 export interface DeleteDatabaseResult {
@@ -1986,6 +2015,9 @@ export const databasesApi = {
     domain?: string;
     scale?: string;
     difficulty?: string;
+    dialect?: string;
+    /** Substring search on name, slug, description, engine, tags */
+    q?: string;
     page?: number;
     limit?: number;
   }) =>
@@ -2021,6 +2053,14 @@ export const databasesApi = {
     api
       .post<SqlDumpImportResult>('/admin/databases/import', payload)
       .then((r) => normalizeSqlDumpImportResult(r.data)),
+
+  listPendingScans: (params?: { page?: number; limit?: number }) =>
+    api
+      .get<PendingSqlDumpScansPage>('/admin/databases/pending-scans', { params })
+      .then((r) => r.data),
+
+  getSqlDumpScan: (scanId: string) =>
+    api.get<SqlDumpScanResult>(`/admin/databases/scans/${scanId}`).then((r) => r.data),
 };
 
 // ─── Leaderboard API ──────────────────────────────────────────────────────────

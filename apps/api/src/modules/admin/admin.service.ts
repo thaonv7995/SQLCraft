@@ -34,6 +34,7 @@ import type {
   SqlDumpScanImportBody,
   ListSystemJobsQuery,
   ListAuditLogsQuery,
+  ListPendingScansQuery,
 } from './admin.schema';
 import type {
   AdminConfigResult,
@@ -57,6 +58,7 @@ import {
   createStoredSqlDumpScan,
   loadStoredSqlDumpScan,
 } from './sql-dump-scan';
+import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 
 const ADMIN_CONFIG_SCOPE = 'global';
@@ -602,6 +604,8 @@ async function persistCanonicalDatabaseImport(
     name: body.name,
     description: body.description,
     version: (latestSchema?.version ?? 0) + 1,
+    dialect: body.dialect,
+    engineVersion: body.engineVersion ?? null,
     definition: body.definition,
     status: body.status,
     createdBy: userId,
@@ -704,6 +708,18 @@ export async function scanSqlDump(
   return createStoredSqlDumpScan(buffer, fileName);
 }
 
+export async function listPendingScans(query: ListPendingScansQuery) {
+  return listPendingSqlDumpScans({ page: query.page, limit: query.limit });
+}
+
+export async function getAdminSqlDumpScan(scanId: string): Promise<SqlDumpScanResult> {
+  const result = await getSqlDumpScanById(scanId);
+  if (!result) {
+    throw new NotFoundError('SQL dump scan not found or has expired');
+  }
+  return result;
+}
+
 export async function importCanonicalDatabase(
   userId: string,
   body: ImportCanonicalDatabaseBody,
@@ -721,6 +737,10 @@ export async function importCanonicalDatabase(
     body.datasetScale ??
     storedScan.inferredScale ??
     classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(storedScan.rowCounts));
+
+  const reviewedDialect = body.dialect ?? storedScan.inferredDialect ?? 'postgresql';
+  const reviewedEngineVersion =
+    body.engineVersion ?? storedScan.inferredEngineVersion ?? null;
 
   let materializedDerivedDatasets:
     | Array<{
@@ -771,6 +791,8 @@ export async function importCanonicalDatabase(
     definition: mergeDefinitionMetadata(storedScan.definition, {
       reviewedDomain: body.domain,
       reviewedScale: sourceScale,
+      reviewedDialect,
+      reviewedEngineVersion,
       tags: body.tags ?? [],
       scanId: storedScan.scanId,
       sourceArtifactUrl: storedScan.artifactUrl,
@@ -782,6 +804,8 @@ export async function importCanonicalDatabase(
     },
     generateDerivedDatasets: true,
     status: 'published',
+    dialect: reviewedDialect,
+    engineVersion: reviewedEngineVersion,
   }, {
     materializedDerivedDatasets,
   });

@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import { Input } from '@/components/ui/input';
 import { databasesApi } from '@/lib/api';
 import type { Database } from '@/lib/api';
 import {
   DATABASE_DIFFICULTY_STYLES,
+  DATABASE_DIALECT_OPTIONS,
+  DATABASE_DIFFICULTY_FILTER_OPTIONS,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
   databaseScaleDisplayLabelFromRowCount,
@@ -49,9 +52,10 @@ function DatabaseCard({ db, onClick }: { db: Database; onClick: () => void }) {
       <h3 className="font-headline text-base font-bold text-on-surface group-hover:text-primary transition-colors mb-1.5">
         {db.name}
       </h3>
-      <p className="text-xs text-outline leading-relaxed line-clamp-2 mb-4">
+      <p className="text-xs text-outline leading-relaxed line-clamp-2 mb-2">
         {db.description}
       </p>
+      <p className="text-[10px] font-mono text-outline/80 mb-4 truncate">{db.engine}</p>
 
       {/* Tags */}
       <div className="flex items-center gap-1.5 mb-4 flex-wrap">
@@ -139,10 +143,26 @@ function FilterSelect({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const EXPLORE_PAGE_SIZE = 12;
+
 export default function ExplorePage(_props: ClientPageProps) {
   const router = useRouter();
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');
+  const [difficulty, setDifficulty] = useState('all');
+  const [dialect, setDialect] = useState('all');
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
+  const [catalogPage, setCatalogPage] = useState(1);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setCatalogPage(1);
+  }, [domain, scale, difficulty, dialect, debouncedQ]);
 
   const {
     data: apiData,
@@ -151,16 +171,22 @@ export default function ExplorePage(_props: ClientPageProps) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['databases', domain, scale],
+    queryKey: ['databases', domain, scale, difficulty, dialect, debouncedQ, catalogPage],
     queryFn: () =>
       databasesApi.list({
         domain: domain === 'all' ? undefined : domain,
         scale: scale === 'all' ? undefined : scale,
-    }),
+        difficulty: difficulty === 'all' ? undefined : difficulty,
+        dialect: dialect === 'all' ? undefined : dialect,
+        q: debouncedQ || undefined,
+        page: catalogPage,
+        limit: EXPLORE_PAGE_SIZE,
+      }),
     staleTime: 60_000,
   });
 
   const filtered = apiData?.items ?? [];
+  const totalMatching = apiData?.total ?? filtered.length;
 
   return (
     <div className="page-shell page-stack">
@@ -176,16 +202,31 @@ export default function ExplorePage(_props: ClientPageProps) {
       </div>
 
       {/* Filters row */}
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="font-headline text-xl font-medium flex items-center gap-2">
+      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <h2 className="font-headline flex items-center gap-2 text-xl font-medium">
           <span className="w-1.5 h-6 bg-tertiary rounded-full shrink-0" />
           Available Databases
-          <span className="text-sm font-normal text-outline ml-1">({filtered.length})</span>
+          <span className="text-sm font-normal text-outline ml-1">({totalMatching})</span>
         </h2>
 
-        <div className="flex items-center gap-2">
-          <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
-          <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
+        <div className="flex w-full max-w-3xl flex-col gap-3 sm:max-w-none sm:items-end">
+          <Input
+            label="Search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Name, engine, tags…"
+            className="min-w-[12rem] sm:w-64"
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
+            <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
+            <FilterSelect
+              value={difficulty}
+              onChange={setDifficulty}
+              options={DATABASE_DIFFICULTY_FILTER_OPTIONS}
+            />
+            <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
+          </div>
         </div>
       </div>
 
@@ -213,18 +254,45 @@ export default function ExplorePage(_props: ClientPageProps) {
         <div className="bg-surface-container-low rounded-xl p-16 flex flex-col items-center text-center">
           <span className="material-symbols-outlined text-4xl text-outline mb-3">search_off</span>
           <p className="text-sm font-medium text-on-surface mb-1">No databases found</p>
-          <p className="text-xs text-on-surface-variant">Try a different domain or scale filter.</p>
+          <p className="text-xs text-on-surface-variant">
+            Try different filters or clear the search box.
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((db) => (
-            <DatabaseCard
-              key={db.id}
-              db={db}
-              onClick={() => router.push(`/explore/${db.id}`)}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filtered.map((db) => (
+              <DatabaseCard
+                key={db.id}
+                db={db}
+                onClick={() => router.push(`/explore/${db.id}`)}
+              />
+            ))}
+          </div>
+          {apiData && apiData.totalPages > 1 ? (
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                disabled={catalogPage <= 1}
+                onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-outline-variant/20 bg-surface-container-high px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-xs text-on-surface-variant">
+                Page {apiData.page} / {apiData.totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={catalogPage >= apiData.totalPages}
+                onClick={() => setCatalogPage((p) => p + 1)}
+                className="rounded-lg border border-outline-variant/20 bg-surface-container-high px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-highest disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );

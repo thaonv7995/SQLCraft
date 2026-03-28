@@ -1,13 +1,13 @@
 import { execFile } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { SchemaSqlEngine } from '@sqlcraft/types';
 
 const execFileAsync = promisify(execFile);
 
 const configuredSandboxDockerNetwork = process.env.SANDBOX_DOCKER_NETWORK?.trim();
 const stackName = process.env.STACK_NAME?.trim() || 'sqlcraft';
 const fallbackSandboxDockerNetwork = `${stackName}-prod`;
-const sandboxPostgresImage = process.env.SANDBOX_POSTGRES_IMAGE ?? 'postgres:16-alpine';
 const sandboxPostgresMaxWalSize = process.env.SANDBOX_POSTGRES_MAX_WAL_SIZE ?? '4GB';
 const sandboxPostgresMinWalSize = process.env.SANDBOX_POSTGRES_MIN_WAL_SIZE ?? '1GB';
 const sandboxPostgresCheckpointTimeout =
@@ -172,21 +172,32 @@ export async function ensureSandboxContainerRemoved(containerRef: string): Promi
   }
 }
 
-export async function createSandboxContainer(params: {
+export async function createSandboxEngineContainer(params: {
   containerRef: string;
+  engine: SchemaSqlEngine;
   dbName: string;
   dbUser: string;
   dbPassword: string;
   sandboxId: string;
+  dockerImage: string;
+  /** SQL Server only: SA password (must meet complexity rules). */
+  mssqlSaPassword?: string;
 }): Promise<void> {
-  const { containerRef, dbName, dbUser, dbPassword, sandboxId } = params;
+  const {
+    containerRef,
+    engine,
+    dbName,
+    dbUser,
+    dbPassword,
+    sandboxId,
+    dockerImage,
+    mssqlSaPassword,
+  } = params;
   const sandboxDockerNetwork = await resolveSandboxDockerNetwork();
 
   await ensureSandboxContainerRemoved(containerRef);
 
-  // Sandboxes are short-lived and spend most provisioning time bulk-loading fixtures.
-  // Looser checkpointing + compressed WAL cuts restore/seed time without changing SQL behavior.
-  await runDocker([
+  const baseArgs = [
     'run',
     '-d',
     '--name',
@@ -199,29 +210,91 @@ export async function createSandboxContainer(params: {
     'sqlcraft.managed=true',
     '--label',
     `sqlcraft.sandbox_id=${sandboxId}`,
-    '-e',
-    `POSTGRES_USER=${dbUser}`,
-    '-e',
-    `POSTGRES_PASSWORD=${dbPassword}`,
-    '-e',
-    `POSTGRES_DB=${dbName}`,
-    sandboxPostgresImage,
-    'postgres',
-    '-c',
-    'listen_addresses=*',
-    '-c',
-    `max_wal_size=${sandboxPostgresMaxWalSize}`,
-    '-c',
-    `min_wal_size=${sandboxPostgresMinWalSize}`,
-    '-c',
-    `checkpoint_timeout=${sandboxPostgresCheckpointTimeout}`,
-    '-c',
-    `checkpoint_completion_target=${sandboxPostgresCheckpointCompletionTarget}`,
-    '-c',
-    `wal_compression=${sandboxPostgresWalCompression}`,
-    '-c',
-    `synchronous_commit=${sandboxPostgresSynchronousCommit}`,
-  ]);
+    '--label',
+    `sqlcraft.engine=${engine}`,
+  ];
+
+  if (engine === 'postgresql') {
+    await runDocker([
+      ...baseArgs,
+      '-e',
+      `POSTGRES_USER=${dbUser}`,
+      '-e',
+      `POSTGRES_PASSWORD=${dbPassword}`,
+      '-e',
+      `POSTGRES_DB=${dbName}`,
+      dockerImage,
+      'postgres',
+      '-c',
+      'listen_addresses=*',
+      '-c',
+      `max_wal_size=${sandboxPostgresMaxWalSize}`,
+      '-c',
+      `min_wal_size=${sandboxPostgresMinWalSize}`,
+      '-c',
+      `checkpoint_timeout=${sandboxPostgresCheckpointTimeout}`,
+      '-c',
+      `checkpoint_completion_target=${sandboxPostgresCheckpointCompletionTarget}`,
+      '-c',
+      `wal_compression=${sandboxPostgresWalCompression}`,
+      '-c',
+      `synchronous_commit=${sandboxPostgresSynchronousCommit}`,
+    ]);
+    return;
+  }
+
+  if (engine === 'mysql' || engine === 'mariadb') {
+    await runDocker([
+      ...baseArgs,
+      '-e',
+      `MYSQL_ROOT_PASSWORD=${dbPassword}`,
+      '-e',
+      `MYSQL_DATABASE=${dbName}`,
+      '-e',
+      `MYSQL_USER=${dbUser}`,
+      '-e',
+      `MYSQL_PASSWORD=${dbPassword}`,
+      dockerImage,
+    ]);
+    return;
+  }
+
+  if (engine === 'sqlserver') {
+    const sa = mssqlSaPassword ?? dbPassword;
+    await runDocker([
+      ...baseArgs,
+      '-e',
+      'ACCEPT_EULA=Y',
+      '-e',
+      `MSSQL_SA_PASSWORD=${sa}`,
+      '-e',
+      'MSSQL_PID=Developer',
+      dockerImage,
+    ]);
+    return;
+  }
+
+  throw new Error(`Unsupported sandbox engine for Docker: ${engine}`);
+}
+
+/** @deprecated Use createSandboxEngineContainer */
+export async function createSandboxContainer(params: {
+  containerRef: string;
+  dbName: string;
+  dbUser: string;
+  dbPassword: string;
+  sandboxId: string;
+  postgresImage: string;
+}): Promise<void> {
+  await createSandboxEngineContainer({
+    containerRef: params.containerRef,
+    engine: 'postgresql',
+    dbName: params.dbName,
+    dbUser: params.dbUser,
+    dbPassword: params.dbPassword,
+    sandboxId: params.sandboxId,
+    dockerImage: params.postgresImage,
+  });
 }
 
 export async function waitForSandboxPostgres(params: {
@@ -243,6 +316,131 @@ export async function waitForSandboxPostgres(params: {
   }
 
   throw new Error(`Sandbox container ${containerRef} did not become ready within ${timeoutMs}ms`);
+}
+
+export async function waitForSandboxMysql(params: {
+  containerRef: string;
+  dbUser: string;
+  dbPassword: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  const { containerRef, dbUser, dbPassword, timeoutMs = 90_000 } = params;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await runDocker([
+        'exec',
+        '-e',
+        `MYSQL_PWD=${dbPassword}`,
+        containerRef,
+        'mysqladmin',
+        'ping',
+        '-h',
+        '127.0.0.1',
+        `-u${dbUser}`,
+        '--silent',
+      ]);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  throw new Error(`MySQL/MariaDB sandbox ${containerRef} did not become ready within ${timeoutMs}ms`);
+}
+
+async function sqlcmdSelectOne(
+  containerRef: string,
+  saPassword: string,
+  toolsPath: 'tools18' | 'tools',
+): Promise<void> {
+  const bin =
+    toolsPath === 'tools18'
+      ? '/opt/mssql-tools18/bin/sqlcmd'
+      : '/opt/mssql-tools/bin/sqlcmd';
+  const args =
+    toolsPath === 'tools18'
+      ? ['exec', '-e', `SQLCMDPASSWORD=${saPassword}`, containerRef, bin, '-C', '-S', 'localhost', '-U', 'sa', '-Q', 'SELECT 1', '-b', '-o', '/dev/null']
+      : ['exec', '-e', `SQLCMDPASSWORD=${saPassword}`, containerRef, bin, '-S', 'localhost', '-U', 'sa', '-Q', 'SELECT 1', '-b', '-o', '/dev/null'];
+  await runDocker(args);
+}
+
+export async function waitForSandboxSqlServer(params: {
+  containerRef: string;
+  saPassword: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  const { containerRef, saPassword, timeoutMs = 120_000 } = params;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      try {
+        await sqlcmdSelectOne(containerRef, saPassword, 'tools18');
+      } catch {
+        await sqlcmdSelectOne(containerRef, saPassword, 'tools');
+      }
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  }
+
+  throw new Error(`SQL Server sandbox ${containerRef} did not become ready within ${timeoutMs}ms`);
+}
+
+export async function initSqlServerDatabase(params: {
+  containerRef: string;
+  saPassword: string;
+  dbName: string;
+}): Promise<void> {
+  const { containerRef, saPassword, dbName } = params;
+  const escLiteral = dbName.replace(/'/g, "''");
+  const escBracket = dbName.replace(/\]/g, ']]');
+  const q = `IF DB_ID(N'${escLiteral}') IS NULL CREATE DATABASE [${escBracket}]`;
+  const tryRun = async (toolsPath: 'tools18' | 'tools'): Promise<void> => {
+    const bin =
+      toolsPath === 'tools18'
+        ? '/opt/mssql-tools18/bin/sqlcmd'
+        : '/opt/mssql-tools/bin/sqlcmd';
+    const base =
+      toolsPath === 'tools18'
+        ? ['exec', '-e', `SQLCMDPASSWORD=${saPassword}`, containerRef, bin, '-C', '-S', 'localhost', '-U', 'sa', '-b', '-Q', q]
+        : ['exec', '-e', `SQLCMDPASSWORD=${saPassword}`, containerRef, bin, '-S', 'localhost', '-U', 'sa', '-b', '-Q', q];
+    await runDocker(base);
+  };
+  try {
+    await tryRun('tools18');
+  } catch {
+    await tryRun('tools');
+  }
+}
+
+export async function waitForSandboxEngine(params: {
+  engine: SchemaSqlEngine;
+  containerRef: string;
+  dbUser: string;
+  dbName: string;
+  dbPassword: string;
+  mssqlSaPassword?: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  const { engine, containerRef, dbUser, dbName, dbPassword, mssqlSaPassword, timeoutMs } = params;
+  if (engine === 'postgresql') {
+    await waitForSandboxPostgres({ containerRef, dbUser, dbName, timeoutMs });
+    return;
+  }
+  if (engine === 'mysql' || engine === 'mariadb') {
+    await waitForSandboxMysql({ containerRef, dbUser, dbPassword, timeoutMs });
+    return;
+  }
+  if (engine === 'sqlserver') {
+    const sa = mssqlSaPassword ?? dbPassword;
+    await waitForSandboxSqlServer({ containerRef, saPassword: sa, timeoutMs });
+    return;
+  }
+  throw new Error(`waitForSandboxEngine: unsupported engine ${engine}`);
 }
 
 export async function runPsqlInSandboxContainer(params: {
@@ -282,6 +480,91 @@ export async function runPgRestoreInSandboxContainer(params: {
     ],
     dump,
   );
+}
+
+/** Run mysql client in container (MySQL / MariaDB sandboxes). Uses MYSQL_PWD to avoid shell quoting issues. */
+export async function runMysqlInSandboxContainer(params: {
+  containerRef: string;
+  dbUser: string;
+  dbPassword: string;
+  dbName: string;
+  sql: string | Buffer;
+}): Promise<void> {
+  const { containerRef, dbUser, dbPassword, dbName, sql } = params;
+  await runDockerWithInput(
+    [
+      'exec',
+      '-i',
+      '-e',
+      `MYSQL_PWD=${dbPassword}`,
+      containerRef,
+      'mysql',
+      '--default-character-set=utf8mb4',
+      `-u${dbUser}`,
+      dbName,
+    ],
+    sql,
+  );
+}
+
+export async function runSqlcmdInSandboxContainer(params: {
+  containerRef: string;
+  saPassword: string;
+  dbName: string;
+  sql: string | Buffer;
+}): Promise<void> {
+  const { containerRef, saPassword, dbName, sql } = params;
+  const tryRun = async (toolsPath: 'tools18' | 'tools'): Promise<void> => {
+    const bin =
+      toolsPath === 'tools18'
+        ? '/opt/mssql-tools18/bin/sqlcmd'
+        : '/opt/mssql-tools/bin/sqlcmd';
+    const args =
+      toolsPath === 'tools18'
+        ? [
+            'exec',
+            '-i',
+            '-e',
+            `SQLCMDPASSWORD=${saPassword}`,
+            containerRef,
+            bin,
+            '-C',
+            '-S',
+            'localhost',
+            '-U',
+            'sa',
+            '-d',
+            dbName,
+            '-b',
+            '-I',
+            '-i',
+            '-',
+          ]
+        : [
+            'exec',
+            '-i',
+            '-e',
+            `SQLCMDPASSWORD=${saPassword}`,
+            containerRef,
+            bin,
+            '-S',
+            'localhost',
+            '-U',
+            'sa',
+            '-d',
+            dbName,
+            '-b',
+            '-I',
+            '-i',
+            '-',
+          ];
+    await runDockerWithInput(args, sql);
+  };
+  try {
+    await tryRun('tools18');
+  } catch {
+    await tryRun('tools');
+  }
 }
 
 export async function readS3ObjectViaMinioContainer(artifactRef: string): Promise<Buffer> {

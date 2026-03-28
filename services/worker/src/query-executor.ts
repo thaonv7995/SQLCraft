@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
-import type { QueryResultPreview } from '@sqlcraft/types';
+import mysql from 'mysql2/promise';
+import sql from 'mssql';
+import type { QueryResultPreview, SchemaSqlEngine } from '@sqlcraft/types';
 
 const MAX_ROWS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -33,7 +35,7 @@ export class QueryExecutionFailedError extends Error {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
-const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+const BLOCKED_PATTERNS_COMMON: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^\s*drop\s+(?!index\b)/i, reason: 'DROP statements are not allowed' },
   { pattern: /^\s*truncate\s+/i, reason: 'TRUNCATE statements are not allowed' },
   { pattern: /^\s*create\s+user\b/i, reason: 'CREATE USER is not allowed' },
@@ -41,6 +43,9 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^\s*drop\s+user\b/i, reason: 'DROP USER is not allowed' },
   { pattern: /^\s*grant\b/i, reason: 'GRANT statements are not allowed' },
   { pattern: /^\s*revoke\b/i, reason: 'REVOKE statements are not allowed' },
+];
+
+const BLOCKED_PATTERNS_POSTGRES: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bpg_catalog\b/i, reason: 'Access to pg_catalog is not allowed' },
   { pattern: /\bpg_read_file\b/i, reason: 'pg_read_file is not allowed' },
   { pattern: /\bpg_write_file\b/i, reason: 'pg_write_file is not allowed' },
@@ -49,17 +54,36 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bpg_sleep\b/i, reason: 'pg_sleep is not allowed' },
 ];
 
+const BLOCKED_PATTERNS_SQLSERVER: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\bxp_cmdshell\b/i, reason: 'xp_cmdshell is not allowed' },
+  { pattern: /\bOPENROWSET\b/i, reason: 'OPENROWSET is not allowed' },
+  { pattern: /\bBULK\s+INSERT\b/i, reason: 'BULK INSERT is not allowed' },
+];
+
 export interface SqlValidationResult {
   valid: boolean;
   reason?: string;
 }
 
-export function validateSql(sql: string): SqlValidationResult {
-  const trimmed = sql.trim();
+export function validateSql(
+  sqlText: string,
+  engine: SchemaSqlEngine = 'postgresql',
+): SqlValidationResult {
+  const trimmed = sqlText.trim();
   if (!trimmed) return { valid: false, reason: 'SQL query cannot be empty' };
 
-  for (const { pattern, reason } of BLOCKED_PATTERNS) {
+  for (const { pattern, reason } of BLOCKED_PATTERNS_COMMON) {
     if (pattern.test(trimmed)) return { valid: false, reason };
+  }
+  if (engine === 'postgresql') {
+    for (const { pattern, reason } of BLOCKED_PATTERNS_POSTGRES) {
+      if (pattern.test(trimmed)) return { valid: false, reason };
+    }
+  }
+  if (engine === 'sqlserver') {
+    for (const { pattern, reason } of BLOCKED_PATTERNS_SQLSERVER) {
+      if (pattern.test(trimmed)) return { valid: false, reason };
+    }
   }
 
   const deleteNoWhere = /^\s*delete\s+from\s+[\w"`.]+\s*(?:;?\s*)?$/i;
@@ -287,6 +311,289 @@ function repairExplainPlanResult(result: ExplainResult): ExplainResult {
       actualTime: toFiniteMetric(ps.actualTime) ?? fromRaw.actualTime,
     },
   };
+}
+
+// ─── Multi-engine sandbox targets ─────────────────────────────────────────────
+
+export interface SandboxDbTarget {
+  engine: SchemaSqlEngine;
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+}
+
+function pgConnString(target: SandboxDbTarget): string {
+  const u = encodeURIComponent(target.user);
+  const p = encodeURIComponent(target.password);
+  return `postgresql://${u}:${p}@${target.host}:${target.port}/${target.database}`;
+}
+
+function isMysqlQueryTimeout(code: string | undefined): boolean {
+  return code === 'ER_QUERY_TIMEOUT' || code === '3024';
+}
+
+async function executeSqlMysql(
+  target: SandboxDbTarget,
+  sqlText: string,
+  timeoutMs: number,
+  maxRows: number,
+): Promise<ExecuteSqlResult> {
+  const start = Date.now();
+  const conn = await mysql.createConnection({
+    host: target.host,
+    port: target.port,
+    user: target.user,
+    password: target.password,
+    database: target.database,
+    connectTimeout: Math.min(timeoutMs, 15_000),
+  });
+  try {
+    const cap = Math.min(timeoutMs, 2_147_483_647);
+    await conn.query(`SET SESSION max_execution_time = ${cap}`).catch(() => undefined);
+    const [rows, fields] = await conn.query(sqlText);
+    const durationMs = Date.now() - start;
+
+    if (!Array.isArray(rows)) {
+      const header = rows as mysql.ResultSetHeader;
+      return {
+        columns: [],
+        rows: [],
+        rowCount: header.affectedRows ?? 0,
+        truncated: false,
+        durationMs,
+      };
+    }
+
+    const fieldList = fields as mysql.FieldPacket[] | undefined;
+    const rowObjs = rows as mysql.RowDataPacket[];
+    const columns =
+      fieldList?.map((f) => f.name) ?? (rowObjs[0] ? Object.keys(rowObjs[0] as object) : []);
+    const allRows = rowObjs.map((row) => Object.values(row));
+    const truncated = allRows.length > maxRows;
+    return {
+      columns,
+      rows: truncated ? allRows.slice(0, maxRows) : allRows,
+      rowCount: allRows.length,
+      truncated,
+      durationMs,
+    };
+  } catch (err: unknown) {
+    const e = err as { code?: string; message?: string };
+    const durationMs = Date.now() - start;
+    if (isMysqlQueryTimeout(e.code)) {
+      throw new QueryTimeoutError(`Query exceeded ${timeoutMs}ms timeout`);
+    }
+    throw new QueryExecutionFailedError(e.message ?? 'Query execution failed', { durationMs });
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
+async function executeSqlMssql(
+  target: SandboxDbTarget,
+  sqlText: string,
+  timeoutMs: number,
+  maxRows: number,
+): Promise<ExecuteSqlResult> {
+  const start = Date.now();
+  const pool = new sql.ConnectionPool({
+    user: target.user,
+    password: target.password,
+    server: target.host,
+    database: target.database,
+    port: target.port,
+    options: { encrypt: false, trustServerCertificate: true },
+    connectionTimeout: Math.min(timeoutMs, 60_000),
+    requestTimeout: timeoutMs,
+    pool: { max: 1, min: 0 },
+  });
+  await pool.connect();
+  try {
+    const result = await pool.request().query(sqlText);
+    const durationMs = Date.now() - start;
+    const rs = result.recordset as Record<string, unknown>[] | undefined;
+    if (!rs || !Array.isArray(rs)) {
+      const affected = result.rowsAffected?.[0];
+      return {
+        columns: [],
+        rows: [],
+        rowCount: typeof affected === 'number' ? affected : 0,
+        truncated: false,
+        durationMs,
+      };
+    }
+    const columns = rs.length > 0 ? Object.keys(rs[0]!) : [];
+    const allRows = rs.map((row) => Object.values(row));
+    const truncated = allRows.length > maxRows;
+    return {
+      columns,
+      rows: truncated ? allRows.slice(0, maxRows) : allRows,
+      rowCount: allRows.length,
+      truncated,
+      durationMs,
+    };
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    const durationMs = Date.now() - start;
+    if (/timeout|ETIMEOUT/i.test(e.message ?? '')) {
+      throw new QueryTimeoutError(`Query exceeded ${timeoutMs}ms timeout`);
+    }
+    throw new QueryExecutionFailedError(e.message ?? 'Query execution failed', { durationMs });
+  } finally {
+    await pool.close().catch(() => undefined);
+  }
+}
+
+/** Run user SQL against the provisioned sandbox DB (Postgres, MySQL/MariaDB, SQL Server). */
+export async function executeSqlOnTarget(
+  target: SandboxDbTarget,
+  sqlText: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxRows = MAX_ROWS,
+): Promise<ExecuteSqlResult> {
+  switch (target.engine) {
+    case 'postgresql':
+      return executeSql(pgConnString(target), sqlText, timeoutMs, maxRows);
+    case 'mysql':
+    case 'mariadb':
+      return executeSqlMysql(target, sqlText, timeoutMs, maxRows);
+    case 'sqlserver':
+      return executeSqlMssql(target, sqlText, timeoutMs, maxRows);
+    case 'sqlite':
+      throw new QueryExecutionFailedError('SQLite sandboxes are not supported for remote query execution');
+    default:
+      throw new QueryExecutionFailedError(`Unsupported engine: ${String(target.engine)}`);
+  }
+}
+
+function firstStringCellFromMssqlResult(result: sql.IResult<Record<string, unknown>>): string | null {
+  const raw = result.recordsets;
+  const list: sql.IRecordSet<Record<string, unknown>>[] = Array.isArray(raw)
+    ? raw
+    : Object.values(raw);
+  for (const rs of list) {
+    if (rs.length > 0 && rs[0]) {
+      const v = Object.values(rs[0])[0];
+      if (typeof v === 'string') return v;
+    }
+  }
+  return null;
+}
+
+async function getExplainPlanMysql(
+  target: SandboxDbTarget,
+  sqlText: string,
+  mode: PlanMode,
+): Promise<ExplainResult> {
+  const conn = await mysql.createConnection({
+    host: target.host,
+    port: target.port,
+    user: target.user,
+    password: target.password,
+    database: target.database,
+    connectTimeout: 15_000,
+  });
+  try {
+    const tryExplain = async (q: string): Promise<ExplainResult> => {
+      const [rows] = await conn.query(q);
+      const rowArr = rows as mysql.RowDataPacket[];
+      const first = rowArr[0] as Record<string, unknown> | undefined;
+      let raw: unknown = rowArr;
+      if (first && typeof first === 'object') {
+        const explainVal = first.EXPLAIN ?? first['EXPLAIN'];
+        if (typeof explainVal === 'string') {
+          try {
+            raw = JSON.parse(explainVal) as unknown;
+          } catch {
+            raw = explainVal;
+          }
+        } else if (explainVal != null) {
+          raw = explainVal;
+        }
+      }
+      return repairExplainPlanResult({ rawPlan: raw, planSummary: extractPlanSummary(raw) });
+    };
+
+    if (mode === 'explain_analyze') {
+      try {
+        return await tryExplain(`EXPLAIN ANALYZE ${sqlText}`);
+      } catch {
+        return await tryExplain(`EXPLAIN FORMAT=JSON ${sqlText}`);
+      }
+    }
+    return await tryExplain(`EXPLAIN FORMAT=JSON ${sqlText}`);
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
+async function getExplainPlanMssql(
+  target: SandboxDbTarget,
+  sqlText: string,
+  mode: PlanMode,
+): Promise<ExplainResult> {
+  const pool = new sql.ConnectionPool({
+    user: target.user,
+    password: target.password,
+    server: target.host,
+    database: target.database,
+    port: target.port,
+    options: { encrypt: false, trustServerCertificate: true },
+    connectionTimeout: 30_000,
+    requestTimeout: 60_000,
+    pool: { max: 1, min: 0 },
+  });
+  await pool.connect();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+  try {
+    if (mode === 'explain_analyze') {
+      await new sql.Request(transaction).batch('SET STATISTICS XML ON');
+      const res = await new sql.Request(transaction).query(sqlText);
+      await new sql.Request(transaction).batch('SET STATISTICS XML OFF');
+      const xml = firstStringCellFromMssqlResult(res);
+      return { rawPlan: xml ?? { recordsets: res.recordsets }, planSummary: {} };
+    }
+    await new sql.Request(transaction).batch('SET SHOWPLAN_XML ON');
+    const res = await new sql.Request(transaction).query(sqlText);
+    await new sql.Request(transaction).batch('SET SHOWPLAN_XML OFF');
+    const xml = firstStringCellFromMssqlResult(res);
+    return { rawPlan: xml ?? { recordsets: res.recordsets }, planSummary: {} };
+  } finally {
+    try {
+      await transaction.commit();
+    } catch {
+      await transaction.rollback();
+    }
+    await pool.close().catch(() => undefined);
+  }
+}
+
+export async function getExplainPlanOnTarget(
+  target: SandboxDbTarget,
+  sqlText: string,
+  mode: PlanMode = 'explain',
+): Promise<ExplainResult> {
+  switch (target.engine) {
+    case 'postgresql':
+      return getExplainPlan(pgConnString(target), sqlText, mode);
+    case 'mysql':
+    case 'mariadb':
+      return getExplainPlanMysql(target, sqlText, mode);
+    case 'sqlserver':
+      return getExplainPlanMssql(target, sqlText, mode);
+    default:
+      return { rawPlan: { message: 'EXPLAIN not supported for this engine' }, planSummary: {} };
+  }
+}
+
+export async function probeSandboxConnection(
+  target: SandboxDbTarget,
+  timeoutMs = 20_000,
+): Promise<void> {
+  await executeSqlOnTarget(target, 'SELECT 1', timeoutMs, 1);
 }
 
 export function shapeResults(rawResult: ExecuteSqlResult): QueryResultPreview {

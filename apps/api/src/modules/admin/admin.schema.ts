@@ -1,5 +1,42 @@
+import { normalizeSchemaSqlEngine, SCHEMA_SQL_DIALECT_VALUES } from '@sqlcraft/types';
 import { z } from 'zod';
 import { ChallengeValidatorConfigSchema } from '../challenges/challenge-validator-config.schema';
+
+const schemaSqlDialectTuple = SCHEMA_SQL_DIALECT_VALUES as unknown as [
+  (typeof SCHEMA_SQL_DIALECT_VALUES)[number],
+  ...(typeof SCHEMA_SQL_DIALECT_VALUES)[number][],
+];
+const schemaSqlDialectEnum = z.enum(schemaSqlDialectTuple);
+
+/** Accepts engine family or legacy aliases (e.g. postgresql-16). */
+export const SchemaSqlDialectSchema = z
+  .union([schemaSqlDialectEnum, z.string()])
+  .transform((v) => normalizeSchemaSqlEngine(typeof v === 'string' ? v : v))
+  .pipe(schemaSqlDialectEnum);
+
+export const OptionalSchemaSqlDialectSchema = z
+  .union([schemaSqlDialectEnum, z.string()])
+  .optional()
+  .transform((v) => (v === undefined ? undefined : normalizeSchemaSqlEngine(typeof v === 'string' ? v : v)))
+  .pipe(schemaSqlDialectEnum.optional());
+
+export const SchemaSqlDialectDefaultPostgresqlSchema = z
+  .union([schemaSqlDialectEnum, z.string()])
+  .default('postgresql')
+  .transform((v) => normalizeSchemaSqlEngine(typeof v === 'string' ? v : v))
+  .pipe(schemaSqlDialectEnum);
+
+/** Optional engine version from dump header (e.g. 16.2) or admin override; null/omit = platform default. */
+export const EngineVersionFieldSchema = z
+  .string()
+  .max(64)
+  .nullable()
+  .optional()
+  .transform((v) => {
+    if (v == null) return null;
+    const t = v.trim();
+    return t.length > 0 ? t : null;
+  });
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
@@ -105,6 +142,8 @@ export const DirectCanonicalDatabaseImportSchema = z.object({
   }),
   generateDerivedDatasets: z.boolean().default(true),
   status: z.enum(['draft', 'published', 'archived']).default('published'),
+  dialect: SchemaSqlDialectDefaultPostgresqlSchema,
+  engineVersion: EngineVersionFieldSchema,
 });
 
 export const SqlDumpScanImportSchema = z.object({
@@ -114,6 +153,10 @@ export const SqlDumpScanImportSchema = z.object({
   datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).optional().nullable(),
   description: z.string().optional().nullable(),
   tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+  /** When set, overrides {@link SqlDumpScanResult.inferredDialect} from the scan step. */
+  dialect: OptionalSchemaSqlDialectSchema,
+  /** When set, overrides inferred engine version from the dump scan. */
+  engineVersion: EngineVersionFieldSchema,
 });
 
 export const ImportCanonicalDatabaseSchema = z.union([
@@ -134,10 +177,15 @@ export const ListAuditLogsQuerySchema = z.object({
   resourceType: z.string().min(1).max(50).optional(),
 });
 
+export const ListPendingScansQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(12),
+});
+
 // ─── Admin Config ────────────────────────────────────────────────────────────
 
 const AdminPlatformConfigSchema = z.object({
-  defaultDialect: z.enum(['postgresql-16', 'mysql-8', 'sqlite-3']),
+  defaultDialect: SchemaSqlDialectSchema,
   defaultChallengePoints: z.string().min(1).max(20),
   sessionTimeoutMinutes: z.string().min(1).max(20),
   dailyQueryBudget: z.string().min(1).max(20),
@@ -195,7 +243,7 @@ export const AdminConfigSchema = z.object({
 
 export const DEFAULT_ADMIN_CONFIG = {
   platform: {
-    defaultDialect: 'postgresql-16',
+    defaultDialect: 'postgresql',
     defaultChallengePoints: '100',
     sessionTimeoutMinutes: '35',
     dailyQueryBudget: '800',
@@ -249,6 +297,10 @@ export const AdminIdParamsSchema = z.object({
   id: z.string().uuid(),
 });
 
+export const SqlDumpScanIdParamsSchema = z.object({
+  scanId: z.string().uuid(),
+});
+
 // ─── Inferred Types ───────────────────────────────────────────────────────────
 
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
@@ -264,3 +316,5 @@ export type ListSystemJobsQuery = z.infer<typeof ListSystemJobsQuerySchema>;
 export type ListAuditLogsQuery = z.infer<typeof ListAuditLogsQuerySchema>;
 export type AdminConfigBody = z.infer<typeof AdminConfigSchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;
+export type ListPendingScansQuery = z.infer<typeof ListPendingScansQuerySchema>;
+export type SqlDumpScanIdParams = z.infer<typeof SqlDumpScanIdParamsSchema>;

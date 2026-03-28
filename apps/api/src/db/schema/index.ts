@@ -185,6 +185,10 @@ export const schemaTemplates = pgTable('schema_templates', {
   name: varchar('name', { length: 100 }).notNull(),
   description: text('description'),
   version: integer('version').notNull().default(1),
+  /** Target engine family (postgresql | mysql | mariadb | sqlserver | sqlite). */
+  dialect: varchar('dialect', { length: 32 }).notNull().default('postgresql'),
+  /** Parsed from dump (e.g. pg_dump / mysqldump header); drives sandbox image major for Postgres. */
+  engineVersion: varchar('engine_version', { length: 64 }),
   definition: jsonb('definition').notNull(),
   status: contentStatusEnum('status').notNull().default('draft'),
   createdBy: uuid('created_by').references(() => users.id),
@@ -239,6 +243,10 @@ export const sandboxInstances = pgTable('sandbox_instances', {
   status: sandboxStatusEnum('status').notNull().default('requested'),
   containerRef: varchar('container_ref', { length: 255 }),
   dbName: varchar('db_name', { length: 100 }),
+  /** Engine family for this sandbox instance (mirrors schema_templates.dialect at provision time). */
+  sandboxEngine: varchar('sandbox_engine', { length: 32 }).notNull().default('postgresql'),
+  /** TCP port inside the container / Docker network (5432, 3306, 1433, …). */
+  sandboxDbPort: integer('sandbox_db_port').notNull().default(5432),
   expiresAt: timestamp('expires_at'),
   createdAt: timestamp('created_at').notNull().default(sql`now()`),
   updatedAt: timestamp('updated_at').notNull().default(sql`now()`),

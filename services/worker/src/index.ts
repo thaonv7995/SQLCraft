@@ -7,6 +7,7 @@ import {
   mainDb,
   fetchDatasetTemplate,
   fetchSchemaTemplate,
+  fetchSchemaTemplateSandboxMeta,
   fetchSandbox,
   updateSandboxReady,
   updateSandboxStatus,
@@ -19,20 +20,25 @@ import {
   fetchExpiredSandboxes,
 } from './db';
 import { loadDatasetIntoSandbox } from './dataset-loader';
+import { normalizeSchemaSqlEngine, type SchemaSqlEngine } from '@sqlcraft/types';
 import {
-  executeSql,
-  getExplainPlan,
+  executeSqlOnTarget,
+  getExplainPlanOnTarget,
   shapeResults,
   validateSql,
+  probeSandboxConnection,
+  type SandboxDbTarget,
   QueryBlockedError,
   QueryTimeoutError,
 } from './query-executor';
 import {
-  createSandboxContainer,
+  createSandboxEngineContainer,
   ensureSandboxContainerRemoved,
   sandboxContainerName,
-  waitForSandboxPostgres,
+  waitForSandboxEngine,
+  initSqlServerDatabase,
 } from './docker';
+import { resolveSandboxEngineSpec } from './sandbox-engine-image';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -50,6 +56,8 @@ const sandboxHost = process.env.SANDBOX_DB_HOST ?? 'localhost';
 const sandboxPort = process.env.SANDBOX_DB_PORT ?? '5433';
 const sandboxUser = process.env.SANDBOX_DB_USER ?? 'sandbox';
 const sandboxPassword = process.env.SANDBOX_DB_PASSWORD ?? 'sandbox';
+/** SQL Server `sa` password inside the container; must meet complexity policy. Defaults to sandbox password. */
+const mssqlSaPassword = process.env.SANDBOX_MSSQL_SA_PASSWORD ?? sandboxPassword;
 
 // Session TTL: 2 hours
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -84,57 +92,49 @@ function sandboxDbName(sandboxId: string): string {
   return `s_${sandboxId.replace(/-/g, '').slice(0, 16)}`;
 }
 
-/** Build a connection string pointing to a specific sandbox database */
+/** Build a connection string pointing to a specific sandbox database (PostgreSQL only). */
 function sandboxConnStr(host: string, dbName: string, port = 5432): string {
-  return `postgresql://${sandboxUser}:${sandboxPassword}@${host}:${port}/${dbName}`;
+  const u = encodeURIComponent(sandboxUser);
+  const p = encodeURIComponent(sandboxPassword);
+  return `postgresql://${u}:${p}@${host}:${port}/${dbName}`;
 }
 
-type RetryablePgError = {
-  code?: string;
-  message?: string;
-};
-
-function isRetryablePgStartupError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') {
-    return false;
-  }
-
-  const { code, message } = error as RetryablePgError;
-  if (code && ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', '57P03'].includes(code)) {
-    return true;
-  }
-
-  return typeof message === 'string' && /starting up|connection refused/i.test(message);
-}
-
-async function waitForSandboxTcpReady(params: {
+function sandboxTargetForProbe(params: {
+  engine: SchemaSqlEngine;
   containerRef: string;
   dbName: string;
+  internalPort: number;
+}): SandboxDbTarget {
+  const { engine, containerRef, dbName, internalPort } = params;
+  return {
+    engine,
+    host: containerRef,
+    port: internalPort,
+    user: engine === 'sqlserver' ? 'sa' : sandboxUser,
+    password: engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
+    database: dbName,
+  };
+}
+
+async function waitForSandboxDbReady(params: {
+  engine: SchemaSqlEngine;
+  containerRef: string;
+  dbName: string;
+  internalPort: number;
   timeoutMs?: number;
 }): Promise<void> {
-  const { containerRef, dbName, timeoutMs = 20_000 } = params;
+  const target = sandboxTargetForProbe(params);
   const startedAt = Date.now();
+  const timeoutMs = params.timeoutMs ?? 45_000;
   let lastError: unknown;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const probePool = new Pool({
-      connectionString: sandboxConnStr(containerRef, dbName),
-      max: 1,
-      connectionTimeoutMillis: 1_500,
-      idleTimeoutMillis: 1_000,
-    });
-
     try {
-      await probePool.query('SELECT 1');
+      await probeSandboxConnection(target, Math.min(5_000, timeoutMs - (Date.now() - startedAt)));
       return;
     } catch (error) {
       lastError = error;
-      if (!isRetryablePgStartupError(error)) {
-        throw error;
-      }
       await new Promise((resolve) => setTimeout(resolve, 500));
-    } finally {
-      await probePool.end().catch(() => undefined);
     }
   }
 
@@ -142,11 +142,19 @@ async function waitForSandboxTcpReady(params: {
     lastError && typeof lastError === 'object' && 'message' in lastError
       ? String((lastError as { message?: unknown }).message ?? '')
       : 'timeout';
-  throw new Error(`Sandbox ${containerRef} TCP readiness check timed out: ${reason}`);
+  throw new Error(`Sandbox ${params.containerRef} DB readiness check timed out: ${reason}`);
 }
 
 function stripInlinePrimaryKey(type: string): string {
   return type.replace(/\bPRIMARY\s+KEY\b/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+async function resolveEngineSpecForSandbox(schemaTemplateId: string | null) {
+  const meta = schemaTemplateId ? await fetchSchemaTemplateSandboxMeta(schemaTemplateId) : null;
+  return resolveSandboxEngineSpec({
+    dialectRaw: meta?.dialect ?? 'postgresql',
+    engineVersion: meta?.engineVersion ?? null,
+  });
 }
 
 /** Generate CREATE TABLE DDL from a parsed schema definition */
@@ -183,8 +191,9 @@ async function applySchemaAndDataset(params: {
   dbName: string;
   schemaTemplateId: string | null;
   datasetTemplateId: string | null;
+  engine: SchemaSqlEngine;
 }): Promise<void> {
-  const { sandboxInstanceId, containerRef, dbName, schemaTemplateId, datasetTemplateId } = params;
+  const { sandboxInstanceId, containerRef, dbName, schemaTemplateId, datasetTemplateId, engine } = params;
   const [schemaDef, datasetTemplate] = await Promise.all([
     schemaTemplateId ? fetchSchemaTemplate(schemaTemplateId) : Promise.resolve(null),
     datasetTemplateId ? fetchDatasetTemplate(datasetTemplateId) : Promise.resolve(null),
@@ -193,7 +202,7 @@ async function applySchemaAndDataset(params: {
   let schemaApplied = false;
 
   const ensureSchemaApplied = async (): Promise<void> => {
-    if (schemaApplied || !schemaDef?.tables?.length) {
+    if (schemaApplied || !schemaDef?.tables?.length || engine !== 'postgresql') {
       return;
     }
 
@@ -226,6 +235,12 @@ async function applySchemaAndDataset(params: {
   const artifactIncludesSchema =
     Boolean(datasetTemplate?.artifactUrl) && schemaDef?.metadata?.source === 'sql_dump';
 
+  if (schemaDef?.tables?.length && engine !== 'postgresql' && !artifactIncludesSchema) {
+    throw new Error(
+      `Template schema DDL is only auto-applied for PostgreSQL; use a self-contained SQL dump artifact or a PostgreSQL template (engine=${engine})`,
+    );
+  }
+
   if (artifactIncludesSchema) {
     logger.info(
       { sandboxInstanceId, datasetTemplateId, schemaTemplateId },
@@ -249,7 +264,10 @@ async function applySchemaAndDataset(params: {
     logger,
     containerRef,
     dbUser: sandboxUser,
+    dbPassword: sandboxPassword,
     dbName,
+    engine,
+    mssqlSaPassword,
     datasetTemplate,
     schema: schemaDef,
     ensureSchemaApplied,
@@ -285,16 +303,42 @@ const sandboxProvisioningWorker = new Worker(
     const containerRef = sandboxContainerName(sandboxInstanceId);
 
     try {
-      await createSandboxContainer({
+      const spec = await resolveEngineSpecForSandbox(schemaTemplateId);
+      if (spec.engine === 'sqlite') {
+        throw new Error('SQLite templates cannot use Docker sandboxes');
+      }
+      await createSandboxEngineContainer({
         containerRef,
+        engine: spec.engine,
+        dockerImage: spec.dockerImage,
         dbName,
         dbUser: sandboxUser,
         dbPassword: sandboxPassword,
         sandboxId: sandboxInstanceId,
+        mssqlSaPassword,
       });
-      await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
-      await waitForSandboxTcpReady({ containerRef, dbName });
-      logger.info({ containerRef, dbName }, 'Sandbox container ready');
+      if (spec.engine === 'sqlserver') {
+        await initSqlServerDatabase({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+        });
+      }
+      await waitForSandboxEngine({
+        engine: spec.engine,
+        containerRef,
+        dbUser: sandboxUser,
+        dbName,
+        dbPassword: sandboxPassword,
+        mssqlSaPassword,
+      });
+      await waitForSandboxDbReady({
+        engine: spec.engine,
+        containerRef,
+        dbName,
+        internalPort: spec.internalPort,
+      });
+      logger.info({ containerRef, dbName, engine: spec.engine }, 'Sandbox container ready');
 
       await applySchemaAndDataset({
         sandboxInstanceId,
@@ -302,10 +346,18 @@ const sandboxProvisioningWorker = new Worker(
         dbName,
         schemaTemplateId,
         datasetTemplateId,
+        engine: spec.engine,
       });
 
       const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-      await updateSandboxReady(sandboxInstanceId, dbName, containerRef, expiresAt);
+      await updateSandboxReady(
+        sandboxInstanceId,
+        dbName,
+        containerRef,
+        expiresAt,
+        spec.engine,
+        spec.internalPort,
+      );
       await updateSessionStatus(learningSessionId, 'active');
       await touchLearningSessionActivity(learningSessionId);
 
@@ -402,15 +454,41 @@ const sandboxResetWorker = new Worker(
 
     try {
       await ensureSandboxContainerRemoved(containerRef);
-      await createSandboxContainer({
+      const spec = await resolveEngineSpecForSandbox(sandbox.schemaTemplateId);
+      if (spec.engine === 'sqlite') {
+        throw new Error('SQLite templates cannot use Docker sandboxes');
+      }
+      await createSandboxEngineContainer({
         containerRef,
+        engine: spec.engine,
+        dockerImage: spec.dockerImage,
         dbName,
         dbUser: sandboxUser,
         dbPassword: sandboxPassword,
         sandboxId: sandboxInstanceId,
+        mssqlSaPassword,
       });
-      await waitForSandboxPostgres({ containerRef, dbUser: sandboxUser, dbName });
-      await waitForSandboxTcpReady({ containerRef, dbName });
+      if (spec.engine === 'sqlserver') {
+        await initSqlServerDatabase({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+        });
+      }
+      await waitForSandboxEngine({
+        engine: spec.engine,
+        containerRef,
+        dbUser: sandboxUser,
+        dbName,
+        dbPassword: sandboxPassword,
+        mssqlSaPassword,
+      });
+      await waitForSandboxDbReady({
+        engine: spec.engine,
+        containerRef,
+        dbName,
+        internalPort: spec.internalPort,
+      });
 
       await applySchemaAndDataset({
         sandboxInstanceId,
@@ -418,10 +496,18 @@ const sandboxResetWorker = new Worker(
         dbName,
         schemaTemplateId: sandbox.schemaTemplateId,
         datasetTemplateId: sandbox.datasetTemplateId,
+        engine: spec.engine,
       });
 
       const newExpiresAt = new Date(Date.now() + SESSION_TTL_MS);
-      await updateSandboxReady(sandboxInstanceId, dbName, containerRef, newExpiresAt);
+      await updateSandboxReady(
+        sandboxInstanceId,
+        dbName,
+        containerRef,
+        newExpiresAt,
+        spec.engine,
+        spec.internalPort,
+      );
       await touchLearningSessionActivity(sandbox.learningSessionId);
 
       logger.info({ sandboxInstanceId, containerRef }, 'Sandbox reset complete');
@@ -469,8 +555,10 @@ const queryExecutionWorker = new Worker(
       return;
     }
 
+    const engine = normalizeSchemaSqlEngine(sandbox.sandboxEngine);
+
     // Pre-validate
-    const validation = validateSql(sql);
+    const validation = validateSql(sql, engine);
     if (!validation.valid) {
       await updateQueryExecutionFailed(
         queryExecutionId,
@@ -482,14 +570,19 @@ const queryExecutionWorker = new Worker(
 
     await updateQueryExecutionRunning(queryExecutionId);
 
-    const connStr = sandboxConnStr(
-      sandbox.containerRef ?? sandboxHost,
-      sandbox.dbName,
-      sandbox.containerRef ? 5432 : Number(sandboxPort),
-    );
+    const host = sandbox.containerRef ?? sandboxHost;
+    const port = sandbox.containerRef ? sandbox.sandboxDbPort : Number(sandboxPort);
+    const target: SandboxDbTarget = {
+      engine,
+      host,
+      port,
+      user: engine === 'sqlserver' ? 'sa' : sandboxUser,
+      password: engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
+      database: sandbox.dbName,
+    };
 
     try {
-      const result = await executeSql(connStr, sql);
+      const result = await executeSqlOnTarget(target, sql);
       const preview = shapeResults(result);
 
       await updateQueryExecutionSuccess(
@@ -502,7 +595,7 @@ const queryExecutionWorker = new Worker(
       if (explainPlan) {
         const mode = planMode ?? 'explain';
         try {
-          const plan = await getExplainPlan(connStr, sql, mode);
+          const plan = await getExplainPlanOnTarget(target, sql, mode);
           await insertQueryExecutionPlan(queryExecutionId, mode, plan.rawPlan, plan.planSummary);
           logger.info(
             {

@@ -69,6 +69,8 @@ describe('databases router HTTP contracts', () => {
       domain: 'ecommerce',
       page: 2,
       limit: 5,
+      dialect: undefined,
+      q: undefined,
     });
     expect(response.json()).toEqual({
       success: true,
@@ -82,6 +84,22 @@ describe('databases router HTTP contracts', () => {
         totalPages: 0,
       },
     });
+  });
+
+  it('forwards dialect and search query to listDatabases', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/databases?dialect=postgresql-16&q=orders&difficulty=beginner',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(databaseServiceMocks.listDatabases).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dialect: 'postgresql',
+        q: 'orders',
+        difficulty: 'beginner',
+      }),
+    );
   });
 
   it('retrieves database explorer items by id or slug without authentication', async () => {

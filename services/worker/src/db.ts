@@ -48,6 +48,22 @@ export async function fetchSchemaTemplate(
   return def as SchemaDefinition;
 }
 
+/** Dialect + engine_version for sandbox Docker image selection. */
+export async function fetchSchemaTemplateSandboxMeta(
+  schemaTemplateId: string,
+): Promise<{ dialect: string; engineVersion: string | null } | null> {
+  const result = await mainDb.query<{
+    dialect: string;
+    engineVersion: string | null;
+  }>(
+    'SELECT dialect, engine_version AS "engineVersion" FROM schema_templates WHERE id = $1',
+    [schemaTemplateId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return { dialect: row.dialect, engineVersion: row.engineVersion };
+}
+
 export async function fetchDatasetTemplate(
   datasetTemplateId: string,
 ): Promise<DatasetTemplateDefinition | null> {
@@ -98,6 +114,8 @@ export async function fetchSandbox(
   learningSessionId: string;
   schemaTemplateId: string | null;
   datasetTemplateId: string | null;
+  sandboxEngine: string;
+  sandboxDbPort: number;
 } | null> {
   const result = await mainDb.query(
     `SELECT id,
@@ -106,7 +124,9 @@ export async function fetchSandbox(
             status,
             learning_session_id AS "learningSessionId",
             schema_template_id AS "schemaTemplateId",
-            dataset_template_id AS "datasetTemplateId"
+            dataset_template_id AS "datasetTemplateId",
+            sandbox_engine AS "sandboxEngine",
+            sandbox_db_port AS "sandboxDbPort"
        FROM sandbox_instances
       WHERE id = $1`,
     [sandboxId],
@@ -119,13 +139,15 @@ export async function updateSandboxReady(
   dbName: string,
   containerRef: string,
   expiresAt: Date,
+  sandboxEngine: string,
+  sandboxDbPort: number,
 ): Promise<void> {
   await mainDb.query(
     `UPDATE sandbox_instances
      SET status = 'ready', db_name = $2, container_ref = $3,
-         expires_at = $4, updated_at = now()
+         expires_at = $4, sandbox_engine = $5, sandbox_db_port = $6, updated_at = now()
      WHERE id = $1`,
-    [sandboxId, dbName, containerRef, expiresAt],
+    [sandboxId, dbName, containerRef, expiresAt, sandboxEngine, sandboxDbPort],
   );
 }
 

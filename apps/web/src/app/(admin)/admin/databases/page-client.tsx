@@ -1,17 +1,20 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { searchParamFirst } from '@/lib/next-app-page';
 import type { ClientPageProps } from '@/lib/page-props';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { Database } from '@/lib/api';
 import { databasesApi } from '@/lib/api';
 import { DatabaseImportPanel } from '@/components/admin/database-import-panel';
 import {
   DATABASE_DIFFICULTY_STYLES,
+  DATABASE_DIALECT_OPTIONS,
+  DATABASE_DIFFICULTY_FILTER_OPTIONS,
   DATABASE_DOMAIN_LABELS,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
@@ -83,6 +86,7 @@ function DatabaseCatalogCard({ database }: { database: Database }) {
             <p className="mt-1 text-xs text-on-surface-variant">
               {DATABASE_DOMAIN_LABELS[database.domain]}
             </p>
+            <p className="mt-0.5 truncate text-[10px] font-mono text-outline">{database.engine}</p>
           </div>
         </div>
         <span
@@ -166,27 +170,66 @@ function DatabaseCatalogSkeleton() {
   );
 }
 
+const CATALOG_PAGE_SIZE = 12;
+
 export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const requestedView = searchParamFirst(searchParams, 'view');
   const requestedTab = searchParamFirst(searchParams, 'tab');
 
   const [showImportPanel, setShowImportPanel] = useState(
     requestedView === 'import' || requestedTab === 'sql-imports',
   );
+  const [resumeScanId, setResumeScanId] = useState<string | null>(null);
+  const [pendingPage, setPendingPage] = useState(1);
+  const [catalogPage, setCatalogPage] = useState(1);
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');
+  const [difficulty, setDifficulty] = useState('all');
+  const [dialect, setDialect] = useState('all');
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedQ, setDebouncedQ] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setCatalogPage(1);
+  }, [domain, scale, difficulty, dialect, debouncedQ]);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['admin-database-catalog', domain, scale],
+    queryKey: [
+      'admin-database-catalog',
+      domain,
+      scale,
+      difficulty,
+      dialect,
+      debouncedQ,
+      catalogPage,
+    ],
     queryFn: () =>
       databasesApi.list({
         domain: domain === 'all' ? undefined : domain,
         scale: scale === 'all' ? undefined : scale,
-        limit: 100,
+        difficulty: difficulty === 'all' ? undefined : difficulty,
+        dialect: dialect === 'all' ? undefined : dialect,
+        q: debouncedQ || undefined,
+        page: catalogPage,
+        limit: CATALOG_PAGE_SIZE,
       }),
     staleTime: 60_000,
   });
+
+  const { data: pendingData, isLoading: pendingLoading } = useQuery({
+    queryKey: ['admin-pending-scans', pendingPage],
+    queryFn: () => databasesApi.listPendingScans({ page: pendingPage, limit: 10 }),
+    staleTime: 30_000,
+  });
+
+  const clearResumeScan = useCallback(() => setResumeScanId(null), []);
 
   const databases = useMemo(() => data?.items ?? [], [data?.items]);
   const datasetVariantCount = useMemo(
@@ -233,24 +276,141 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         <CatalogMetric
           label="Dataset Variants"
           value={isLoading ? '—' : String(datasetVariantCount)}
-          hint="Published scale variants available across the catalog."
+          hint="Published scale variants on this catalog page."
         />
         <CatalogMetric
           label="Largest Source Dataset"
           value={isLoading ? '—' : formatRows(largestSourceRows)}
-          hint="Largest source dataset currently available for provisioning."
+          hint="Largest source row count among databases on this catalog page."
         />
       </div>
 
       {showImportPanel ? (
         <DatabaseImportPanel
-          onClose={() => setShowImportPanel(false)}
-          onImported={(databaseId) => {
+          resumeScanId={resumeScanId}
+          onResumeConsumed={clearResumeScan}
+          onClose={() => {
             setShowImportPanel(false);
+            setResumeScanId(null);
+          }}
+          onImported={(databaseId) => {
+            void queryClient.invalidateQueries({ queryKey: ['admin-pending-scans'] });
+            void queryClient.invalidateQueries({ queryKey: ['admin-database-catalog'] });
+            setShowImportPanel(false);
+            setResumeScanId(null);
             router.push(`/admin/databases/${databaseId}`);
           }}
         />
       ) : null}
+
+      <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-on-surface">Scanned SQL dumps (storage)</h2>
+            <p className="mt-0.5 text-xs text-on-surface-variant">
+              Uploads that finished scan and have metadata in object storage. Resume to publish or
+              review before import.
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="shrink-0"
+            onClick={() => {
+              setShowImportPanel(true);
+              setResumeScanId(null);
+            }}
+          >
+            Open SQL import
+          </Button>
+        </div>
+        {pendingLoading ? (
+          <p className="mt-4 text-xs text-on-surface-variant">Loading pending scans…</p>
+        ) : !pendingData?.items.length ? (
+          <p className="mt-4 text-xs text-on-surface-variant">No scan metadata found under storage.</p>
+        ) : (
+          <>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-outline-variant/15 text-on-surface-variant">
+                    <th className="py-2 pr-3 font-medium">File</th>
+                    <th className="py-2 pr-3 font-medium">Scan ID</th>
+                    <th className="py-2 pr-3 font-medium">Updated</th>
+                    <th className="py-2 pr-3 font-medium">Status</th>
+                    <th className="py-2 text-right font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingData.items.map((row) => (
+                    <tr
+                      key={row.scanId}
+                      className="border-b border-outline-variant/10 text-on-surface last:border-0"
+                    >
+                      <td className="py-2 pr-3 font-mono text-[11px]">{row.fileName}</td>
+                      <td className="max-w-[140px] truncate py-2 pr-3 font-mono text-[10px] text-outline">
+                        {row.scanId}
+                      </td>
+                      <td className="py-2 pr-3 text-on-surface-variant">
+                        {row.lastModified
+                          ? new Date(row.lastModified).toLocaleString()
+                          : '—'}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {row.imported ? (
+                          <span className="rounded-full bg-secondary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-secondary">
+                            Published
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-tertiary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-tertiary">
+                            Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={row.imported}
+                          onClick={() => {
+                            setResumeScanId(row.scanId);
+                            setShowImportPanel(true);
+                          }}
+                        >
+                          Resume
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {pendingData.totalPages > 1 ? (
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={pendingData.page <= 1}
+                  onClick={() => setPendingPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs text-on-surface-variant">
+                  Page {pendingData.page} / {pendingData.totalPages}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={pendingData.page >= pendingData.totalPages}
+                  onClick={() => setPendingPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
@@ -259,9 +419,24 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
             Select a database to inspect its templates and operational history.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
-          <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
+        <div className="flex w-full flex-col gap-3 lg:w-auto lg:max-w-3xl">
+          <Input
+            label="Search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Name, description, engine, tags…"
+            className="w-full"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
+            <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
+            <FilterSelect
+              value={difficulty}
+              onChange={setDifficulty}
+              options={DATABASE_DIFFICULTY_FILTER_OPTIONS}
+            />
+            <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
+          </div>
         </div>
       </div>
 
@@ -279,15 +454,40 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-5 py-8 text-center">
           <p className="text-sm font-medium text-on-surface">No published databases found</p>
           <p className="mt-1 text-sm text-on-surface-variant">
-            Import a SQL dump to create the first reusable database in the catalog.
+            Import a SQL dump or adjust filters — no database matches the current criteria.
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {databases.map((database) => (
-            <DatabaseCatalogCard key={database.id} database={database} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {databases.map((database) => (
+              <DatabaseCatalogCard key={database.id} database={database} />
+            ))}
+          </div>
+          {data && data.totalPages > 1 ? (
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={catalogPage <= 1}
+                onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <span className="text-xs text-on-surface-variant">
+                Page {data.page} / {data.totalPages} · {data.total} total
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={catalogPage >= data.totalPages}
+                onClick={() => setCatalogPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );

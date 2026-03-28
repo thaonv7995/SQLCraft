@@ -54,6 +54,22 @@ export const DATABASE_SCALE_OPTIONS = [
   { value: 'large', label: 'Large' },
 ];
 
+export const DATABASE_DIALECT_OPTIONS = [
+  { value: 'all', label: 'All SQL engines' },
+  { value: 'postgresql', label: 'PostgreSQL' },
+  { value: 'mysql', label: 'MySQL' },
+  { value: 'mariadb', label: 'MariaDB' },
+  { value: 'sqlserver', label: 'SQL Server' },
+  { value: 'sqlite', label: 'SQLite' },
+];
+
+export const DATABASE_DIFFICULTY_FILTER_OPTIONS = [
+  { value: 'all', label: 'Any difficulty' },
+  { value: 'beginner', label: 'Novice' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'advanced', label: 'Advanced' },
+];
+
 export const DATABASE_DIFFICULTY_STYLES: Record<
   string,
   { badge: string; label: string; accent: string }

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { DatasetSize } from '@sqlcraft/types';
+import type { DatasetSize, SchemaSqlDialect } from '@sqlcraft/types';
 import { classifyDatasetScaleFromTotalRows } from '../../lib/dataset-scales';
 import { ValidationError } from '../../lib/errors';
+import { inferEngineVersionFromDump } from '../../lib/sql-engine-version';
+import { inferSqlDialectFromDump, type SqlDialectConfidence } from '../../lib/sql-dialect-infer';
 
 export type AdminDatabaseDomain =
   | 'ecommerce'
@@ -34,6 +36,11 @@ export interface SqlDumpScanResult {
   schemaName?: string | null;
   domain: AdminDatabaseDomain;
   inferredScale: DatasetSize | null;
+  /** Heuristic from dump contents; admin may override before import. */
+  inferredDialect: SchemaSqlDialect;
+  dialectConfidence: SqlDialectConfidence;
+  /** Parsed from dump tool header (e.g. pg_dump); drives sandbox Postgres image major. */
+  inferredEngineVersion: string | null;
   totalTables: number;
   totalRows: number;
   columnCount: number;
@@ -68,6 +75,9 @@ export interface StoredSqlDumpScan extends SqlDumpScanResult {
       detectedForeignKeys: number;
       inferredDomain: AdminDatabaseDomain;
       inferredScale: DatasetSize | null;
+      inferredDialect: SchemaSqlDialect;
+      dialectConfidence: SqlDialectConfidence;
+      inferredEngineVersion: string | null;
       scannedAt: string;
     };
   };
@@ -129,6 +139,28 @@ function setCachedScan(scan: StoredSqlDumpScan): void {
   });
 }
 
+function ensureScanDialectFields(scan: StoredSqlDumpScan): StoredSqlDumpScan {
+  const inferredDialect = scan.inferredDialect ?? 'postgresql';
+  const dialectConfidence = scan.dialectConfidence ?? 'low';
+  const inferredEngineVersion = scan.inferredEngineVersion ?? null;
+  const meta = scan.definition.metadata ?? ({} as StoredSqlDumpScan['definition']['metadata']);
+  return {
+    ...scan,
+    inferredDialect,
+    dialectConfidence,
+    inferredEngineVersion,
+    definition: {
+      ...scan.definition,
+      metadata: {
+        ...meta,
+        inferredDialect: meta.inferredDialect ?? inferredDialect,
+        dialectConfidence: meta.dialectConfidence ?? dialectConfidence,
+        inferredEngineVersion: meta.inferredEngineVersion ?? inferredEngineVersion,
+      },
+    },
+  };
+}
+
 function getCachedScan(scanId: string): StoredSqlDumpScan | null {
   const cached = scanCache.get(scanId);
   if (!cached) {
@@ -140,7 +172,7 @@ function getCachedScan(scanId: string): StoredSqlDumpScan | null {
     return null;
   }
 
-  return cached.value;
+  return ensureScanDialectFields(cached.value);
 }
 
 function normalizeSql(input: string): string {
@@ -813,7 +845,10 @@ export function parseSqlDumpBuffer(
     throw new ValidationError('Uploaded SQL dump is empty');
   }
 
-  const rawSql = normalizeSql(buffer.toString('utf8'));
+  const utf8 = buffer.toString('utf8');
+  const { inferredDialect, dialectConfidence } = inferSqlDialectFromDump(utf8);
+  const inferredEngineVersion = inferEngineVersionFromDump(utf8, inferredDialect);
+  const rawSql = normalizeSql(utf8);
   const statements = splitStatements(rawSql);
   const tables = statements
     .map((statement) => parseCreateTable(statement))
@@ -887,6 +922,9 @@ export function parseSqlDumpBuffer(
     schemaName,
     domain: inferredDomain,
     inferredScale,
+    inferredDialect,
+    dialectConfidence,
+    inferredEngineVersion,
     totalTables: tables.length,
     totalRows,
     columnCount,
@@ -917,6 +955,9 @@ export function parseSqlDumpBuffer(
         detectedForeignKeys,
         inferredDomain,
         inferredScale,
+        inferredDialect,
+        dialectConfidence,
+        inferredEngineVersion,
         scannedAt,
       },
     },
@@ -945,19 +986,27 @@ export async function createStoredSqlDumpScan(
   );
 
   setCachedScan(persistedScan);
+  return toSqlDumpScanResult(persistedScan);
+}
+
+/** API-safe subset of a stored scan (same shape as POST …/scan). */
+export function toSqlDumpScanResult(persisted: StoredSqlDumpScan): SqlDumpScanResult {
   return {
-    scanId: persistedScan.scanId,
-    fileName: persistedScan.fileName,
-    databaseName: persistedScan.databaseName,
-    schemaName: persistedScan.schemaName,
-    domain: persistedScan.domain,
-    inferredScale: persistedScan.inferredScale,
-    totalTables: persistedScan.totalTables,
-    totalRows: persistedScan.totalRows,
-    columnCount: persistedScan.columnCount,
-    detectedPrimaryKeys: persistedScan.detectedPrimaryKeys,
-    detectedForeignKeys: persistedScan.detectedForeignKeys,
-    tables: persistedScan.tables,
+    scanId: persisted.scanId,
+    fileName: persisted.fileName,
+    databaseName: persisted.databaseName,
+    schemaName: persisted.schemaName,
+    domain: persisted.domain,
+    inferredScale: persisted.inferredScale,
+    inferredDialect: persisted.inferredDialect,
+    dialectConfidence: persisted.dialectConfidence,
+    inferredEngineVersion: persisted.inferredEngineVersion,
+    totalTables: persisted.totalTables,
+    totalRows: persisted.totalRows,
+    columnCount: persisted.columnCount,
+    detectedPrimaryKeys: persisted.detectedPrimaryKeys,
+    detectedForeignKeys: persisted.detectedForeignKeys,
+    tables: persisted.tables,
   };
 }
 
@@ -971,8 +1020,9 @@ export async function loadStoredSqlDumpScan(scanId: string): Promise<StoredSqlDu
     const { readFile } = await import('../../lib/storage');
     const sidecar = await readFile(makeScanMetadataObjectName(scanId));
     const parsed = JSON.parse(sidecar.toString('utf8')) as StoredSqlDumpScan;
-    setCachedScan(parsed);
-    return parsed;
+    const normalized = ensureScanDialectFields(parsed);
+    setCachedScan(normalized);
+    return normalized;
   } catch {
     return null;
   }

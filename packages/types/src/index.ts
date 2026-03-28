@@ -67,6 +67,40 @@ export const ApiCode = {
 // Derive a union type from the values so params can be typed as ApiCode
 export type ApiCode = typeof ApiCode[keyof typeof ApiCode];
 
+/**
+ * Logical SQL engine family for schema templates, catalog filters, and sandboxes.
+ * Legacy rows may still store `postgresql-16` / `mysql-8` / `sqlite-3`; normalize at boundaries.
+ */
+export const SCHEMA_SQL_ENGINE_VALUES = [
+  'postgresql',
+  'mysql',
+  'mariadb',
+  'sqlserver',
+  'sqlite',
+] as const;
+export type SchemaSqlEngine = (typeof SCHEMA_SQL_ENGINE_VALUES)[number];
+
+/** @deprecated Prefer SchemaSqlEngine; kept as alias for existing imports. */
+export const SCHEMA_SQL_DIALECT_VALUES = SCHEMA_SQL_ENGINE_VALUES;
+export type SchemaSqlDialect = SchemaSqlEngine;
+
+const LEGACY_DIALECT_MAP: Record<string, SchemaSqlEngine> = {
+  'postgresql-16': 'postgresql',
+  'mysql-8': 'mysql',
+  'sqlite-3': 'sqlite',
+};
+
+export function normalizeSchemaSqlEngine(raw: string | null | undefined): SchemaSqlEngine {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (!v) return 'postgresql';
+  if ((SCHEMA_SQL_ENGINE_VALUES as readonly string[]).includes(v)) {
+    return v as SchemaSqlEngine;
+  }
+  const mapped = LEGACY_DIALECT_MAP[v];
+  if (mapped) return mapped;
+  return 'postgresql';
+}
+
 // Domain types
 export interface User {
   id: string;

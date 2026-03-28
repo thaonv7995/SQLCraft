@@ -1,9 +1,12 @@
+import type { SchemaSqlDialect } from '@sqlcraft/types';
+import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
 import { NotFoundError, ValidationError } from '../../lib/errors';
 import { inferDatabaseDomain } from '../../lib/infer-database-domain';
 import { enqueueProvisionSandbox } from '../../lib/queue';
+import { databaseMatchesListQuery } from './databases.filters';
 import type {
   CreateDatabaseSessionBody,
   ListDatabasesQuery,
@@ -54,6 +57,26 @@ const SCALE_RANK: Record<DatabaseScale, number> = {
   medium: 2,
   large: 3,
 };
+
+function dialectToEngineLabel(dialect: string, engineVersion: string | null): string {
+  const family = normalizeSchemaSqlEngine(dialect);
+  switch (family) {
+    case 'mysql':
+      return engineVersion ? `MySQL ${engineVersion}` : 'MySQL';
+    case 'mariadb':
+      return engineVersion ? `MariaDB ${engineVersion}` : 'MariaDB';
+    case 'sqlite':
+      return engineVersion ? `SQLite ${engineVersion}` : 'SQLite';
+    case 'sqlserver':
+      return engineVersion ? `SQL Server ${engineVersion}` : 'SQL Server';
+    default:
+      return engineVersion ? `PostgreSQL ${engineVersion}` : 'PostgreSQL';
+  }
+}
+
+function normalizeSchemaDialect(dialect: string | null | undefined): SchemaSqlDialect {
+  return normalizeSchemaSqlEngine(dialect);
+}
 
 function slugify(value: string): string {
   return value
@@ -223,6 +246,8 @@ function buildDatabaseItem(
   const description = schemaTemplate.description ?? `${schemaTemplate.name} training database`;
   const domain = inferDatabaseDomain(schemaTemplate.name, description);
 
+  const dialect = normalizeSchemaDialect(schemaTemplate.dialect);
+
   return {
     id: schemaTemplate.id,
     name: schemaTemplate.name,
@@ -232,7 +257,8 @@ function buildDatabaseItem(
     scale: sourceScale,
     sourceScale,
     difficulty: inferDifficulty(tables.length),
-    engine: 'PostgreSQL 16',
+    dialect,
+    engine: dialectToEngineLabel(dialect, schemaTemplate.engineVersion ?? null),
     domainIcon: DOMAIN_ICONS[domain],
     tags: buildTags(domain, tables),
     rowCount: sourceRowCount,
@@ -314,12 +340,7 @@ export async function listDatabases(
   query: ListDatabasesQuery,
 ): Promise<PaginatedDatabasesResult> {
   const catalog = await loadDatabaseCatalog();
-  const filtered = catalog.filter((database) => {
-    if (query.domain && database.domain !== query.domain) return false;
-    if (query.difficulty && database.difficulty !== query.difficulty) return false;
-    if (query.scale && !database.availableScales.includes(query.scale)) return false;
-    return true;
-  });
+  const filtered = catalog.filter((database) => databaseMatchesListQuery(database, query));
 
   const offset = (query.page - 1) * query.limit;
   const items = filtered.slice(offset, offset + query.limit);

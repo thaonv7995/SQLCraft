@@ -1,6 +1,6 @@
 'use client';
 
-import { type ChangeEvent, useMemo, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +8,7 @@ import { Input, Select, Textarea } from '@/components/ui/input';
 import {
   type DatabaseDomain,
   type DatasetScale,
+  type SchemaSqlDialect,
   type SqlDumpImportPayload,
   type SqlDumpScanResult,
   databasesApi,
@@ -16,6 +17,9 @@ import {
 interface DatabaseImportPanelProps {
   onClose?: () => void;
   onImported?: (databaseId: string) => void;
+  /** When set, load this scan from storage (same payload as after a fresh upload scan). */
+  resumeScanId?: string | null;
+  onResumeConsumed?: () => void;
 }
 
 const DOMAIN_OPTIONS: Array<{ value: DatabaseDomain; label: string }> = [
@@ -35,31 +39,82 @@ const DATASET_SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
   { value: 'large', label: 'Large' },
 ];
 
+const DIALECT_OPTIONS: Array<{ value: SchemaSqlDialect; label: string }> = [
+  { value: 'postgresql', label: 'PostgreSQL' },
+  { value: 'mysql', label: 'MySQL' },
+  { value: 'mariadb', label: 'MariaDB' },
+  { value: 'sqlserver', label: 'SQL Server' },
+  { value: 'sqlite', label: 'SQLite' },
+];
+
 function formatNumber(value: number) {
   return value.toLocaleString('en-US');
 }
 
-export function DatabaseImportPanel({ onClose, onImported }: DatabaseImportPanelProps) {
+export function DatabaseImportPanel({
+  onClose,
+  onImported,
+  resumeScanId,
+  onResumeConsumed,
+}: DatabaseImportPanelProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [scanResult, setScanResult] = useState<SqlDumpScanResult | null>(null);
   const [schemaName, setSchemaName] = useState('');
   const [domain, setDomain] = useState<DatabaseDomain | ''>('');
   const [datasetScale, setDatasetScale] = useState<DatasetScale | ''>('');
+  const [dialect, setDialect] = useState<SchemaSqlDialect>('postgresql');
+  const [engineVersion, setEngineVersion] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+
+  const applyScanResult = useCallback((result: SqlDumpScanResult) => {
+    setScanResult(result);
+    const fallbackName = result.fileName.replace(/\.sql$/i, '').slice(0, 32);
+    setSchemaName(result.schemaName?.trim() ?? fallbackName);
+    setDomain(result.domain);
+    setDatasetScale(result.inferredScale ?? '');
+    setDialect(result.inferredDialect);
+    setEngineVersion(result.inferredEngineVersion?.trim() ?? '');
+    setDescription('');
+    setTags('');
+    setImportSuccess(null);
+    setSelectedFile(null);
+  }, []);
+
+  useEffect(() => {
+    if (!resumeScanId?.trim()) {
+      return;
+    }
+    const id = resumeScanId.trim();
+    let cancelled = false;
+    setResumeLoading(true);
+    setResumeError(null);
+    void databasesApi
+      .getSqlDumpScan(id)
+      .then((result) => {
+        if (cancelled) return;
+        applyScanResult(result);
+        onResumeConsumed?.();
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setResumeError(err instanceof Error ? err.message : 'Could not load scan.');
+      })
+      .finally(() => {
+        if (!cancelled) setResumeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeScanId, applyScanResult, onResumeConsumed]);
 
   const scanMutation = useMutation({
     mutationFn: (file: File) => databasesApi.scanSqlDump(file),
     onSuccess(result) {
-      setScanResult(result);
-      const fallbackName = result.fileName.replace(/\.sql$/i, '').slice(0, 32);
-      setSchemaName(result.schemaName?.trim() ?? fallbackName);
-      setDomain(result.domain);
-      setDatasetScale(result.inferredScale ?? '');
-      setDescription('');
-      setTags('');
-      setImportSuccess(null);
+      applyScanResult(result);
     },
   });
 
@@ -81,6 +136,8 @@ export function DatabaseImportPanel({ onClose, onImported }: DatabaseImportPanel
     setSchemaName('');
     setDomain('');
     setDatasetScale('');
+    setDialect('postgresql');
+    setEngineVersion('');
     setDescription('');
     setTags('');
     setImportSuccess(null);
@@ -120,6 +177,10 @@ export function DatabaseImportPanel({ onClose, onImported }: DatabaseImportPanel
       schemaName: schemaName.trim(),
       domain: domain || 'other',
       datasetScale: datasetScale || undefined,
+      dialect,
+      ...(engineVersion.trim()
+        ? { engineVersion: engineVersion.trim() }
+        : {}),
       description: description.trim() || undefined,
       tags: normalizedTags.length ? normalizedTags : undefined,
     };
@@ -147,6 +208,10 @@ export function DatabaseImportPanel({ onClose, onImported }: DatabaseImportPanel
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {resumeLoading ? (
+            <p className="text-xs text-on-surface-variant">Loading saved scan…</p>
+          ) : null}
+          {resumeError ? <p className="text-xs text-error">{resumeError}</p> : null}
           <label className="block rounded-lg border border-dashed border-outline-variant px-4 py-6 text-sm">
             <span className="text-xs uppercase tracking-[0.35em] text-outline">SQL Dump</span>
             <p className="mt-2 font-medium text-on-surface">
@@ -201,6 +266,20 @@ export function DatabaseImportPanel({ onClose, onImported }: DatabaseImportPanel
                   <p className="text-lg font-semibold">{scanResult.detectedPrimaryKeys}</p>
                 </div>
               </div>
+              <p className="mt-3 text-xs text-on-surface-variant">
+                Inferred SQL dialect:{' '}
+                <span className="font-medium text-on-surface">
+                  {DIALECT_OPTIONS.find((o) => o.value === scanResult.inferredDialect)?.label ??
+                    scanResult.inferredDialect}
+                </span>{' '}
+                ({scanResult.dialectConfidence} confidence). Adjust below if this is wrong.
+              </p>
+              <p className="mt-2 text-xs text-on-surface-variant">
+                Inferred engine version:{' '}
+                <span className="font-medium text-on-surface">
+                  {scanResult.inferredEngineVersion?.trim() || '— (header not found; sandbox uses default major)'}
+                </span>
+              </p>
             </div>
           ) : null}
         </CardContent>
@@ -240,6 +319,20 @@ export function DatabaseImportPanel({ onClose, onImported }: DatabaseImportPanel
                 { value: '', label: 'Use inferred scale' },
                 ...DATASET_SCALE_OPTIONS,
               ]}
+            />
+
+            <Select
+              label="SQL dialect (stored on template)"
+              value={dialect}
+              onChange={(event) => setDialect(event.target.value as SchemaSqlDialect)}
+              options={DIALECT_OPTIONS}
+            />
+
+            <Input
+              label="Engine version (optional)"
+              value={engineVersion}
+              onChange={(event) => setEngineVersion(event.target.value)}
+              placeholder="e.g. 16.2 — leave empty to use value from scan"
             />
 
             <Textarea

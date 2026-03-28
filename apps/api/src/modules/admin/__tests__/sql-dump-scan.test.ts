@@ -4,6 +4,7 @@ import { parseSqlDumpBuffer } from '../sql-dump-scan';
 describe('parseSqlDumpBuffer()', () => {
   it('extracts tables, columns, keys, and row counts from a postgres-style dump', () => {
     const sql = `
+      -- Dumped from database version 15.2
       CREATE DATABASE "commerce_lab";
 
       CREATE TABLE public.customers (
@@ -40,6 +41,9 @@ describe('parseSqlDumpBuffer()', () => {
     expect(result.scanId).toBe('11111111-1111-4111-8111-111111111111');
     expect(result.databaseName).toBe('commerce_lab');
     expect(result.domain).toBe('ecommerce');
+    expect(result.inferredDialect).toBe('postgresql');
+    expect(result.dialectConfidence).toBe('high');
+    expect(result.inferredEngineVersion).toBe('15.2');
     expect(result.totalTables).toBe(2);
     expect(result.totalRows).toBe(4);
     expect(result.detectedPrimaryKeys).toBe(2);

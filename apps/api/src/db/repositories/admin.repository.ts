@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, or, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -306,6 +306,23 @@ export class AdminRepository {
     const rows = whereClause ? await listBase.where(whereClause) : await listBase;
 
     return { rows, total };
+  }
+
+  /** Scan IDs already linked from a published SQL import (`definition.metadata.scanId`). */
+  async getDistinctSqlDumpScanIdsFromTemplates(): Promise<Set<string>> {
+    const result = await this.db.execute(sql`
+      SELECT DISTINCT TRIM(BOTH FROM definition->'metadata'->>'scanId') AS sid
+      FROM schema_templates
+      WHERE definition->'metadata'->>'scanId' IS NOT NULL
+        AND TRIM(BOTH FROM definition->'metadata'->>'scanId') <> ''
+    `);
+    const set = new Set<string>();
+    const rows = (result as unknown as { rows: Array<{ sid: string | null }> }).rows;
+    for (const row of rows) {
+      const v = row.sid?.trim().toLowerCase();
+      if (v) set.add(v);
+    }
+    return set;
   }
 }
 

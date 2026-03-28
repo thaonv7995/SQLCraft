@@ -617,9 +617,11 @@ export function AdminConfigPanel() {
                         })
                       }
                       options={[
-                        { value: 'postgresql-16', label: 'PostgreSQL 16' },
-                        { value: 'mysql-8', label: 'MySQL 8' },
-                        { value: 'sqlite-3', label: 'SQLite 3' },
+                        { value: 'postgresql', label: 'PostgreSQL' },
+                        { value: 'mysql', label: 'MySQL' },
+                        { value: 'mariadb', label: 'MariaDB' },
+                        { value: 'sqlserver', label: 'SQL Server' },
+                        { value: 'sqlite', label: 'SQLite' },
                       ]}
                     />
                     <Select

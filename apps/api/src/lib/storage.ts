@@ -103,3 +103,44 @@ export async function deleteFile(objectName: string): Promise<void> {
   const client = getClient();
   await client.removeObject(config.STORAGE_BUCKET, objectName);
 }
+
+export interface StorageObjectInfo {
+  name: string;
+  lastModified: Date | null;
+  size: number;
+}
+
+/**
+ * List objects under a prefix (S3-compatible). Used for admin pending SQL dump scans.
+ * Stops after `maxKeys` objects to bound work on large buckets.
+ */
+export async function listObjectsWithPrefix(
+  prefix: string,
+  options?: { recursive?: boolean; maxKeys?: number },
+): Promise<StorageObjectInfo[]> {
+  await ensureBucket();
+  const client = getClient();
+  const stream = client.listObjectsV2(
+    config.STORAGE_BUCKET,
+    prefix,
+    options?.recursive ?? true,
+  );
+  const maxKeys = options?.maxKeys ?? 8_000;
+  const out: StorageObjectInfo[] = [];
+
+  for await (const obj of stream) {
+    if (!obj || typeof obj !== 'object') continue;
+    if ('prefix' in obj && obj.prefix) continue;
+    if (!('name' in obj) || typeof obj.name !== 'string' || !obj.name) continue;
+    out.push({
+      name: obj.name,
+      lastModified: 'lastModified' in obj && obj.lastModified instanceof Date ? obj.lastModified : null,
+      size: Number('size' in obj ? obj.size : 0),
+    });
+    if (out.length >= maxKeys) {
+      break;
+    }
+  }
+
+  return out;
+}
