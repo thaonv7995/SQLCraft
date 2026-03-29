@@ -16,7 +16,7 @@ import {
   DATABASE_SCALE_LABELS,
   inferDatasetScaleFromRowCount,
 } from '@/lib/database-catalog';
-import { cn, formatRows } from '@/lib/utils';
+import { cn, formatEstimatedDatasetFootprint, formatRows } from '@/lib/utils';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import type { ClientPageProps } from '@/lib/page-props';
 
@@ -638,7 +638,7 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
         <span className="mx-1.5 text-outline">·</span>
         {database.tableCount} tables
         <span className="mx-1.5 text-outline">·</span>
-        ~{database.estimatedSizeGb.toFixed(1)} GB est.
+        {formatEstimatedDatasetFootprint(database.estimatedSizeGb)}
       </p>
 
       <p className="text-[11px] text-outline">

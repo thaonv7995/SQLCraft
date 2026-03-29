@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   cn,
   formatDuration,
+  formatEstimatedDatasetFootprint,
   formatPlannerEstimatedCost,
   formatRows,
   truncateSql,
@@ -63,6 +64,31 @@ describe('formatRows()', () => {
   it('uses M suffix for millions', () => {
     expect(formatRows(1_000_000)).toBe('1.0M');
     expect(formatRows(2_500_000)).toBe('2.5M');
+  });
+});
+
+// ─── formatEstimatedDatasetFootprint() ───────────────────────────────────────
+
+describe('formatEstimatedDatasetFootprint()', () => {
+  it('uses MB with decimals for sub–1 GB heuristic', () => {
+    expect(formatEstimatedDatasetFootprint(0.187)).toBe('~187 MB est.');
+    expect(formatEstimatedDatasetFootprint(0.009)).toBe('~9.0 MB est.');
+  });
+
+  it('shows tiny sizes without rounding to zero', () => {
+    expect(formatEstimatedDatasetFootprint(0.000_005)).toBe('~<0.01 MB est.');
+    expect(formatEstimatedDatasetFootprint(0.000_011)).toBe('~0.01 MB est.');
+  });
+
+  it('uses GB from 1 upward', () => {
+    expect(formatEstimatedDatasetFootprint(1.0)).toBe('~1.0 GB est.');
+    expect(formatEstimatedDatasetFootprint(4.3)).toBe('~4.3 GB est.');
+  });
+
+  it('handles zero and invalid', () => {
+    expect(formatEstimatedDatasetFootprint(0)).toBe('~0 MB est.');
+    expect(formatEstimatedDatasetFootprint(-1)).toBe('~0 MB est.');
+    expect(formatEstimatedDatasetFootprint(Number.NaN)).toBe('~0 MB est.');
   });
 });
 

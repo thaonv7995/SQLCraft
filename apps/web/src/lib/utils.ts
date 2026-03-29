@@ -19,6 +19,30 @@ export function formatRows(count: number): string {
 }
 
 /**
+ * Catalog heuristic size (bytes ≈ rowCount × 110 / 1e9 as GB). Not dump file size.
+ * Prefer MB when under 1 GB so small datasets are not shown as "~0.0 GB".
+ */
+export function formatEstimatedDatasetFootprint(estimatedSizeGb: number): string {
+  if (!Number.isFinite(estimatedSizeGb) || estimatedSizeGb <= 0) {
+    return '~0 MB est.';
+  }
+  if (estimatedSizeGb < 1) {
+    const mb = estimatedSizeGb * 1000;
+    if (mb < 0.01) {
+      return '~<0.01 MB est.';
+    }
+    if (mb < 1) {
+      return `~${mb.toFixed(2)} MB est.`;
+    }
+    if (mb < 10) {
+      return `~${mb.toFixed(1)} MB est.`;
+    }
+    return `~${Math.round(mb)} MB est.`;
+  }
+  return `~${estimatedSizeGb.toFixed(1)} GB est.`;
+}
+
+/**
  * Format optimizer estimated cost for display. PostgreSQL costs are often large;
  * SQL Server subtree costs are often below 1, so `toFixed(1)` shows "0.0" incorrectly.
  */

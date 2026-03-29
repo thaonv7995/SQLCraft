@@ -180,7 +180,8 @@ function estimateSizeGb(rowCount: number, _tableCount: number): number {
   if (rowCount <= 0) return 0;
   const bytesPerRow = 110;
   const estimated = (rowCount * bytesPerRow) / 1_000_000_000;
-  return Number(estimated.toFixed(1));
+  // Keep fractional GB for the API; UI picks MB vs GB. Rounding to 1 decimal here turned tiny DBs into 0.0.
+  return estimated;
 }
 
 function sumRowCounts(rowCounts: unknown): number {
