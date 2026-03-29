@@ -62,6 +62,7 @@ services:
     container_name: sqlcraft-api
     env_file: .env
     environment:
+      NODE_OPTIONS: --max-old-space-size=8192
       DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
       REDIS_URL: redis://redis:6379
       QUEUE_PREFIX: sqlcraft:docker-dev

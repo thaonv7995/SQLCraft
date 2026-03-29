@@ -747,8 +747,9 @@ async function restoreFromArtifact(params: {
   artifactUrl: string;
   engine: SchemaSqlEngine;
   mssqlSaPassword: string;
+  schema: SchemaDefinition | null;
 }): Promise<boolean> {
-  const { logger, containerRef, dbUser, dbPassword, dbName, artifactUrl, engine, mssqlSaPassword } =
+  const { logger, containerRef, dbUser, dbPassword, dbName, artifactUrl, engine, mssqlSaPassword, schema } =
     params;
   const mysqlFamilyEngine = engine === 'mariadb' ? 'mariadb' : 'mysql';
   const inlineSql = maybeExtractInlineSql(artifactUrl);
@@ -759,7 +760,7 @@ async function restoreFromArtifact(params: {
         containerRef,
         dbUser,
         dbName,
-        sql: sanitizePostgresDumpForPsql(dbName, inlineSql),
+        sql: sanitizePostgresDumpForPsql(dbName, inlineSql, schema),
       });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
@@ -826,7 +827,7 @@ async function restoreFromArtifact(params: {
           containerRef,
           dbUser,
           dbName,
-          sql: sanitizePostgresDumpForPsql(dbName, bytes),
+          sql: sanitizePostgresDumpForPsql(dbName, bytes, schema),
         });
       } else if (engine === 'sqlserver') {
         await runSqlcmdInSandboxContainer({
@@ -849,7 +850,7 @@ async function restoreFromArtifact(params: {
           containerRef,
           dbUser,
           dbName,
-          sql: sanitizePostgresDumpForPsql(dbName, sqlBuf),
+          sql: sanitizePostgresDumpForPsql(dbName, sqlBuf, schema),
         });
       } else if (engine === 'sqlserver') {
         await runSqlcmdInSandboxContainer({
@@ -918,6 +919,7 @@ export async function loadDatasetIntoSandbox(params: {
         artifactUrl: datasetTemplate.artifactUrl,
         engine,
         mssqlSaPassword,
+        schema,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

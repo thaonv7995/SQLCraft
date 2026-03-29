@@ -72,6 +72,7 @@ services:
       - .env.production
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=8192
     ports:
       - "${API_PORT:-4000}:4000"
     extra_hosts:

@@ -1,5 +1,8 @@
 FROM node:20-alpine
 
+# Large SQL dump import/scan paths can exceed default ~2GB heap.
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
 WORKDIR /app
 
 RUN npm install -g pnpm

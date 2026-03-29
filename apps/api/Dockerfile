@@ -22,6 +22,7 @@ RUN pnpm --filter @sqlcraft/api build
 
 FROM base AS runner
 ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=8192"
 WORKDIR /app
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/.npmrc ./
 COPY --from=build /app/packages ./packages
