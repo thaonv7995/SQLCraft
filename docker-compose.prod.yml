@@ -117,9 +117,32 @@ services:
       - .env.production
     environment:
       NODE_ENV: production
+      WORKER_ROLE: sandbox
       STORAGE_DOCKER_CONTAINER: "${STACK_NAME:-sqlcraft}-minio"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sqlcraft
+
+  worker-query:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    image: ${WORKER_IMAGE:-ghcr.io/thaonv7995/sqlcraft-worker:latest}
+    container_name: "${STACK_NAME:-sqlcraft}-worker-query"
+    env_file:
+      - .env.production
+    environment:
+      NODE_ENV: production
+      WORKER_ROLE: query
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

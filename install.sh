@@ -408,13 +408,13 @@ pick_stack_name() {
   desired="$base"
   local names
   names="$(docker ps -a --format '{{.Names}}')"
-  if ! grep -Eq "^${desired}-(postgres|redis|minio|api|web|worker)$" <<<"$names"; then
+  if ! grep -Eq "^${desired}-(postgres|redis|minio|api|web|worker|worker-query)$" <<<"$names"; then
     echo "$desired"
     return
   fi
   suffix="${USER:-dev}"
   candidate="${base}-${suffix}"
-  if ! grep -Eq "^${candidate}-(postgres|redis|minio|api|web|worker)$" <<<"$names"; then
+  if ! grep -Eq "^${candidate}-(postgres|redis|minio|api|web|worker|worker-query)$" <<<"$names"; then
     echo "$candidate"
     return
   fi
@@ -532,8 +532,8 @@ bootstrap_stack() {
   run_compose run --rm --entrypoint sh api -lc \
     "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:seed"
 
-  headline "Starting API + Web + Worker"
-  run_compose up -d api web worker
+  headline "Starting API + Web + Worker + Worker-query"
+  run_compose up -d api web worker worker-query
 }
 
 print_summary() {

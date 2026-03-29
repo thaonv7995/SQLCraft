@@ -113,6 +113,7 @@ services:
     networks:
       - sqlcraft
 
+  # Sandbox-heavy queues (provision / reset / cleanup + expiry). Needs Docker socket.
   worker:
     build:
       context: .
@@ -123,6 +124,7 @@ services:
       DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
       REDIS_URL: redis://redis:6379
       QUEUE_PREFIX: sqlcraft:docker-dev
+      WORKER_ROLE: sandbox
       SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
@@ -135,6 +137,37 @@ services:
       - /app/node_modules
       - /app/services/worker/node_modules
       - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sqlcraft
+
+  # Interactive query jobs only — separate Node process so long restores do not block queries.
+  worker-query:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile.dev
+    container_name: sqlcraft-worker-query
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://sqlcraft:sqlcraft@postgres:5432/sqlcraft
+      REDIS_URL: redis://redis:6379
+      QUEUE_PREFIX: sqlcraft:docker-dev
+      WORKER_ROLE: query
+      SANDBOX_DB_HOST: sandbox-unconfigured
+      SANDBOX_DB_PORT: 5432
+      SANDBOX_DB_USER: sandbox
+      SANDBOX_DB_PASSWORD: sandbox
+      SANDBOX_MSSQL_SA_PASSWORD: SqlForge1!Sb
+    volumes:
+      - ./services/worker:/app/services/worker
+      - ./packages:/app/packages
+      - /app/node_modules
+      - /app/services/worker/node_modules
     depends_on:
       postgres:
         condition: service_healthy

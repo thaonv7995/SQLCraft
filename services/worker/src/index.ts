@@ -101,6 +101,36 @@ const DATASET_RESTORE_TIMEOUT_MS = Math.max(
   Number(process.env.SANDBOX_DATASET_RESTORE_TIMEOUT_MS) || 10 * 60 * 1000,
 );
 
+/**
+ * Split heavy sandbox work (Docker, restore) from interactive query jobs so long restores
+ * do not share one Node event loop with query execution.
+ * - `all`: single process (legacy / dev convenience).
+ * - `sandbox`: sandbox-provisioning, sandbox-cleanup, sandbox-reset + expiry scanner.
+ * - `query`: query-execution only (no Docker socket).
+ */
+type WorkerRole = 'all' | 'sandbox' | 'query';
+function resolveWorkerRole(): WorkerRole {
+  const raw = (process.env.WORKER_ROLE ?? 'all').trim().toLowerCase();
+  if (raw === 'sandbox' || raw === 'sandbox-only') return 'sandbox';
+  if (raw === 'query' || raw === 'query-only') return 'query';
+  if (raw === 'all' || raw === '') return 'all';
+  logger.warn({ raw }, 'Invalid WORKER_ROLE, defaulting to all');
+  return 'all';
+}
+const workerRole = resolveWorkerRole();
+const sandboxQueuesEnabled = workerRole === 'all' || workerRole === 'sandbox';
+const queryQueueEnabled = workerRole === 'all' || workerRole === 'query';
+
+/** Parallel query jobs when `WORKER_ROLE=query` (default 4). With `all`, default 1. */
+const queryWorkerConcurrency = Math.max(
+  1,
+  Math.min(
+    64,
+    Number(process.env.QUERY_WORKER_CONCURRENCY) ||
+      (workerRole === 'query' ? 4 : 1),
+  ),
+);
+
 // ─── Redis connection ─────────────────────────────────────────────────────────
 
 const connection = new IORedis(redisUrl, { maxRetriesPerRequest: null });
@@ -384,7 +414,8 @@ const longJobOpts = {
   stalledInterval: LONG_JOB_STALLED_INTERVAL_MS,
 };
 
-const sandboxProvisioningWorker = new Worker(
+const sandboxProvisioningWorker = sandboxQueuesEnabled
+  ? new Worker(
   QUEUES.SANDBOX_PROVISIONING,
   async (job: Job) => {
     const { sandboxInstanceId, learningSessionId, schemaTemplateId, datasetTemplateId } = job.data as {
@@ -472,11 +503,13 @@ const sandboxProvisioningWorker = new Worker(
     }
   },
   longJobOpts,
-);
+)
+  : null;
 
 // ─── Worker: destroy_sandbox ──────────────────────────────────────────────────
 
-const sandboxCleanupWorker = new Worker(
+const sandboxCleanupWorker = sandboxQueuesEnabled
+  ? new Worker(
   QUEUES.SANDBOX_CLEANUP,
   async (job: Job) => {
     const { sandboxInstanceId, learningSessionId } = job.data as {
@@ -526,11 +559,13 @@ const sandboxCleanupWorker = new Worker(
     logger.info({ sandboxInstanceId }, 'Sandbox destroyed');
   },
   longJobOpts,
-);
+)
+  : null;
 
 // ─── Worker: reset_sandbox ────────────────────────────────────────────────────
 
-const sandboxResetWorker = new Worker(
+const sandboxResetWorker = sandboxQueuesEnabled
+  ? new Worker(
   QUEUES.SANDBOX_RESET,
   async (job: Job) => {
     const { sandboxInstanceId } = job.data as {
@@ -620,7 +655,8 @@ const sandboxResetWorker = new Worker(
     }
   },
   longJobOpts,
-);
+)
+  : null;
 
 // ─── Worker: execute_query / cancel_query ─────────────────────────────────────
 
@@ -809,16 +845,21 @@ async function handleExecuteQueryJob(job: Job): Promise<void> {
   }
 }
 
-const queryExecutionWorker = new Worker(
-  QUEUES.QUERY_EXECUTION,
-  async (job: Job) => {
-    if (job.name === 'cancel_query') {
-      return handleCancelQueryJob(job);
-    }
-    return handleExecuteQueryJob(job);
-  },
-  queueOptions,
-);
+const queryExecutionWorker = queryQueueEnabled
+  ? new Worker(
+      QUEUES.QUERY_EXECUTION,
+      async (job: Job) => {
+        if (job.name === 'cancel_query') {
+          return handleCancelQueryJob(job);
+        }
+        return handleExecuteQueryJob(job);
+      },
+      {
+        ...queueOptions,
+        concurrency: queryWorkerConcurrency,
+      },
+    )
+  : null;
 
 // ─── Expiry scanner ───────────────────────────────────────────────────────────
 
@@ -843,17 +884,35 @@ async function runExpiryScanner(): Promise<void> {
   }
 }
 
-const expiryScanner = setInterval(runExpiryScanner, EXPIRY_SCAN_INTERVAL_MS);
-runExpiryScanner().catch((err) => logger.error({ err }, 'Initial expiry scan failed'));
+const expiryScanner =
+  sandboxQueuesEnabled
+    ? setInterval(runExpiryScanner, EXPIRY_SCAN_INTERVAL_MS)
+    : null;
+if (sandboxQueuesEnabled) {
+  runExpiryScanner().catch((err) => logger.error({ err }, 'Initial expiry scan failed'));
+}
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
-const workers = [
-  { name: QUEUES.SANDBOX_PROVISIONING, worker: sandboxProvisioningWorker },
-  { name: QUEUES.SANDBOX_CLEANUP, worker: sandboxCleanupWorker },
-  { name: QUEUES.SANDBOX_RESET, worker: sandboxResetWorker },
-  { name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker },
-];
+const workers: Array<{ name: string; worker: Worker }> = [];
+if (sandboxProvisioningWorker) {
+  workers.push({ name: QUEUES.SANDBOX_PROVISIONING, worker: sandboxProvisioningWorker });
+}
+if (sandboxCleanupWorker) {
+  workers.push({ name: QUEUES.SANDBOX_CLEANUP, worker: sandboxCleanupWorker });
+}
+if (sandboxResetWorker) {
+  workers.push({ name: QUEUES.SANDBOX_RESET, worker: sandboxResetWorker });
+}
+if (queryExecutionWorker) {
+  workers.push({ name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker });
+}
+
+if (workers.length === 0) {
+  throw new Error(
+    'No BullMQ workers started: check WORKER_ROLE (must be all, sandbox, or query)',
+  );
+}
 
 for (const { name, worker } of workers) {
   worker.on('completed', (job) => {
@@ -876,7 +935,7 @@ for (const { name, worker } of workers) {
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Received shutdown signal, closing workers...');
 
-  clearInterval(expiryScanner);
+  if (expiryScanner) clearInterval(expiryScanner);
   await Promise.all(workers.map(({ worker }) => worker.close()));
   await cleanupQueue.close();
   await queryExecutionQueueClient.close();
@@ -891,6 +950,12 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 logger.info(
-  { queues: Object.values(QUEUES), redisUrl, queuePrefix: queuePrefix ?? 'bull' },
+  {
+    workerRole,
+    activeQueues: workers.map((w) => w.name),
+    queryWorkerConcurrency: queryQueueEnabled ? queryWorkerConcurrency : null,
+    redisUrl,
+    queuePrefix: queuePrefix ?? 'bull',
+  },
   'SQLCraft worker service started',
 );

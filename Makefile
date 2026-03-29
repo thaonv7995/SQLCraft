@@ -28,13 +28,13 @@ dev: ## Start full dev environment (Docker + services)
 	@sleep 3
 	@pnpm run db:migrate
 	@pnpm run db:seed
-	@docker compose -f docker-compose.dev.yml up --build api web worker
+	@docker compose -f docker-compose.dev.yml up --build api web worker worker-query
 
 dev-infra: ## Start only infrastructure (Postgres, Redis, MinIO)
 	docker compose -f docker-compose.dev.yml up -d postgres redis minio
 
 dev-services: ## Start app services without rebuilding infra
-	docker compose -f docker-compose.dev.yml up --build api web worker
+	docker compose -f docker-compose.dev.yml up --build api web worker worker-query
 
 dev-logs: ## Tail logs from all services
 	docker compose -f docker-compose.dev.yml logs -f
@@ -130,7 +130,7 @@ prod-build: prod-setup ## Build images, bootstrap DB/admin, and start production
 	@set -e; \
 	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build postgres redis minio; \
 	docker compose --env-file .env.production -f docker-compose.prod.yml run --rm --entrypoint sh api -lc "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:seed"; \
-	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build api web worker; \
+	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build api web worker worker-query; \
 	first_admin_email="$$(awk -F= '/^FIRST_ADMIN_EMAIL=/{print $$2}' .env.production)"; \
 	first_admin_username="$$(awk -F= '/^FIRST_ADMIN_USERNAME=/{print $$2}' .env.production)"; \
 	first_admin_password="$$(awk -F= '/^FIRST_ADMIN_PASSWORD=/{print $$2}' .env.production)"; \

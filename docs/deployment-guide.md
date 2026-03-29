@@ -6,7 +6,8 @@ This repo’s supported path is **Docker Compose production** (`docker-compose.p
 
 - **web** — Next.js (`WEB_PORT` → container `3000`)
 - **api** — Fastify (`API_PORT` → `4000`)
-- **worker** — BullMQ + sandbox provisioning (**requires** Docker socket: `/var/run/docker.sock`)
+- **worker** — BullMQ sandbox queues (`WORKER_ROLE=sandbox`): provision / reset / cleanup (**requires** Docker socket: `/var/run/docker.sock`)
+- **worker-query** — BullMQ `query-execution` only (`WORKER_ROLE=query`); **no** Docker socket (separate process so long restores do not block queries)
 - **postgres** — app metadata DB
 - **redis** — queues
 - **minio** — object storage for dataset artifacts
@@ -15,7 +16,7 @@ This repo’s supported path is **Docker Compose production** (`docker-compose.p
 
 - **Docker Engine** with **Compose V2** (`docker compose`, not only legacy `docker-compose`).
 - **`openssl`** — used by `install.sh` / `make prod-setup` for secrets.
-- **Linux** recommended for the worker (host Docker socket + sandbox containers).
+- **Linux** recommended for **worker** (host Docker socket + sandbox containers). **worker-query** can run anywhere Redis is reachable; it does not use the Docker socket.
 
 ## 3. Environment variables (see `.env.production.example`)
 
@@ -27,9 +28,9 @@ Optional image overrides: `USE_PREBUILT_IMAGES`, `SQLCRAFT_GHCR_OWNER`, `SQLCRAF
 
 1. Ensures `.env.production` (from example), secrets, ports, domain-based URLs.
 2. `docker compose up` **postgres, redis, minio** (with port conflict retries).
-3. Pull or build **api / web / worker** images.
+3. Pull or build **api / web / worker** images (same image used for **worker** and **worker-query**).
 4. One-off: `drizzle-kit migrate` + `db:seed` inside the **api** image (same as `make prod-build`).
-5. Starts **api**, **web**, **worker**.
+5. Starts **api**, **web**, **worker**, **worker-query**.
 
 The **api** image entrypoint also runs migrations on each container start (idempotent).
 
@@ -43,7 +44,7 @@ The **api** image entrypoint also runs migrations on each container start (idemp
 
 - Open web URL, sign in with first admin from `.env.production`.
 - SQL Lab: start a session, wait for sandbox **ready**, run a query.
-- Worker logs: sandbox provisioning jobs complete without permanent `failed` status.
+- Worker logs: sandbox provisioning jobs complete without permanent `failed` status. Check **worker-query** if SQL runs fail while provisioning logs look fine.
 
 ---
 
@@ -111,16 +112,22 @@ Adjust ports if you changed `WEB_PORT`, `API_PORT`, or `MINIO_*` in `.env.produc
 
 ## 9. Worker and Docker permissions
 
-The **worker** container mounts **`/var/run/docker.sock`** so it can create/remove **sandbox engine** containers on the **same Docker host**.
+The **worker** (sandbox) container mounts **`/var/run/docker.sock`** so it can create/remove **sandbox engine** containers on the **same Docker host**. The **worker-query** container does **not** mount the socket; it only consumes BullMQ jobs and connects to sandbox DBs over the Docker network.
 
 - Run Docker Engine as usual (rootful daemon is the common, supported path for this stack).
-- The worker process inside the container uses the **socket**; ensure **SELinux** (if enforcing) allows the container to use the socket (many distros need the Docker CE packages’ default policies or `container_manage_cgroup` / `container_socket` rules — consult your distro if `permission denied` appears on `docker.sock`).
+- The sandbox worker process uses the **socket**; ensure **SELinux** (if enforcing) allows the container to use the socket (many distros need the Docker CE packages’ default policies or `container_manage_cgroup` / `container_socket` rules — consult your distro if `permission denied` appears on `docker.sock`).
 - **Rootless Docker** on the host is possible but **not** documented here; socket paths and permissions differ.
 
-If provisioning fails with Docker errors in worker logs:
+If provisioning fails with Docker errors in **worker** logs:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker
+```
+
+For stuck or failing **SQL Lab queries** (with sandbox already ready), tail **worker-query**:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker-query
 ```
 
 Confirm `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod` matches the Compose network name in `docker-compose.prod.yml`.
@@ -129,7 +136,7 @@ Confirm `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod` matches the Compose network n
 
 ## 10. Prebuilt images (`USE_PREBUILT_IMAGES=true`) and GHCR
 
-When `USE_PREBUILT_IMAGES=true`, `install.sh` / `make prod-build` runs `docker compose pull` for **api**, **web**, and **worker** using `API_IMAGE` / `WEB_IMAGE` / `WORKER_IMAGE` (default `ghcr.io/<owner>/sqlcraft-*`).
+When `USE_PREBUILT_IMAGES=true`, `install.sh` / `make prod-build` runs `docker compose pull` for **api**, **web**, and **worker** (image reused for **worker-query**) using `API_IMAGE` / `WEB_IMAGE` / `WORKER_IMAGE` (default `ghcr.io/<owner>/sqlcraft-*`).
 
 **Public images:** no login required; ensure outbound HTTPS to `ghcr.io` is allowed.
 
@@ -144,7 +151,7 @@ Then re-run:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.yml pull api web worker
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d api web worker
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d api web worker worker-query
 ```
 
 If pull fails, the installer falls back to **local build** (`docker compose build`) when possible.

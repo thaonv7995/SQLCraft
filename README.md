@@ -118,6 +118,8 @@ Typical dev URLs match production defaults on localhost.
 docker compose -f docker-compose.dev.yml up --build -d
 ```
 
+This starts **`worker`** (`WORKER_ROLE=sandbox`, Docker + provision/cleanup) and **`worker-query`** (`WORKER_ROLE=query`, BullMQ queries only) as separate containers so heavy dataset restores do not share the same Node process with interactive queries.
+
 After changing workspace `package.json` files, run **`pnpm install`** at the repo root, commit **`pnpm-lock.yaml`**, then rebuild dev images.
 
 ## Docker images & releases
@@ -132,11 +134,11 @@ Installer env knobs: `USE_PREBUILT_IMAGES`, `SQLCRAFT_GHCR_OWNER`, `SQLCRAFT_VER
 
 **“Sandbox could not start” (Linux)**
 
-- Restart worker:  
-  `docker compose --env-file .env.production -f docker-compose.prod.yml up -d worker`
+- Restart workers:  
+  `docker compose --env-file .env.production -f docker-compose.prod.yml up -d worker worker-query`
 - Ensure `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod` in `.env.production`.
 - Logs:  
-  `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker`
+  `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker worker-query`
 
 **Compose / pull**
 

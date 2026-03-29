@@ -84,7 +84,7 @@ stop_stack() {
 
 cleanup_stack_artifacts() {
   local pattern network
-  pattern="^${STACK_NAME}-(postgres|redis|minio|api|web|worker)$"
+  pattern="^${STACK_NAME}-(postgres|redis|minio|api|web|worker|worker-query)$"
   network="${STACK_NAME}-prod"
 
   log "Cleaning leftover containers for stack: ${STACK_NAME}"
