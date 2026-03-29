@@ -256,6 +256,12 @@ importers:
 
   packages/config: {}
 
+  packages/mysql-explain:
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
   packages/types:
     devDependencies:
       typescript:
@@ -264,6 +270,9 @@ importers:
 
   services/worker:
     dependencies:
+      '@sqlcraft/mysql-explain':
+        specifier: workspace:*
+        version: link:../../packages/mysql-explain
       '@sqlcraft/types':
         specifier: workspace:*
         version: link:../../packages/types

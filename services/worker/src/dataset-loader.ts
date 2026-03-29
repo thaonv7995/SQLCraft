@@ -757,10 +757,7 @@ export async function loadDatasetIntoSandbox(params: {
         },
         'Dataset artifact restore failed',
       );
-      throw new Error(
-        `Dataset artifact restore failed (${datasetTemplate.artifactUrl}): ${msg}`,
-        { cause: error instanceof Error ? error : undefined },
-      );
+      throw new Error(`Dataset artifact restore failed (${datasetTemplate.artifactUrl}): ${msg}`);
     }
 
     if (!restored) {

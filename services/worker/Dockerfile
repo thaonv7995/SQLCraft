@@ -8,6 +8,7 @@ FROM base AS deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY packages/types/package.json ./packages/types/
 COPY packages/config/package.json ./packages/config/
+COPY packages/mysql-explain/package.json ./packages/mysql-explain/
 COPY services/worker/package.json ./services/worker/
 RUN pnpm install --frozen-lockfile
 
@@ -18,6 +19,7 @@ COPY packages ./packages
 COPY services/worker ./services/worker
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @sqlcraft/types build
+RUN pnpm --filter @sqlcraft/mysql-explain build
 RUN pnpm --filter @sqlcraft/worker build
 
 FROM base AS runner

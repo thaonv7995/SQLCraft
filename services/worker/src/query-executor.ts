@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { mysqlExplainJsonToPgShaped } from '@sqlcraft/mysql-explain';
 import mysql from 'mysql2/promise';
 import sql from 'mssql';
 import type { QueryResultPreview, SchemaSqlEngine } from '@sqlcraft/types';
@@ -529,7 +530,8 @@ async function getExplainPlanMysql(
       const first = rowArr[0] as Record<string, unknown> | undefined;
       let raw: unknown = rowArr;
       if (first && typeof first === 'object') {
-        const explainVal = first.EXPLAIN ?? first['EXPLAIN'];
+        const explainVal =
+          first.EXPLAIN ?? first.explain ?? first['EXPLAIN'] ?? first['explain'];
         if (typeof explainVal === 'string') {
           try {
             raw = JSON.parse(explainVal) as unknown;
@@ -540,16 +542,14 @@ async function getExplainPlanMysql(
           raw = explainVal;
         }
       }
-      return repairExplainPlanResult({ rawPlan: raw, planSummary: extractPlanSummary(raw) });
+      const normalized = mysqlExplainJsonToPgShaped(raw) ?? raw;
+      return repairExplainPlanResult({
+        rawPlan: normalized,
+        planSummary: extractPlanSummary(normalized),
+      });
     };
 
-    if (mode === 'explain_analyze') {
-      try {
-        return await tryExplain(`EXPLAIN ANALYZE ${sqlText}`);
-      } catch {
-        return await tryExplain(`EXPLAIN FORMAT=JSON ${sqlText}`);
-      }
-    }
+    // MySQL EXPLAIN ANALYZE is plain text; FORMAT=JSON matches Postgres tree UI. Use JSON for both modes.
     return await tryExplain(`EXPLAIN FORMAT=JSON ${sqlText}`);
   } finally {
     await conn.end().catch(() => undefined);

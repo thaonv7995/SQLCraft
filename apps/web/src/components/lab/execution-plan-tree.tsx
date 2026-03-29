@@ -1,5 +1,6 @@
 import type { QueryExecutionPlan } from '@/lib/api';
 import { isSqlServerWrappedPlan, tryMssqlPlanToPgShapedRoot } from '@/lib/mssql-plan-adapter';
+import { tryMysqlJsonToPgRoot } from '@/lib/mysql-explain-adapter';
 import { cn, formatDuration, formatRows } from '@/lib/utils';
 
 type PgPlanNode = {
@@ -46,6 +47,11 @@ function getPlanRoot(plan: unknown): PgPlanNode | null {
 
   if (raw.Plan && typeof raw.Plan === 'object') {
     return raw.Plan as PgPlanNode;
+  }
+
+  const mysqlAsPg = tryMysqlJsonToPgRoot(raw);
+  if (mysqlAsPg) {
+    return mysqlAsPg as PgPlanNode;
   }
 
   if (typeof raw['Node Type'] === 'string') {
