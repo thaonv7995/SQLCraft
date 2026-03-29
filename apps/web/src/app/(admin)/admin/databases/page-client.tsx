@@ -170,7 +170,7 @@ function DatabaseCatalogSkeleton() {
   );
 }
 
-const CATALOG_PAGE_SIZE = 12;
+const CATALOG_PAGE_SIZE = 9;
 const PENDING_SCANS_PAGE_SIZE = 5;
 
 export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
@@ -335,7 +335,7 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
+          {Array.from({ length: CATALOG_PAGE_SIZE }).map((_, index) => (
             <DatabaseCatalogSkeleton key={index} />
           ))}
         </div>
