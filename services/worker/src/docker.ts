@@ -1,5 +1,9 @@
 import { execFile } from 'node:child_process';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { pipeline } from 'node:stream/promises';
+import type { Readable } from 'node:stream';
+import { createGunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
 
@@ -606,7 +610,7 @@ export async function runSqlcmdInSandboxContainer(params: {
   }
 }
 
-export async function readS3ObjectViaMinioContainer(artifactRef: string): Promise<Buffer> {
+function buildMcCatShellScript(artifactRef: string): string {
   const parsed = new URL(artifactRef);
   const bucket = parsed.hostname;
   const objectName = parsed.pathname.replace(/^\/+/, '');
@@ -615,10 +619,92 @@ export async function readS3ObjectViaMinioContainer(artifactRef: string): Promis
     throw new Error(`Invalid s3 artifact reference: ${artifactRef}`);
   }
 
-  const script = [
+  return [
     `mc alias set local http://localhost:9000 ${shQuote(storageAccessKey)} ${shQuote(storageSecretKey)} >/dev/null`,
     `mc cat ${shQuote(`local/${bucket}/${objectName}`)}`,
   ].join(' && ');
+}
 
+export async function readS3ObjectViaMinioContainer(artifactRef: string): Promise<Buffer> {
+  const script = buildMcCatShellScript(artifactRef);
   return runDockerBinary(['exec', storageDockerContainer, 'sh', '-lc', script]);
+}
+
+/**
+ * Stream object bytes from MinIO via `mc cat` inside the storage sidecar (no full-file buffer in the worker).
+ */
+export function createMcCatObjectReadStream(artifactRef: string): Readable {
+  const script = buildMcCatShellScript(artifactRef);
+  const child = spawn('docker', ['exec', storageDockerContainer, 'sh', '-lc', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+
+  child.on('error', (err) => {
+    child.stdout.destroy(err);
+  });
+
+  child.on('close', (code) => {
+    if (code !== 0 && code !== null) {
+      const msg = stderr.trim() || `mc cat exited with code ${code}`;
+      child.stdout.destroy(new Error(msg));
+    }
+  });
+
+  return child.stdout;
+}
+
+export async function runPsqlInSandboxContainerStreaming(params: {
+  containerRef: string;
+  dbUser: string;
+  dbName: string;
+  source: Readable;
+  gzip?: boolean;
+}): Promise<void> {
+  const { containerRef, dbUser, dbName, source, gzip } = params;
+  const args = [
+    'exec',
+    '-i',
+    containerRef,
+    'psql',
+    '-v',
+    'ON_ERROR_STOP=1',
+    '-U',
+    dbUser,
+    '-d',
+    dbName,
+  ];
+  const child = spawn('docker', args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  const pipelinePromise = gzip
+    ? pipeline(source, createGunzip(), child.stdin)
+    : pipeline(source, child.stdin);
+
+  try {
+    await pipelinePromise;
+  } catch (err) {
+    child.kill('SIGKILL');
+    throw err;
+  }
+
+  const code = await closePromise;
+  if (code !== 0) {
+    const detail = stderr.trim().slice(0, 2000);
+    throw new Error(`psql restore failed with code ${code}: ${detail || '(no stderr)'}`);
+  }
 }

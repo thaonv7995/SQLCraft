@@ -4,10 +4,12 @@ import pino from 'pino';
 import type { DatasetTemplateDefinition, SchemaDefinition } from './db';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
 import {
+  createMcCatObjectReadStream,
   readS3ObjectViaMinioContainer,
   runMysqlInSandboxContainer,
   runPgRestoreInSandboxContainer,
   runPsqlInSandboxContainer,
+  runPsqlInSandboxContainerStreaming,
   runSqlcmdInSandboxContainer,
 } from './docker';
 import { sanitizeSqlServerDumpPayload } from './sqlserver-dump-sanitize';
@@ -585,6 +587,20 @@ async function restoreFromArtifact(params: {
   const extension = getArtifactExtension(artifactRef);
   if (!extension) {
     return false;
+  }
+
+  const isS3 = /^s3:\/\//i.test(artifactRef);
+  if (engine === 'postgresql' && isS3 && (extension === '.sql' || extension === '.sql.gz')) {
+    const source = createMcCatObjectReadStream(artifactRef);
+    await runPsqlInSandboxContainerStreaming({
+      containerRef,
+      dbUser,
+      dbName,
+      source,
+      gzip: extension === '.sql.gz',
+    });
+    logger.info({ artifactRef, extension }, 'Dataset restored from S3 artifact (streaming)');
+    return true;
   }
 
   const bytes = await readArtifactBytes(artifactRef);

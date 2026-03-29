@@ -27,12 +27,53 @@ describe('sessions router HTTP contracts', () => {
   beforeEach(async () => {
     sessionServiceMocks.listUserSessions.mockResolvedValue([]);
     sessionServiceMocks.createSession.mockResolvedValue({
-      id: '11111111-1111-4111-8111-111111111111',
-      status: 'provisioning',
+      session: {
+        id: '11111111-1111-4111-8111-111111111111',
+        userId: 'user-123',
+        challengeVersionId: '11111111-1111-4111-8111-111111111111',
+        status: 'provisioning',
+        startedAt: new Date('2026-01-01T00:00:00.000Z'),
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        databaseName: null,
+        sourceScale: null,
+        selectedScale: null,
+        availableScales: [],
+        rowCount: null,
+        sourceRowCount: null,
+        provisioningEstimate: {
+          estimatedSeconds: 60,
+          estimatedReadyAt: '2026-01-01T00:01:00.000Z',
+        },
+      },
+      sandbox: { id: '22222222-2222-4222-8222-222222222222', status: 'requested' },
     });
     sessionServiceMocks.getSession.mockResolvedValue({
       id: '11111111-1111-4111-8111-111111111111',
+      userId: 'user-123',
+      challengeVersionId: '11111111-1111-4111-8111-111111111111',
       status: 'active',
+      startedAt: new Date('2026-01-01T00:00:00.000Z'),
+      lastActivityAt: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      endedAt: null,
+      databaseName: null,
+      sandbox: null,
+      dataset: {
+        schemaTemplateId: null,
+        datasetTemplateId: null,
+        selectedScale: null,
+        sourceScale: null,
+        availableScales: [],
+        totalRows: null,
+        sourceTotalRows: null,
+        rowCounts: null,
+      },
+      sourceScale: null,
+      selectedScale: null,
+      availableScales: [],
+      rowCount: null,
+      sourceRowCount: null,
+      provisioningEstimate: null,
     });
     sessionServiceMocks.heartbeatSession.mockResolvedValue({
       expiresAt: '2026-01-01T00:00:00.000Z',
@@ -114,8 +155,25 @@ describe('sessions router HTTP contracts', () => {
       code: ApiCode.CREATED,
       message: 'Learning session created',
       data: {
-        id: '11111111-1111-4111-8111-111111111111',
-        status: 'provisioning',
+        session: {
+          id: '11111111-1111-4111-8111-111111111111',
+          userId: 'user-123',
+          challengeVersionId: '11111111-1111-4111-8111-111111111111',
+          status: 'provisioning',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          databaseName: null,
+          sourceScale: null,
+          selectedScale: null,
+          availableScales: [],
+          rowCount: null,
+          sourceRowCount: null,
+          provisioningEstimate: {
+            estimatedSeconds: 60,
+            estimatedReadyAt: '2026-01-01T00:01:00.000Z',
+          },
+        },
+        sandbox: { id: '22222222-2222-4222-8222-222222222222', status: 'requested' },
       },
     });
   });

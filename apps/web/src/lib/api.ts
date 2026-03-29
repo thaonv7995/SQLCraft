@@ -516,6 +516,11 @@ export function resolveDatasetScaleContext(payload: {
   };
 }
 
+export interface SessionProvisioningEstimate {
+  estimatedSeconds: number;
+  estimatedReadyAt: string;
+}
+
 export interface LearningSession {
   id: string;
   userId: string;
@@ -538,6 +543,7 @@ export interface LearningSession {
   availableScales?: DatasetScale[];
   rowCount?: number;
   sourceRowCount?: number;
+  provisioningEstimate?: SessionProvisioningEstimate | null;
   startedAt: string;
   lastActivityAt?: string | null;
   createdAt: string;

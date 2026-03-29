@@ -76,6 +76,13 @@ function getEffectiveSessionStatus(
   return session.status;
 }
 
+function formatProvisioningEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 1) return '';
+  if (seconds < 90) return `~${Math.round(seconds)}s`;
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `~${minutes} min`;
+}
+
 // ─── Dataset Scale Selector ───────────────────────────────────────────────────
 
 const DATASET_SCALE_META: Record<DatasetScale, { label: string; desc: string }> = {
@@ -2171,6 +2178,10 @@ export default function LabPage({ params }: ClientPageProps) {
     (Boolean(latestAttemptEvaluation.feedbackText?.trim()) || latestAttemptPassChecks.length > 0);
   const explainPlanMode = getExplainPlanMode(currentQuery);
   const effectiveSessionStatus = getEffectiveSessionStatus(session);
+  const provisioningEtaLabel =
+    session?.status === 'provisioning' && session.provisioningEstimate
+      ? formatProvisioningEta(session.provisioningEstimate.estimatedSeconds)
+      : '';
   const isSessionReady = effectiveSessionStatus === 'active';
   const isInteractiveSession =
     !session || ['active', 'provisioning', 'paused'].includes(effectiveSessionStatus ?? session.status);
@@ -2712,7 +2723,9 @@ export default function LabPage({ params }: ClientPageProps) {
               }
               aria-label={
                 effectiveSessionStatus === 'provisioning'
-                  ? 'Sandbox provisioning'
+                  ? provisioningEtaLabel
+                    ? `Sandbox provisioning, estimated ${provisioningEtaLabel}`
+                    : 'Sandbox provisioning'
                   : effectiveSessionStatus === 'active'
                     ? 'Sandbox ready'
                     : `Sandbox ${effectiveSessionStatus ?? 'unknown'}`
@@ -2731,12 +2744,21 @@ export default function LabPage({ params }: ClientPageProps) {
                       : 'bg-outline',
                 )}
               />
-              <span className="hidden text-[11px] font-medium text-on-surface-variant sm:inline">
-                {effectiveSessionStatus === 'provisioning'
-                  ? 'Provisioning'
-                  : effectiveSessionStatus === 'active'
-                    ? 'Ready'
-                    : effectiveSessionStatus ?? '—'}
+              <span className="hidden flex-col text-[11px] font-medium text-on-surface-variant sm:flex sm:leading-tight">
+                {effectiveSessionStatus === 'provisioning' ? (
+                  <>
+                    <span>Provisioning</span>
+                    {provisioningEtaLabel ? (
+                      <span className="text-[10px] font-normal text-on-surface-variant/75">
+                        {provisioningEtaLabel}
+                      </span>
+                    ) : null}
+                  </>
+                ) : effectiveSessionStatus === 'active' ? (
+                  'Ready'
+                ) : (
+                  (effectiveSessionStatus ?? '—')
+                )}
               </span>
             </div>
             <Button

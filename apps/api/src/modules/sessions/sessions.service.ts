@@ -28,6 +28,10 @@ import {
 } from '../../lib/dataset-scales';
 import type { DatasetSize } from '@sqlcraft/types';
 import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue';
+import {
+  computeSandboxProvisioningEstimate,
+  type ProvisioningEstimate,
+} from '../../lib/sandbox-provision-estimate';
 import type { CreateSessionBody } from './sessions.schema';
 import type { RevertSchemaDiffChangeBody } from './sessions.schema';
 
@@ -123,6 +127,7 @@ export interface CreateSessionResult {
     availableScales: DatasetSize[];
     rowCount: number | null;
     sourceRowCount: number | null;
+    provisioningEstimate: ProvisioningEstimate;
   };
   sandbox: Pick<SandboxRow, 'id' | 'status'>;
 }
@@ -136,6 +141,7 @@ export interface GetSessionResult extends SessionRow {
   availableScales: DatasetSize[];
   rowCount: number | null;
   sourceRowCount: number | null;
+  provisioningEstimate: ProvisioningEstimate | null;
 }
 
 export interface EndSessionResult {
@@ -491,6 +497,12 @@ export async function createSession(
   const schemaTemplate =
     await sessionsRepository.findSchemaTemplateById(provisionSchemaTemplateId);
 
+  const provisioningEstimate = await computeSandboxProvisioningEstimate({
+    artifactUrl: selectedTemplate?.artifactUrl ?? null,
+    dialect: schemaTemplate?.dialect ?? 'postgresql',
+    tableCount: parseRawSchema(schemaTemplate?.definition ?? null).length,
+  });
+
   return {
     session: {
       id: session.id,
@@ -505,6 +517,7 @@ export async function createSession(
       availableScales: dataset.availableScales,
       rowCount: dataset.totalRows,
       sourceRowCount: dataset.sourceTotalRows,
+      provisioningEstimate,
     },
     sandbox: {
       id: sandbox.id,
@@ -579,6 +592,20 @@ export async function getSession(
   const dataset = await resolveSandboxDatasetSummary(detailedSandbox);
   const schemaTemplate = await resolveSchemaTemplateForSession(normalizedSession, detailedSandbox);
 
+  const datasetTemplateForEstimate =
+    normalizedSession.status === 'provisioning' && detailedSandbox?.datasetTemplateId
+      ? await sessionsRepository.findDatasetTemplateById(detailedSandbox.datasetTemplateId)
+      : null;
+
+  const provisioningEstimate =
+    normalizedSession.status === 'provisioning' && schemaTemplate
+      ? await computeSandboxProvisioningEstimate({
+          artifactUrl: datasetTemplateForEstimate?.artifactUrl ?? null,
+          dialect: schemaTemplate.dialect,
+          tableCount: parseRawSchema(schemaTemplate.definition).length,
+        })
+      : null;
+
   return {
     ...normalizedSession,
     databaseName: schemaTemplate?.name ?? null,
@@ -589,6 +616,7 @@ export async function getSession(
     availableScales: dataset.availableScales,
     rowCount: dataset.totalRows,
     sourceRowCount: dataset.sourceTotalRows,
+    provisioningEstimate,
   };
 }
 

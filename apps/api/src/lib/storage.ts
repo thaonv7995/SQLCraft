@@ -184,6 +184,25 @@ export async function statStorageObject(objectName: string): Promise<StorageObje
   return { size: Number(st.size), etag };
 }
 
+/**
+ * Stat an `s3://bucket/key` URL (same layout as worker / dataset templates). Any bucket name is allowed.
+ */
+export async function statS3ArtifactUrl(artifactUrl: string): Promise<StorageObjectStat | null> {
+  try {
+    const u = new URL(artifactUrl.trim());
+    if (!/^s3:$/i.test(u.protocol)) return null;
+    const bucket = u.hostname;
+    const objectName = u.pathname.replace(/^\/+/, '');
+    if (!bucket || !objectName) return null;
+    const client = getClient();
+    const st = await client.statObject(bucket, objectName);
+    const etag = typeof st.etag === 'string' ? st.etag : '';
+    return { size: Number(st.size), etag };
+  } catch {
+    return null;
+  }
+}
+
 /** Read a byte range [offset, offset + length) from an object (S3 Range GET). */
 export async function readObjectRange(objectName: string, offset: number, length: number): Promise<Buffer> {
   await ensureBucket();
