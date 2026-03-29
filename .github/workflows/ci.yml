@@ -61,6 +61,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test
         env:
+          NODE_ENV: test
           DATABASE_URL: postgresql://sqlforge:sqlforge@localhost:5432/sqlforge_test
           REDIS_URL: redis://localhost:6379
-          JWT_SECRET: test-secret-key-for-ci
+          # config.ts requires >=32 chars and full storage/sandbox vars when router tests load the app
+          JWT_SECRET: test-jwt-secret-minimum-32-characters-ci
+          STORAGE_ENDPOINT: http://127.0.0.1:9000
+          STORAGE_ACCESS_KEY: test-access-key
+          STORAGE_SECRET_KEY: test-secret-key
+          SANDBOX_DB_HOST: localhost
+          SANDBOX_DB_USER: sandbox
+          SANDBOX_DB_PASSWORD: sandbox

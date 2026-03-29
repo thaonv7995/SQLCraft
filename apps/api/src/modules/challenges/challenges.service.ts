@@ -4,7 +4,6 @@ import {
   challengesRepository,
   queriesRepository,
   sandboxesRepository,
-  sessionsRepository,
 } from '../../db/repositories';
 import type {
   ChallengeAttemptRow,

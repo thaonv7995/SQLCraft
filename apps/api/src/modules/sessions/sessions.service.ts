@@ -484,16 +484,12 @@ export async function createSession(
     throw new ValidationError('challengeVersionId is required');
   }
 
-  let selectedTemplate: DatasetTemplateRow | null = null;
-  let dataset: SessionDatasetSummary;
-
   const resolved = await resolveRequestedDatasetTemplate(
     challengeVersion.databaseId,
     challengeVersion.datasetScale,
   );
-  selectedTemplate = resolved.selectedTemplate;
-  dataset = resolved.summary;
-
+  const selectedTemplate = resolved.selectedTemplate;
+  const dataset = resolved.summary;
   const provisionSchemaTemplateId = resolved.provisionSchemaTemplateId;
   if (!provisionSchemaTemplateId) {
     throw new NotFoundError('Database template for this challenge is not available');

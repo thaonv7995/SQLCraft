@@ -1,5 +1,22 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "JWT_SECRET",
+    "QUEUE_PREFIX",
+    "STORAGE_ENDPOINT",
+    "STORAGE_PUBLIC_URL",
+    "STORAGE_ACCESS_KEY",
+    "STORAGE_SECRET_KEY",
+    "STORAGE_BUCKET",
+    "SANDBOX_DB_HOST",
+    "SANDBOX_DB_PORT",
+    "SANDBOX_DB_USER",
+    "SANDBOX_DB_PASSWORD",
+    "SANDBOX_MSSQL_SA_PASSWORD"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

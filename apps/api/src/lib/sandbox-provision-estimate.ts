@@ -109,7 +109,7 @@ export async function computeSandboxProvisioningEstimate(params: {
   }
 
   const bps = restoreBytesPerSecond(dialect);
-  let restoreSeconds =
+  const restoreSeconds =
     bytes != null && bytes > 0 ? bytes / bps : DEFAULT_RESTORE_WHEN_UNKNOWN_BYTES;
 
   const schemaSeconds = Math.min(params.tableCount * SECONDS_PER_TABLE, MAX_SCHEMA_OVERHEAD);
