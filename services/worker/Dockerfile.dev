@@ -21,4 +21,6 @@ RUN pnpm --filter @sqlcraft/mysql-explain build
 
 WORKDIR /app/services/worker
 
+ENV NODE_OPTIONS=--max-old-space-size=8192
+
 CMD ["pnpm", "dev"]

@@ -187,6 +187,10 @@ export class SessionsRepository {
       SessionRow & {
         sandboxStatus: string | null;
         schemaTemplateName: string | null;
+        /** From joined schema_templates (sandbox engine). */
+        schemaDialect: string | null;
+        /** From joined dataset_templates (selected dump scale). */
+        datasetTemplateSize: typeof schema.datasetTemplates.$inferSelect['size'] | null;
       }
     >
   > {
@@ -202,6 +206,8 @@ export class SessionsRepository {
         createdAt: schema.learningSessions.createdAt,
         sandboxStatus: schema.sandboxInstances.status,
         schemaTemplateName: schema.schemaTemplates.name,
+        schemaDialect: schema.schemaTemplates.dialect,
+        datasetTemplateSize: schema.datasetTemplates.size,
       })
       .from(schema.learningSessions)
       .leftJoin(
@@ -212,6 +218,10 @@ export class SessionsRepository {
         schema.schemaTemplates,
         eq(schema.schemaTemplates.id, schema.sandboxInstances.schemaTemplateId),
       )
+      .leftJoin(
+        schema.datasetTemplates,
+        eq(schema.datasetTemplates.id, schema.sandboxInstances.datasetTemplateId),
+      )
       .where(eq(schema.learningSessions.userId, userId))
       .orderBy(desc(schema.learningSessions.startedAt))
       .limit(limit);
@@ -220,6 +230,8 @@ export class SessionsRepository {
       SessionRow & {
         sandboxStatus: string | null;
         schemaTemplateName: string | null;
+        schemaDialect: string | null;
+        datasetTemplateSize: typeof schema.datasetTemplates.$inferSelect['size'] | null;
       }
     >;
   }

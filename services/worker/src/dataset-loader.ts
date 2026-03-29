@@ -1,9 +1,15 @@
-import { gunzipSync } from 'node:zlib';
-import { readFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { createGunzip, gunzipSync } from 'node:zlib';
 import pino from 'pino';
 import type { DatasetTemplateDefinition, SchemaDefinition } from './db';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
 import {
+  createMcCatObjectReadStream,
   readS3ObjectViaMinioContainer,
   runMysqlInSandboxContainer,
   runPgRestoreInSandboxContainer,
@@ -592,6 +598,93 @@ async function readArtifactBytes(artifactRef: string): Promise<Buffer> {
   return readFile(artifactRef);
 }
 
+async function finalizeRemoteMysqlArtifactToSql(
+  tmpRoot: string,
+  rawPath: string,
+  extension: '.sql' | '.sql.gz',
+  cleanup: () => Promise<void>,
+): Promise<{ sql: string; cleanup: () => Promise<void> }> {
+  let sqlPath = rawPath;
+  if (extension === '.sql.gz') {
+    sqlPath = join(tmpRoot, 'artifact.sql');
+    await pipeline(createReadStream(rawPath), createGunzip(), createWriteStream(sqlPath));
+    await unlink(rawPath);
+  }
+  const sql = await readFile(sqlPath, 'utf8');
+  return { sql, cleanup };
+}
+
+const noopMysqlArtifactCleanup = async (): Promise<void> => {};
+
+/**
+ * Load MySQL/MariaDB dump text without keeping a full S3 Buffer plus gunzipSync output in heap.
+ * Remote artifacts stream to disk; .sql.gz decompresses via streaming gzip.
+ */
+async function loadMysqlArtifactSqlForRestore(
+  artifactRef: string,
+  extension: '.sql' | '.sql.gz',
+): Promise<{ sql: string; cleanup: () => Promise<void> }> {
+  if (/^s3:\/\//i.test(artifactRef)) {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-art-'));
+    const cleanup = async (): Promise<void> => {
+      await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+    };
+    try {
+      const rawPath = join(tmpRoot, extension === '.sql.gz' ? 'raw.sql.gz' : 'raw.sql');
+      await pipeline(createMcCatObjectReadStream(artifactRef), createWriteStream(rawPath));
+      return await finalizeRemoteMysqlArtifactToSql(tmpRoot, rawPath, extension, cleanup);
+    } catch (err) {
+      await cleanup();
+      throw err;
+    }
+  }
+
+  if (/^https?:\/\//i.test(artifactRef)) {
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-art-'));
+    const cleanup = async (): Promise<void> => {
+      await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+    };
+    try {
+      const response = await fetch(artifactRef);
+      if (!response.ok) {
+        throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
+      }
+      const body = response.body;
+      if (!body) {
+        throw new Error(`Dataset artifact has no response body: ${artifactRef}`);
+      }
+      const rawPath = join(tmpRoot, extension === '.sql.gz' ? 'raw.sql.gz' : 'raw.sql');
+      await pipeline(
+        Readable.fromWeb(body as import('node:stream/web').ReadableStream),
+        createWriteStream(rawPath),
+      );
+      return await finalizeRemoteMysqlArtifactToSql(tmpRoot, rawPath, extension, cleanup);
+    } catch (err) {
+      await cleanup();
+      throw err;
+    }
+  }
+
+  if (extension === '.sql') {
+    const sql = await readFile(artifactRef, 'utf8');
+    return { sql, cleanup: noopMysqlArtifactCleanup };
+  }
+
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-art-'));
+  const cleanup = async (): Promise<void> => {
+    await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+  };
+  try {
+    const sqlPath = join(tmpRoot, 'artifact.sql');
+    await pipeline(createReadStream(artifactRef), createGunzip(), createWriteStream(sqlPath));
+    const sql = await readFile(sqlPath, 'utf8');
+    return { sql, cleanup };
+  } catch (err) {
+    await cleanup();
+    throw err;
+  }
+}
+
 function getArtifactExtension(pathLike: string): string {
   const normalized = pathLike.split('?')[0].toLowerCase();
   if (normalized.endsWith('.sql.gz')) return '.sql.gz';
@@ -697,75 +790,95 @@ async function restoreFromArtifact(params: {
     return false;
   }
 
-  // Load full artifact bytes (S3/HTTP/local). We do not stream `.sql` / `.sql.gz` into engines:
-  // PostgreSQL needs {@link sanitizePostgresDumpForPsql}; MySQL/SQL Server need their sanitizers too.
+  let mysqlArtifactCleanup: (() => Promise<void>) | undefined;
 
-  const bytes = await readArtifactBytes(artifactRef);
-
-  if (extension === '.sql') {
-    if (engine === 'postgresql') {
-      await runPsqlInSandboxContainer({
-        containerRef,
-        dbUser,
-        dbName,
-        sql: sanitizePostgresDumpForPsql(dbName, bytes),
-      });
-    } else if (engine === 'mysql' || engine === 'mariadb') {
+  try {
+    if (
+      (engine === 'mysql' || engine === 'mariadb') &&
+      (extension === '.sql' || extension === '.sql.gz')
+    ) {
+      const { sql, cleanup } = await loadMysqlArtifactSqlForRestore(
+        artifactRef,
+        extension as '.sql' | '.sql.gz',
+      );
+      mysqlArtifactCleanup = cleanup;
       await runMysqlInSandboxContainer({
         engine: mysqlFamilyEngine,
-        containerRef, dbUser, dbPassword, dbName,
-        sql: prepareMysqlRestorePayload(dbName, bytes),
-      });
-    } else if (engine === 'sqlserver') {
-      await runSqlcmdInSandboxContainer({
-        containerRef, saPassword: mssqlSaPassword, dbName,
-        sql: sanitizeSqlServerDumpPayload(bytes),
-      });
-    } else {
-      return false;
-    }
-    logger.info({ artifactRef }, 'Dataset restored from .sql artifact');
-    return true;
-  }
-
-  if (extension === '.sql.gz') {
-    const sqlBuf = gunzipSync(bytes);
-    if (engine === 'postgresql') {
-      await runPsqlInSandboxContainer({
         containerRef,
         dbUser,
+        dbPassword,
         dbName,
-        sql: sanitizePostgresDumpForPsql(dbName, sqlBuf),
+        sql: prepareMysqlRestorePayload(dbName, sql),
       });
-    } else if (engine === 'mysql' || engine === 'mariadb') {
-      await runMysqlInSandboxContainer({
-        engine: mysqlFamilyEngine,
-        containerRef, dbUser, dbPassword, dbName,
-        sql: prepareMysqlRestorePayload(dbName, sqlBuf),
-      });
-    } else if (engine === 'sqlserver') {
-      await runSqlcmdInSandboxContainer({
-        containerRef, saPassword: mssqlSaPassword, dbName,
-        sql: sanitizeSqlServerDumpPayload(sqlBuf),
-      });
-    } else {
-      return false;
+      logger.info(
+        { artifactRef },
+        extension === '.sql.gz' ? 'Dataset restored from .sql.gz artifact' : 'Dataset restored from .sql artifact',
+      );
+      return true;
     }
-    logger.info({ artifactRef }, 'Dataset restored from .sql.gz artifact');
-    return true;
-  }
 
-  if (extension === '.dump' || extension === '.backup' || extension === '.tar') {
-    if (engine !== 'postgresql') {
-      logger.warn({ artifactRef, engine }, 'pg_restore artifacts require PostgreSQL sandbox');
-      return false;
+    // Load full artifact bytes (S3/HTTP/local). PostgreSQL / SQL Server still buffer here.
+    const bytes = await readArtifactBytes(artifactRef);
+
+    if (extension === '.sql') {
+      if (engine === 'postgresql') {
+        await runPsqlInSandboxContainer({
+          containerRef,
+          dbUser,
+          dbName,
+          sql: sanitizePostgresDumpForPsql(dbName, bytes),
+        });
+      } else if (engine === 'sqlserver') {
+        await runSqlcmdInSandboxContainer({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+          sql: sanitizeSqlServerDumpPayload(bytes),
+        });
+      } else {
+        return false;
+      }
+      logger.info({ artifactRef }, 'Dataset restored from .sql artifact');
+      return true;
     }
-    await runPgRestoreInSandboxContainer({ containerRef, dbUser, dbName, dump: bytes });
-    logger.info({ artifactRef }, 'Dataset restored from pg_restore artifact');
-    return true;
-  }
 
-  return false;
+    if (extension === '.sql.gz') {
+      const sqlBuf = gunzipSync(bytes);
+      if (engine === 'postgresql') {
+        await runPsqlInSandboxContainer({
+          containerRef,
+          dbUser,
+          dbName,
+          sql: sanitizePostgresDumpForPsql(dbName, sqlBuf),
+        });
+      } else if (engine === 'sqlserver') {
+        await runSqlcmdInSandboxContainer({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+          sql: sanitizeSqlServerDumpPayload(sqlBuf),
+        });
+      } else {
+        return false;
+      }
+      logger.info({ artifactRef }, 'Dataset restored from .sql.gz artifact');
+      return true;
+    }
+
+    if (extension === '.dump' || extension === '.backup' || extension === '.tar') {
+      if (engine !== 'postgresql') {
+        logger.warn({ artifactRef, engine }, 'pg_restore artifacts require PostgreSQL sandbox');
+        return false;
+      }
+      await runPgRestoreInSandboxContainer({ containerRef, dbUser, dbName, dump: bytes });
+      logger.info({ artifactRef }, 'Dataset restored from pg_restore artifact');
+      return true;
+    }
+
+    return false;
+  } finally {
+    await mysqlArtifactCleanup?.();
+  }
 }
 
 export async function loadDatasetIntoSandbox(params: {

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn, formatRelativeTime } from '@/lib/utils';
+import { formatDatasetScaleShort, formatSandboxDialect } from '@/lib/lab-session-display';
 import type { ClientPageProps } from '@/lib/page-props';
 
 export default function LabIndexPage(_props: ClientPageProps) {
@@ -110,11 +111,25 @@ export default function LabIndexPage(_props: ClientPageProps) {
                         <p className="truncate text-sm font-medium text-on-surface">
                           {s.displayTitle ?? s.lessonTitle ?? 'Lab session'}
                         </p>
-                        <p className="text-[11px] text-on-surface-variant">
-                          {s.lastActivityAt
-                            ? formatRelativeTime(s.lastActivityAt)
-                            : formatRelativeTime(s.startedAt)}
-                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="text-[11px] text-on-surface-variant">
+                            {s.lastActivityAt
+                              ? formatRelativeTime(s.lastActivityAt)
+                              : formatRelativeTime(s.startedAt)}
+                          </span>
+                          <span
+                            className="inline-flex items-center rounded-md border border-outline-variant/15 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface"
+                            title="SQL dialect"
+                          >
+                            {formatSandboxDialect(s.dialect)}
+                          </span>
+                          <span
+                            className="inline-flex items-center rounded-md border border-outline-variant/15 bg-surface-container-high px-2 py-0.5 text-[11px] font-medium text-on-surface"
+                            title="Dataset scale loaded in this sandbox"
+                          >
+                            {formatDatasetScaleShort(s.selectedScale)}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <StatusBadge status={s.status} />

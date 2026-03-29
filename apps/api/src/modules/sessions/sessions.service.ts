@@ -163,6 +163,10 @@ export interface SessionListItem {
   startedAt: Date;
   lastActivityAt: Date | null;
   createdAt: Date;
+  /** Engine family from schema template (e.g. postgresql, mysql). */
+  dialect: string | null;
+  /** Dataset dump scale currently bound to the sandbox. */
+  selectedScale: DatasetSize | null;
 }
 
 export interface SessionDatasetSummary {
@@ -442,6 +446,8 @@ export async function listUserSessions(userId: string, limit = 20): Promise<Sess
     startedAt: row.startedAt,
     lastActivityAt: row.lastActivityAt,
     createdAt: row.createdAt,
+    dialect: row.schemaDialect ?? null,
+    selectedScale: row.datasetTemplateSize ?? null,
   }));
 }
 
