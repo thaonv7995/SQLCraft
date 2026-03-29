@@ -332,7 +332,7 @@ export async function scanSqlDumpHandler(
       if (part.type === 'file') {
         if (!tempDir) {
           tempDir = await mkdtemp(path.join(tmpdir(), 'sqlforge-dump-'));
-          const tmpPath = path.join(tempDir, 'upload.sql');
+          const tmpPath = path.join(tempDir, 'upload.bin');
           await pipeline(part.file, createWriteStream(tmpPath));
           dumpFileName = part.filename?.trim() || 'dump.sql';
         } else {
@@ -348,7 +348,7 @@ export async function scanSqlDumpHandler(
       throw new ValidationError('No SQL dump uploaded');
     }
 
-    const tmpPath = path.join(tempDir, 'upload.sql');
+    const tmpPath = path.join(tempDir, 'upload.bin');
     const st = await stat(tmpPath);
     if (st.size === 0) {
       throw new ValidationError('Uploaded SQL dump is empty');

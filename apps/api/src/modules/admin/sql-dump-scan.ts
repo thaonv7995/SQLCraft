@@ -1226,6 +1226,28 @@ export interface CreateStoredSqlDumpScanOptions {
   artifactOnly?: boolean;
   /** When set, stored in scan metadata for access control on user-facing import/read APIs. */
   uploadingUserId?: string;
+  /** Original client file name when the parsed file is a decoded .sql.gz / .zip (for UI + metadata). */
+  displayFileName?: string;
+}
+
+function withDisplayFileName(
+  scan: StoredSqlDumpScan,
+  displayFileName: string | undefined,
+): StoredSqlDumpScan {
+  if (!displayFileName) {
+    return scan;
+  }
+  return {
+    ...scan,
+    fileName: displayFileName,
+    definition: {
+      ...scan.definition,
+      metadata: {
+        ...scan.definition.metadata,
+        fileName: displayFileName,
+      },
+    },
+  };
 }
 
 function withUploadingUserMetadata(
@@ -1327,6 +1349,7 @@ export async function createStoredSqlDumpScan(
   let scan: StoredSqlDumpScan = options?.artifactOnly
     ? parseSqlDumpBufferArtifactOnly(buffer, fileName)
     : parseSqlDumpBuffer(buffer, fileName);
+  scan = withDisplayFileName(scan, options?.displayFileName);
   scan = withUploadingUserMetadata(scan, options?.uploadingUserId);
   const persistedScan = await persistSqlDumpScanPayload(scan, buffer);
   return toSqlDumpScanResult(persistedScan);
@@ -1367,6 +1390,7 @@ export async function createStoredSqlDumpScanFromFile(
     scan = parseSqlDumpBuffer(buf, fileName, scanId);
   }
 
+  scan = withDisplayFileName(scan, options?.displayFileName);
   scan = withUploadingUserMetadata(scan, options?.uploadingUserId);
   const persistedScan = await persistSqlDumpScanPayload(scan, { path: filePath, size: byteSize });
   return toSqlDumpScanResult(persistedScan);
@@ -1382,8 +1406,15 @@ export async function createStoredSqlDumpScanFromStagingObject(
   fileName: string,
   options?: CreateStoredSqlDumpScanOptions,
 ): Promise<SqlDumpScanResult> {
-  const { config } = await import('../../lib/config');
-  const { readObjectRange, readFullObject } = await import('../../lib/storage');
+  const { config, sqlDumpMaxUncompressedBytes } = await import('../../lib/config');
+  const { readObjectRange, readFullObject, streamObjectToFile, deleteFile } =
+    await import('../../lib/storage');
+  const { mkdtemp, rm, unlink } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const { shouldDecodeToPlainSql, normalizeUploadFileToPlainSqlPath } =
+    await import('./sql-dump-upload-format');
+
   const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
   const artifactOnly = Boolean(options?.artifactOnly);
 
@@ -1391,6 +1422,41 @@ export async function createStoredSqlDumpScanFromStagingObject(
     throw new ValidationError(
       `SQL dump is about ${Math.ceil(byteSize / (1024 * 1024))} MiB. Full schema scan supports up to ${config.SQL_DUMP_FULL_PARSE_MAX_MB} MiB. Enable artifact-only for larger dumps (file streams to storage; only the file head is used for dialect heuristics).`,
     );
+  }
+
+  const headProbeLen = Math.min(8, byteSize);
+  const head = await readObjectRange(stagingObjectKey, 0, headProbeLen);
+
+  if (shouldDecodeToPlainSql(fileName, head)) {
+    const maxUnc = sqlDumpMaxUncompressedBytes();
+    const tempDir = await mkdtemp(join(tmpdir(), 'sqlforge-staging-decode-'));
+    const rawPath = join(tempDir, 'upload.raw');
+    try {
+      await streamObjectToFile(stagingObjectKey, rawPath);
+      const normalized = await normalizeUploadFileToPlainSqlPath({
+        filePath: rawPath,
+        byteSize,
+        fileName,
+        maxUncompressedBytes: maxUnc,
+        head,
+      });
+      if (normalized.filePath !== rawPath) {
+        await unlink(rawPath).catch(() => undefined);
+      }
+      try {
+        return await createStoredSqlDumpScanFromFile(
+          normalized.filePath,
+          normalized.byteSize,
+          normalized.effectiveFileName,
+          { ...options, displayFileName: fileName },
+        );
+      } finally {
+        await normalized.dispose();
+      }
+    } finally {
+      await deleteFile(stagingObjectKey).catch(() => undefined);
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   const scanId = randomUUID();
@@ -1402,14 +1468,15 @@ export async function createStoredSqlDumpScanFromStagingObject(
       scan = parseSqlDumpBufferArtifactOnly(buf, fileName, scanId);
     } else {
       const headLen = Math.min(SQL_DUMP_INFERENCE_HEAD_BYTES, byteSize);
-      const head = await readObjectRange(stagingObjectKey, 0, headLen);
-      scan = parseSqlDumpBufferArtifactOnly(head, fileName, scanId);
+      const headFull = await readObjectRange(stagingObjectKey, 0, headLen);
+      scan = parseSqlDumpBufferArtifactOnly(headFull, fileName, scanId);
     }
   } else {
     const buf = await readFullObject(stagingObjectKey);
     scan = parseSqlDumpBuffer(buf, fileName, scanId);
   }
 
+  scan = withDisplayFileName(scan, options?.displayFileName);
   scan = withUploadingUserMetadata(scan, options?.uploadingUserId);
   const persistedScan = await persistSqlDumpScanFromStagingKey(scan, stagingObjectKey);
   return toSqlDumpScanResult(persistedScan);

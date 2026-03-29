@@ -2174,7 +2174,9 @@ async function scanSqlDumpViaPresignedStorage(
     const putRes = await fetch(session.putUrl, {
       method: 'PUT',
       body: file,
-      headers: { 'Content-Type': 'application/sql' },
+      headers: {
+        'Content-Type': file.type?.trim() ? file.type : 'application/octet-stream',
+      },
     });
     if (!putRes.ok) {
       await abort();

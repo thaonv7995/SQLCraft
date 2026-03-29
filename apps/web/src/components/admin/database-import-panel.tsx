@@ -121,7 +121,12 @@ export function DatabaseImportPanel({
   const applyScanResult = useCallback(
     (result: SqlDumpScanResult) => {
       setScanResult(result);
-      const fallbackName = result.fileName.replace(/\.sql$/i, '').slice(0, 32);
+      const fallbackName = result.fileName
+        .replace(/\.sql\.gz$/i, '')
+        .replace(/\.zip$/i, '')
+        .replace(/\.sql$/i, '')
+        .replace(/\.txt$/i, '')
+        .slice(0, 32);
       const nameFromScan = result.schemaName?.trim() ?? fallbackName;
       setSchemaName(
         effectiveReplaceId && lockedSchemaName?.trim()
@@ -361,8 +366,8 @@ export function DatabaseImportPanel({
               <CardTitle>{isUser ? 'Import SQL database' : 'SQL Import'}</CardTitle>
               <CardDescription className="mt-1">
                 {isUser
-                  ? 'Upload a .sql dump. Public submissions need admin approval before they appear in the catalog.'
-                  : 'Upload a .sql file, scan, then publish.'}
+                  ? 'Upload a SQL dump (.sql, .txt, .sql.gz, or .zip with a .sql inside). Public submissions need admin approval before they appear in the catalog.'
+                  : 'Upload .sql, .txt, .sql.gz, or .zip (containing .sql), scan, then publish.'}
               </CardDescription>
             </div>
             {onClose ? (
@@ -385,7 +390,7 @@ export function DatabaseImportPanel({
           <div className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low/40 px-4 py-4 text-sm ring-offset-surface focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/25">
             <span className="text-xs uppercase tracking-[0.35em] text-outline">SQL dump</span>
             <p className="mt-2 text-xs text-on-surface-variant">
-              <span className="font-medium text-on-surface">.sql</span> · max{' '}
+              <span className="font-medium text-on-surface">.sql / .txt / .sql.gz / .zip</span> · max{' '}
               <span className="font-medium text-on-surface">{formatSqlDumpMaxUploadLabel()}</span>
               {' · '}
               {Math.round(SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES / (1024 * 1024))} MB+ uses direct storage upload
@@ -394,7 +399,7 @@ export function DatabaseImportPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".sql,.SQL"
+              accept=".sql,.SQL,.txt,.TXT,.sql.gz,.SQL.GZ,.zip,.ZIP"
               aria-label="Choose SQL dump file"
               onChange={handleFileSelection}
               className="sr-only"
@@ -412,7 +417,7 @@ export function DatabaseImportPanel({
                 }
                 onClick={() => fileInputRef.current?.click()}
               >
-                Choose SQL file
+                Choose dump file
               </Button>
               <p className="min-w-0 text-sm text-on-surface-variant">
                 {selectedFile ? (

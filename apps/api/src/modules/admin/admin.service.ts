@@ -23,6 +23,7 @@ import {
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
 import { toStoredRoleName } from '../../lib/roles';
+import { sqlDumpMaxUncompressedBytes } from '../../lib/config';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { enqueueDestroySandbox } from '../../lib/queue';
 import { resolvePublicAvatarUrl } from '../../lib/storage';
@@ -67,6 +68,12 @@ import {
   loadStoredSqlDumpScan,
   toSqlDumpScanResult,
 } from './sql-dump-scan';
+import {
+  isAllowedSqlDumpUpload,
+  normalizeUploadBufferToPlainSql,
+  normalizeUploadFileToPlainSqlPath,
+  readLocalHeadBytes,
+} from './sql-dump-upload-format';
 import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 
@@ -997,16 +1004,28 @@ async function persistCanonicalDatabaseImport(
   };
 }
 
+const UNSUPPORTED_DUMP_FORMAT_MSG =
+  'Unsupported dump format. Use .sql, .txt, .sql.gz, or .zip containing at least one .sql file.';
+
 export async function scanSqlDump(
   fileName: string,
   buffer: Buffer,
   options?: { artifactOnly?: boolean; uploadingUserId?: string },
 ): Promise<SqlDumpScanResult> {
-  if (!/\.sql$/i.test(fileName)) {
-    throw new ValidationError('Only .sql dump files are supported');
+  if (!isAllowedSqlDumpUpload(fileName)) {
+    throw new ValidationError(UNSUPPORTED_DUMP_FORMAT_MSG);
   }
 
-  return createStoredSqlDumpScan(buffer, fileName, options);
+  const maxUnc = sqlDumpMaxUncompressedBytes();
+  const { buffer: plain, effectiveFileName } = await normalizeUploadBufferToPlainSql(
+    buffer,
+    fileName,
+    maxUnc,
+  );
+  return createStoredSqlDumpScan(plain, effectiveFileName, {
+    ...options,
+    displayFileName: fileName.trim(),
+  });
 }
 
 /** Multipart handler: scan from a temp file path (streams artifact to storage for large dumps). */
@@ -1016,11 +1035,29 @@ export async function scanSqlDumpFromUploadedFile(
   byteSize: number,
   options?: { artifactOnly?: boolean; uploadingUserId?: string },
 ): Promise<SqlDumpScanResult> {
-  if (!/\.sql$/i.test(fileName)) {
-    throw new ValidationError('Only .sql dump files are supported');
+  if (!isAllowedSqlDumpUpload(fileName)) {
+    throw new ValidationError(UNSUPPORTED_DUMP_FORMAT_MSG);
   }
 
-  return createStoredSqlDumpScanFromFile(filePath, byteSize, fileName, options);
+  const maxUnc = sqlDumpMaxUncompressedBytes();
+  const head = await readLocalHeadBytes(filePath, byteSize, 8);
+  const normalized = await normalizeUploadFileToPlainSqlPath({
+    filePath,
+    byteSize,
+    fileName,
+    maxUncompressedBytes: maxUnc,
+    head,
+  });
+  try {
+    return await createStoredSqlDumpScanFromFile(
+      normalized.filePath,
+      normalized.byteSize,
+      normalized.effectiveFileName,
+      { ...options, displayFileName: fileName.trim() },
+    );
+  } finally {
+    await normalized.dispose();
+  }
 }
 
 export async function listPendingScans(query: ListPendingScansQuery) {

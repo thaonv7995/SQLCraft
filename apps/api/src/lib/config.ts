@@ -60,6 +60,12 @@ const EnvSchema = z.object({
    * (streams file to object storage, reads only the first ~12 MiB for dialect heuristics).
    */
   SQL_DUMP_FULL_PARSE_MAX_MB: z.coerce.number().int().positive().max(4096).default(256),
+
+  /**
+   * Hard cap on decompressed SQL size for .sql.gz / ZIP uploads (MiB). Prevents zip/gzip bombs.
+   * Defaults to min(8192, 4 × SQL_DUMP_MAX_FILE_MB) when unset.
+   */
+  SQL_DUMP_MAX_UNCOMPRESSED_MB: z.coerce.number().int().positive().max(131072).optional(),
 });
 
 const result = EnvSchema.safeParse(process.env);
@@ -76,3 +82,11 @@ if (!result.success) {
 
 export const config = result.data;
 export type Config = typeof config;
+
+/** Max decompressed bytes allowed when expanding .sql.gz or a .sql file inside a .zip. */
+export function sqlDumpMaxUncompressedBytes(): number {
+  const mb =
+    config.SQL_DUMP_MAX_UNCOMPRESSED_MB ??
+    Math.min(8192, Math.max(256, config.SQL_DUMP_MAX_FILE_MB * 4));
+  return mb * 1024 * 1024;
+}

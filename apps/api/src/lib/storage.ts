@@ -1,4 +1,5 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import type { Readable } from 'node:stream';
 import * as Minio from 'minio';
 import { config } from './config';
@@ -216,6 +217,14 @@ export async function readFullObject(objectName: string): Promise<Buffer> {
   const client = getClient();
   const stream = await client.getObject(config.STORAGE_BUCKET, objectName);
   return readStreamToBuffer(stream);
+}
+
+/** Stream an entire object to a local file (for decoding compressed uploads without buffering in RAM). */
+export async function streamObjectToFile(objectName: string, destPath: string): Promise<void> {
+  await ensureBucket();
+  const client = getClient();
+  const stream = await client.getObject(config.STORAGE_BUCKET, objectName);
+  await pipeline(stream, createWriteStream(destPath));
 }
 
 /**

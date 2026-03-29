@@ -23,6 +23,7 @@ import type {
   SqlDumpUploadPresignPartResult,
 } from './admin.types';
 import { createStoredSqlDumpScanFromStagingObject } from './sql-dump-scan';
+import { isAllowedSqlDumpUpload } from './sql-dump-upload-format';
 
 const STAGING_PREFIX = 'admin/sql-dumps/staging';
 
@@ -48,8 +49,10 @@ export async function createSqlDumpUploadSession(
   body: CreateSqlDumpUploadSessionBody,
 ): Promise<SqlDumpDirectUploadSessionCreateResult> {
   const fileName = body.fileName.trim();
-  if (!/\.sql$/i.test(fileName)) {
-    throw new ValidationError('Only .sql dump files are supported');
+  if (!isAllowedSqlDumpUpload(fileName)) {
+    throw new ValidationError(
+      'Unsupported dump format. Use .sql, .txt, .sql.gz, or .zip containing at least one .sql file.',
+    );
   }
 
   const maxBytes = config.SQL_DUMP_MAX_FILE_MB * 1024 * 1024;
