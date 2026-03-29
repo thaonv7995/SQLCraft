@@ -10,7 +10,10 @@ import {
 } from './mssql-showplan-json';
 
 const MAX_ROWS = 500;
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.QUERY_EXECUTION_TIMEOUT_MS) || 600_000,
+);
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +28,13 @@ export class QueryTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'QueryTimeoutError';
+  }
+}
+
+export class QueryCancelledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QueryCancelledError';
   }
 }
 
@@ -121,12 +131,18 @@ export async function executeSql(
   sql: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxRows = MAX_ROWS,
+  onSessionReady?: (backendPid: number) => void | Promise<void>,
 ): Promise<ExecuteSqlResult> {
   const pool = new Pool({ connectionString, max: 1 });
   const client = await pool.connect();
   const start = Date.now();
 
   try {
+    const pidRow = await client.query<{ pid: string }>('SELECT pg_backend_pid()::text AS pid');
+    const pid = Number(pidRow.rows[0]?.pid);
+    if (Number.isFinite(pid) && onSessionReady) {
+      await onSessionReady(pid);
+    }
     await client.query(`SET statement_timeout = ${timeoutMs}`);
     const result = await client.query(sql);
     const durationMs = Date.now() - start;
@@ -144,6 +160,10 @@ export async function executeSql(
     const durationMs = Date.now() - start;
 
     if (error.code === '57014') {
+      const msg = error.message ?? '';
+      if (/user request/i.test(msg)) {
+        throw new QueryCancelledError(msg);
+      }
       throw new QueryTimeoutError(`Query exceeded ${timeoutMs}ms timeout`);
     }
     throw new QueryExecutionFailedError(error.message ?? 'Query execution failed', {
@@ -345,6 +365,7 @@ async function executeSqlMysql(
   sqlText: string,
   timeoutMs: number,
   maxRows: number,
+  onSessionReady?: (backendPid: number) => void | Promise<void>,
 ): Promise<ExecuteSqlResult> {
   const start = Date.now();
   const conn = await mysql.createConnection({
@@ -356,6 +377,11 @@ async function executeSqlMysql(
     connectTimeout: Math.min(timeoutMs, 15_000),
   });
   try {
+    const [idRows] = await conn.query<mysql.RowDataPacket[]>('SELECT CONNECTION_ID() AS id');
+    const threadId = Number(idRows[0]?.id);
+    if (Number.isFinite(threadId) && onSessionReady) {
+      await onSessionReady(threadId);
+    }
     const cap = Math.min(timeoutMs, 2_147_483_647);
     await conn.query(`SET SESSION max_execution_time = ${cap}`).catch(() => undefined);
     const [rows, fields] = await conn.query(sqlText);
@@ -391,6 +417,9 @@ async function executeSqlMysql(
     if (isMysqlQueryTimeout(e.code)) {
       throw new QueryTimeoutError(`Query exceeded ${timeoutMs}ms timeout`);
     }
+    if (e.code === '1317' || /Query execution was interrupted/i.test(e.message ?? '')) {
+      throw new QueryCancelledError(e.message ?? 'Query was cancelled');
+    }
     throw new QueryExecutionFailedError(e.message ?? 'Query execution failed', { durationMs });
   } finally {
     await conn.end().catch(() => undefined);
@@ -402,6 +431,7 @@ async function executeSqlMssql(
   sqlText: string,
   timeoutMs: number,
   maxRows: number,
+  onSessionReady?: (backendPid: number) => void | Promise<void>,
 ): Promise<ExecuteSqlResult> {
   const start = Date.now();
   const pool = new sql.ConnectionPool({
@@ -417,6 +447,11 @@ async function executeSqlMssql(
   });
   await pool.connect();
   try {
+    const spidRes = await pool.request().query('SELECT @@SPID AS spid');
+    const spid = Number((spidRes.recordset as Array<{ spid: number }>)[0]?.spid);
+    if (Number.isFinite(spid) && onSessionReady) {
+      await onSessionReady(spid);
+    }
     const result = await pool.request().query(sqlText);
     const durationMs = Date.now() - start;
     const rs = result.recordset as Record<string, unknown>[] | undefined;
@@ -458,15 +493,16 @@ export async function executeSqlOnTarget(
   sqlText: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxRows = MAX_ROWS,
+  onSessionReady?: (backendPid: number) => void | Promise<void>,
 ): Promise<ExecuteSqlResult> {
   switch (target.engine) {
     case 'postgresql':
-      return executeSql(pgConnString(target), sqlText, timeoutMs, maxRows);
+      return executeSql(pgConnString(target), sqlText, timeoutMs, maxRows, onSessionReady);
     case 'mysql':
     case 'mariadb':
-      return executeSqlMysql(target, sqlText, timeoutMs, maxRows);
+      return executeSqlMysql(target, sqlText, timeoutMs, maxRows, onSessionReady);
     case 'sqlserver':
-      return executeSqlMssql(target, sqlText, timeoutMs, maxRows);
+      return executeSqlMssql(target, sqlText, timeoutMs, maxRows, onSessionReady);
     case 'sqlite':
       throw new QueryExecutionFailedError('SQLite sandboxes are not supported for remote query execution');
     default:
@@ -595,6 +631,62 @@ async function getExplainPlanMssql(
       await transaction.rollback();
     }
     await pool.close().catch(() => undefined);
+  }
+}
+
+/** Best-effort cancel of a running statement (separate connection from the one executing SQL). */
+export async function cancelBackendQuery(target: SandboxDbTarget, backendPid: number): Promise<void> {
+  if (!Number.isFinite(backendPid) || backendPid <= 0) return;
+  const pid = Math.floor(backendPid);
+  switch (target.engine) {
+    case 'postgresql': {
+      const pool = new Pool({ connectionString: pgConnString(target), max: 1 });
+      try {
+        await pool.query('SELECT pg_cancel_backend($1)', [pid]);
+      } finally {
+        await pool.end().catch(() => undefined);
+      }
+      return;
+    }
+    case 'mysql':
+    case 'mariadb': {
+      const conn = await mysql.createConnection({
+        host: target.host,
+        port: target.port,
+        user: target.user,
+        password: target.password,
+        database: target.database,
+        connectTimeout: 15_000,
+      });
+      try {
+        await conn.query(`KILL QUERY ${pid}`);
+      } finally {
+        await conn.end().catch(() => undefined);
+      }
+      return;
+    }
+    case 'sqlserver': {
+      const pool = new sql.ConnectionPool({
+        user: target.user,
+        password: target.password,
+        server: target.host,
+        database: target.database,
+        port: target.port,
+        options: { encrypt: false, trustServerCertificate: true },
+        connectionTimeout: 30_000,
+        requestTimeout: 30_000,
+        pool: { max: 1, min: 0 },
+      });
+      await pool.connect();
+      try {
+        await pool.request().query(`KILL ${pid}`);
+      } finally {
+        await pool.close().catch(() => undefined);
+      }
+      return;
+    }
+    default:
+      return;
   }
 }
 

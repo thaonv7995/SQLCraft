@@ -24,7 +24,7 @@ const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : {
 const sandboxProvisioningQueue = new Queue(QUEUE_NAMES.SANDBOX_PROVISIONING, queueOptions);
 const sandboxCleanupQueue = new Queue(QUEUE_NAMES.SANDBOX_CLEANUP, queueOptions);
 const sandboxResetQueue = new Queue(QUEUE_NAMES.SANDBOX_RESET, queueOptions);
-const queryExecutionQueue = new Queue(QUEUE_NAMES.QUERY_EXECUTION, queueOptions);
+export const queryExecutionQueue = new Queue(QUEUE_NAMES.QUERY_EXECUTION, queueOptions);
 
 export interface ProvisionSandboxJobData {
   sandboxInstanceId: string;
@@ -44,6 +44,12 @@ export interface ExecuteQueryJobData {
   sql: string;
   explainPlan?: boolean;
   planMode?: 'explain' | 'explain_analyze';
+  /** Statement timeout in ms (worker `statement_timeout` / MySQL max_execution_time / etc.). */
+  timeoutMs: number;
+}
+
+export interface CancelQueryJobData {
+  queryExecutionId: string;
 }
 
 export async function enqueueProvisionSandbox(data: ProvisionSandboxJobData): Promise<void> {
@@ -72,8 +78,15 @@ export async function enqueueResetSandbox(data: ResetSandboxJobData): Promise<vo
   });
 }
 
-export async function enqueueExecuteQuery(data: ExecuteQueryJobData): Promise<void> {
-  await queryExecutionQueue.add('execute_query', data, {
+export async function enqueueExecuteQuery(data: ExecuteQueryJobData): Promise<string> {
+  const job = await queryExecutionQueue.add('execute_query', data, {
     attempts: 1, // No retry for user queries — report error immediately
+  });
+  return job.id != null ? String(job.id) : '';
+}
+
+export async function enqueueCancelQuery(data: CancelQueryJobData): Promise<void> {
+  await queryExecutionQueue.add('cancel_query', data, {
+    attempts: 1,
   });
 }

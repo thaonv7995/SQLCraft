@@ -1,4 +1,4 @@
-import { eq, desc, count } from 'drizzle-orm';
+import { eq, desc, count, inArray, and } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -43,6 +43,29 @@ export class QueriesRepository {
       .where(eq(schema.queryExecutions.id, id))
       .limit(1);
     return row ?? null;
+  }
+
+  async updateBullJobId(id: string, bullJobId: string): Promise<void> {
+    await this.db
+      .update(schema.queryExecutions)
+      .set({ bullJobId })
+      .where(eq(schema.queryExecutions.id, id));
+  }
+
+  /** Only transitions rows still in a cancellable state (avoids clobbering a late success). */
+  async tryMarkCancelled(
+    id: string,
+    errorMessage: string,
+  ): Promise<{ updated: boolean }> {
+    const allowed: QueryExecutionRow['status'][] = ['accepted', 'running'];
+    const rows = await this.db
+      .update(schema.queryExecutions)
+      .set({ status: 'cancelled', errorMessage })
+      .where(
+        and(eq(schema.queryExecutions.id, id), inArray(schema.queryExecutions.status, allowed)),
+      )
+      .returning({ id: schema.queryExecutions.id });
+    return { updated: rows.length > 0 };
   }
 
   async getExecutionPlans(queryExecutionId: string): Promise<QueryExecutionPlanRow[]> {

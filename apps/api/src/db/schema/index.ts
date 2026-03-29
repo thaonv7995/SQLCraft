@@ -43,6 +43,7 @@ export const queryStatusEnum = pgEnum('query_status', [
   'failed',
   'timed_out',
   'blocked',
+  'cancelled',
 ]);
 export const attemptStatusEnum = pgEnum('attempt_status', ['pending', 'passed', 'failed', 'error']);
 export const planModeEnum = pgEnum('plan_mode', ['explain', 'explain_analyze']);
@@ -333,6 +334,10 @@ export const queryExecutions = pgTable(
     resultPreview: jsonb('result_preview'),
     errorMessage: text('error_message'),
     errorCode: varchar('error_code', { length: 50 }),
+    /** BullMQ job id for `execute_query` (remove from queue when cancelling while waiting). */
+    bullJobId: varchar('bull_job_id', { length: 64 }),
+    /** Backend session id for cancel (pg_backend_pid, MySQL connection id, @@SPID). */
+    dbBackendPid: bigint('db_backend_pid', { mode: 'number' }),
     submittedAt: timestamp('submitted_at').notNull().default(sql`now()`),
   },
   (table) => ({

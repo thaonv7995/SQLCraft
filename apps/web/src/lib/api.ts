@@ -603,7 +603,8 @@ function mapQueryExecutionStatus(raw: unknown): QueryExecution['status'] {
   if (raw == null) return 'pending';
   const s = String(raw).toLowerCase();
   if (s === 'succeeded' || s === 'success' || s === 'completed') return 'success';
-  if (s === 'failed' || s === 'timed_out' || s === 'blocked' || s === 'error') return 'error';
+  if (s === 'failed' || s === 'timed_out' || s === 'blocked' || s === 'error' || s === 'cancelled')
+    return 'error';
   if (s === 'running') return 'running';
   if (s === 'pending') return 'pending';
   return 'pending';
@@ -1839,6 +1840,9 @@ export const queryApi = {
     api
       .get<QueryExecution>(`/query-executions/${executionId}`)
       .then((r) => normalizeQueryExecutionItem(r.data as unknown as Record<string, unknown>)),
+
+  cancel: (executionId: string) =>
+    api.post(`/query-executions/${executionId}/cancel`).then(() => undefined),
 
   history: async (sessionId?: string, params?: { page?: number; limit?: number }) => {
     const pagination = { ...params };

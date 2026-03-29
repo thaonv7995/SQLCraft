@@ -18,6 +18,9 @@ import {
   updateQueryExecutionFailed,
   insertQueryExecutionPlan,
   fetchExpiredSandboxes,
+  fetchQueryExecutionForCancel,
+  tryMarkQueryExecutionCancelled,
+  updateQueryExecutionBackendPid,
 } from './db';
 import { loadDatasetIntoSandbox } from './dataset-loader';
 import { normalizeSchemaSqlEngine, type SchemaSqlEngine } from '@sqlcraft/types';
@@ -30,6 +33,8 @@ import {
   type SandboxDbTarget,
   QueryBlockedError,
   QueryTimeoutError,
+  QueryCancelledError,
+  cancelBackendQuery,
 } from './query-executor';
 import {
   createSandboxEngineContainer,
@@ -116,6 +121,7 @@ type BullConnection = import('bullmq').ConnectionOptions;
 const conn = connection as unknown as BullConnection;
 const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : { connection: conn };
 const cleanupQueue = new Queue(QUEUES.SANDBOX_CLEANUP, queueOptions);
+const queryExecutionQueueClient = new Queue(QUEUES.QUERY_EXECUTION, queueOptions);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -616,117 +622,200 @@ const sandboxResetWorker = new Worker(
   longJobOpts,
 );
 
-// ─── Worker: execute_query ────────────────────────────────────────────────────
+// ─── Worker: execute_query / cancel_query ─────────────────────────────────────
 
-const queryExecutionWorker = new Worker(
-  QUEUES.QUERY_EXECUTION,
-  async (job: Job) => {
-    const { queryExecutionId, sandboxInstanceId, sql, explainPlan, planMode } = job.data as {
+async function handleCancelQueryJob(job: Job): Promise<void> {
+  const { queryExecutionId } = job.data as { queryExecutionId: string };
+  const row = await fetchQueryExecutionForCancel(queryExecutionId);
+  if (!row) return;
+  if (['succeeded', 'failed', 'timed_out', 'blocked', 'cancelled'].includes(row.status)) {
+    return;
+  }
+
+  if (row.bullJobId) {
+    const queued = await queryExecutionQueueClient.getJob(row.bullJobId);
+    if (queued) {
+      const st = await queued.getState();
+      if (st === 'waiting' || st === 'delayed') {
+        await queued.remove();
+      }
+    }
+  }
+
+  const sandbox = row.sandboxInstanceId ? await fetchSandbox(row.sandboxInstanceId) : null;
+  if (!sandbox?.dbName) {
+    await tryMarkQueryExecutionCancelled(queryExecutionId, 'Cancelled by user');
+    return;
+  }
+
+  const engine = normalizeSchemaSqlEngine(sandbox.sandboxEngine);
+  const host = sandbox.containerRef ?? sandboxHost;
+  const port = sandbox.containerRef ? sandbox.sandboxDbPort : Number(sandboxPort);
+  const target: SandboxDbTarget = {
+    engine,
+    host,
+    port,
+    user: engine === 'sqlserver' ? 'sa' : sandboxUser,
+    password: engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
+    database: sandbox.dbName,
+  };
+
+  let pid = row.dbBackendPid ? Number(row.dbBackendPid) : Number.NaN;
+  if (!Number.isFinite(pid) && row.status === 'running') {
+    for (let i = 0; i < 15; i += 1) {
+      await new Promise<void>((r) => {
+        setTimeout(r, 200);
+      });
+      const again = await fetchQueryExecutionForCancel(queryExecutionId);
+      if (!again) return;
+      if (['succeeded', 'failed', 'timed_out', 'blocked', 'cancelled'].includes(again.status)) {
+        return;
+      }
+      if (again.dbBackendPid) {
+        pid = Number(again.dbBackendPid);
+        break;
+      }
+    }
+  }
+
+  if (Number.isFinite(pid)) {
+    try {
+      await cancelBackendQuery(target, pid);
+    } catch (err) {
+      logger.warn({ err, queryExecutionId }, 'cancelBackendQuery failed');
+    }
+  }
+
+  await tryMarkQueryExecutionCancelled(queryExecutionId, 'Cancelled by user');
+}
+
+async function handleExecuteQueryJob(job: Job): Promise<void> {
+  const { queryExecutionId, sandboxInstanceId, sql, explainPlan, planMode, timeoutMs: jobTimeoutMs } =
+    job.data as {
       queryExecutionId: string;
       sandboxInstanceId: string;
       sql: string;
       explainPlan?: boolean;
       planMode?: 'explain' | 'explain_analyze';
+      timeoutMs?: number;
     };
 
-    logger.info({ queryExecutionId }, 'Executing query');
+  const timeoutMs =
+    typeof jobTimeoutMs === 'number' && Number.isFinite(jobTimeoutMs) && jobTimeoutMs >= 1000
+      ? jobTimeoutMs
+      : Math.max(1000, Number(process.env.QUERY_EXECUTION_TIMEOUT_MS) || 600_000);
 
-    const sandbox = await fetchSandbox(sandboxInstanceId);
+  logger.info({ queryExecutionId }, 'Executing query');
 
-    if (!sandbox?.dbName) {
-      await updateQueryExecutionFailed(queryExecutionId, 'failed', 'Sandbox not available');
-      logger.warn({ sandboxInstanceId }, 'Sandbox not found for query execution');
-      return;
-    }
+  const sandbox = await fetchSandbox(sandboxInstanceId);
 
-    if (sandbox.status === 'destroyed' || sandbox.status === 'failed') {
-      await updateQueryExecutionFailed(
-        queryExecutionId,
-        'failed',
-        `Sandbox is in unusable state: ${sandbox.status}`,
-      );
-      return;
-    }
+  if (!sandbox?.dbName) {
+    await updateQueryExecutionFailed(queryExecutionId, 'failed', 'Sandbox not available');
+    logger.warn({ sandboxInstanceId }, 'Sandbox not found for query execution');
+    return;
+  }
 
-    const engine = normalizeSchemaSqlEngine(sandbox.sandboxEngine);
+  if (sandbox.status === 'destroyed' || sandbox.status === 'failed') {
+    await updateQueryExecutionFailed(
+      queryExecutionId,
+      'failed',
+      `Sandbox is in unusable state: ${sandbox.status}`,
+    );
+    return;
+  }
 
-    // Pre-validate
-    const validation = validateSql(sql, engine);
-    if (!validation.valid) {
-      await updateQueryExecutionFailed(
-        queryExecutionId,
-        'blocked',
-        validation.reason ?? 'Blocked',
-      );
-      return;
-    }
+  const engine = normalizeSchemaSqlEngine(sandbox.sandboxEngine);
 
-    await updateQueryExecutionRunning(queryExecutionId);
+  // Pre-validate
+  const validation = validateSql(sql, engine);
+  if (!validation.valid) {
+    await updateQueryExecutionFailed(
+      queryExecutionId,
+      'blocked',
+      validation.reason ?? 'Blocked',
+    );
+    return;
+  }
 
-    const host = sandbox.containerRef ?? sandboxHost;
-    const port = sandbox.containerRef ? sandbox.sandboxDbPort : Number(sandboxPort);
-    const target: SandboxDbTarget = {
-      engine,
-      host,
-      port,
-      user: engine === 'sqlserver' ? 'sa' : sandboxUser,
-      password: engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
-      database: sandbox.dbName,
-    };
+  await updateQueryExecutionRunning(queryExecutionId);
 
-    try {
-      const result = await executeSqlOnTarget(target, sql);
-      const preview = shapeResults(result);
+  const host = sandbox.containerRef ?? sandboxHost;
+  const port = sandbox.containerRef ? sandbox.sandboxDbPort : Number(sandboxPort);
+  const target: SandboxDbTarget = {
+    engine,
+    host,
+    port,
+    user: engine === 'sqlserver' ? 'sa' : sandboxUser,
+    password: engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
+    database: sandbox.dbName,
+  };
 
-      await updateQueryExecutionSuccess(
-        queryExecutionId,
-        result.durationMs,
-        result.rowCount,
-        preview,
-      );
+  try {
+    const result = await executeSqlOnTarget(target, sql, timeoutMs, undefined, async (backendPid) => {
+      await updateQueryExecutionBackendPid(queryExecutionId, backendPid);
+    });
+    const preview = shapeResults(result);
 
-      if (explainPlan) {
-        const mode = planMode ?? 'explain';
-        try {
-          const plan = await getExplainPlanOnTarget(target, sql, mode);
-          await insertQueryExecutionPlan(queryExecutionId, mode, plan.rawPlan, plan.planSummary);
-          logger.info(
-            {
-              queryExecutionId,
-              planMode: mode,
-              planSummaryTotalCost: plan.planSummary?.totalCost ?? null,
-            },
-            'Stored query execution plan',
-          );
-        } catch (planErr) {
-          logger.warn(
-            {
-              planErr,
-              queryExecutionId,
-              planMode: mode,
-              sqlPreview: sql.trim().slice(0, 200),
-            },
-            'Failed to get/store explain plan (non-fatal); challenge submit may miss planner cost',
-          );
-        }
+    const stored = await updateQueryExecutionSuccess(
+      queryExecutionId,
+      result.durationMs,
+      result.rowCount,
+      preview,
+    );
+
+    if (stored && explainPlan) {
+      const mode = planMode ?? 'explain';
+      try {
+        const plan = await getExplainPlanOnTarget(target, sql, mode);
+        await insertQueryExecutionPlan(queryExecutionId, mode, plan.rawPlan, plan.planSummary);
+        logger.info(
+          {
+            queryExecutionId,
+            planMode: mode,
+            planSummaryTotalCost: plan.planSummary?.totalCost ?? null,
+          },
+          'Stored query execution plan',
+        );
+      } catch (planErr) {
+        logger.warn(
+          {
+            planErr,
+            queryExecutionId,
+            planMode: mode,
+            sqlPreview: sql.trim().slice(0, 200),
+          },
+          'Failed to get/store explain plan (non-fatal); challenge submit may miss planner cost',
+        );
       }
-
-      logger.info(
-        { queryExecutionId, durationMs: result.durationMs, rows: result.rowCount },
-        'Query succeeded',
-      );
-    } catch (err: unknown) {
-      if (err instanceof QueryTimeoutError) {
-        await updateQueryExecutionFailed(queryExecutionId, 'timed_out', err.message);
-      } else if (err instanceof QueryBlockedError) {
-        await updateQueryExecutionFailed(queryExecutionId, 'blocked', err.message);
-      } else {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        const durationMs = (err as { durationMs?: number }).durationMs;
-        await updateQueryExecutionFailed(queryExecutionId, 'failed', message, durationMs);
-      }
-      logger.warn({ queryExecutionId, err }, 'Query execution failed');
     }
+
+    logger.info(
+      { queryExecutionId, durationMs: result.durationMs, rows: result.rowCount, stored },
+      'Query succeeded',
+    );
+  } catch (err: unknown) {
+    if (err instanceof QueryTimeoutError) {
+      await updateQueryExecutionFailed(queryExecutionId, 'timed_out', err.message);
+    } else if (err instanceof QueryCancelledError) {
+      await updateQueryExecutionFailed(queryExecutionId, 'cancelled', err.message);
+    } else if (err instanceof QueryBlockedError) {
+      await updateQueryExecutionFailed(queryExecutionId, 'blocked', err.message);
+    } else {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      const durationMs = (err as { durationMs?: number }).durationMs;
+      await updateQueryExecutionFailed(queryExecutionId, 'failed', message, durationMs);
+    }
+    logger.warn({ queryExecutionId, err }, 'Query execution failed');
+  }
+}
+
+const queryExecutionWorker = new Worker(
+  QUEUES.QUERY_EXECUTION,
+  async (job: Job) => {
+    if (job.name === 'cancel_query') {
+      return handleCancelQueryJob(job);
+    }
+    return handleExecuteQueryJob(job);
   },
   queueOptions,
 );
@@ -790,6 +879,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(expiryScanner);
   await Promise.all(workers.map(({ worker }) => worker.close()));
   await cleanupQueue.close();
+  await queryExecutionQueueClient.close();
   await connection.quit();
   await mainDb.end();
 

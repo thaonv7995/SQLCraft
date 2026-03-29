@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import type { SubmitQueryBody, QueryExecutionParams, QueryHistoryParams, QueryHistoryQuerystring } from './queries.schema';
 import {
   submitQueryHandler,
+  cancelQueryHandler,
   getGlobalQueryHistoryHandler,
   getQueryHandler,
   getQueryHistoryHandler,
@@ -55,6 +56,27 @@ export default async function queriesRouter(fastify: FastifyInstance): Promise<v
       },
     },
     submitQueryHandler,
+  );
+
+  // POST /v1/query-executions/:id/cancel
+  fastify.post<{ Params: QueryExecutionParams }>(
+    '/v1/query-executions/:id/cancel',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Queries'],
+        summary: 'Cancel a pending or running sandbox query',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    cancelQueryHandler,
   );
 
   // GET /v1/query-executions/:id

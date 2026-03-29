@@ -2177,8 +2177,8 @@ export default function LabPage({ params }: ClientPageProps) {
     setSelectedScale,
   } = useLabStore();
 
-  const { mutate: executeQuery } = useExecuteQuery();
-  const { mutate: explainQuery } = useExplainQuery();
+  const { mutate: executeQuery, cancelExecution } = useExecuteQuery();
+  const { mutate: explainQuery, cancelExplain } = useExplainQuery();
   const queryClient = useQueryClient();
   const { data: persistedHistoryPage } = useQueryHistory(sessionId, 1, 100);
 
@@ -2710,48 +2710,69 @@ export default function LabPage({ params }: ClientPageProps) {
         <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="scrollbar-none flex min-w-0 flex-wrap items-center gap-2 overflow-x-auto lg:flex-nowrap">
             <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-outline-variant/10 bg-surface-container/70 p-1">
-              <Button
-                variant="primary"
-                size="sm"
-                loading={isExecuting}
-                disabled={
-                  !currentQuery.trim() ||
-                  isExecuting ||
-                  scaleSwitchMutation.isPending ||
-                  resetSandboxMutation.isPending ||
-                  !isSessionReady
-                }
-                onClick={() => executeQuery({ sessionId, sql: currentQuery })}
-                leftIcon={
-                  <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                    play_arrow
-                  </span>
-                }
-              >
-                Run
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                loading={isExplaining}
-                disabled={
-                  !currentQuery.trim() ||
-                  !explainPlanMode ||
-                  isExplaining ||
-                  scaleSwitchMutation.isPending ||
-                  resetSandboxMutation.isPending ||
-                  !isSessionReady
-                }
-                onClick={() => explainQuery({ sessionId, sql: currentQuery })}
-                title={
-                  !explainPlanMode && currentQuery.trim()
-                    ? 'Execution plan is available for SELECT/INSERT/UPDATE/DELETE statements'
-                    : 'Generate an execution plan for the current query'
-                }
-                leftIcon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
-              >
-                Explain
-              </Button>
+              {isExecuting ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => cancelExecution()}
+                  title="Stop the running query"
+                  leftIcon={<span className="material-symbols-outlined text-[18px]">close</span>}
+                >
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={
+                    !currentQuery.trim() ||
+                    scaleSwitchMutation.isPending ||
+                    resetSandboxMutation.isPending ||
+                    !isSessionReady
+                  }
+                  onClick={() => executeQuery({ sessionId, sql: currentQuery })}
+                  leftIcon={
+                    <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                      play_arrow
+                    </span>
+                  }
+                >
+                  Run
+                </Button>
+              )}
+              {isExplaining ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => cancelExplain()}
+                  title="Stop generating the execution plan"
+                  leftIcon={<span className="material-symbols-outlined text-[18px]">close</span>}
+                >
+                  Cancel
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={
+                    !currentQuery.trim() ||
+                    !explainPlanMode ||
+                    isExecuting ||
+                    scaleSwitchMutation.isPending ||
+                    resetSandboxMutation.isPending ||
+                    !isSessionReady
+                  }
+                  onClick={() => explainQuery({ sessionId, sql: currentQuery })}
+                  title={
+                    !explainPlanMode && currentQuery.trim()
+                      ? 'Execution plan is available for SELECT/INSERT/UPDATE/DELETE statements'
+                      : 'Generate an execution plan for the current query'
+                  }
+                  leftIcon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
+                >
+                  Explain
+                </Button>
+              )}
               {session?.challengeVersionId ? (
                 <Button
                   variant="secondary"

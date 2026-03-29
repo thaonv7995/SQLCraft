@@ -1,9 +1,10 @@
 import type { QueryExecutionRow } from '../../db/repositories';
 import { queriesRepository, sessionsRepository } from '../../db/repositories';
 import { labSessionExpiresAtFromNow } from '../../lib/lab-session-ttl';
-import { NotFoundError, ForbiddenError, SessionNotReadyError } from '../../lib/errors';
+import { NotFoundError, ForbiddenError, SessionNotReadyError, ConflictError } from '../../lib/errors';
 import { validateSql } from '../../services/query-executor';
-import { enqueueExecuteQuery } from '../../lib/queue';
+import { enqueueExecuteQuery, enqueueCancelQuery, queryExecutionQueue } from '../../lib/queue';
+import { getQueryExecutionTimeoutMs } from '../../config/query-execution';
 import { logPlannerCostDiag, sqlPreview } from '../../lib/planner-cost-log';
 import { ApiCode } from '@sqlcraft/types';
 import type { SubmitQueryBody, QueryHistoryQuerystring } from './queries.schema';
@@ -48,6 +49,7 @@ function mapDbStatusToUi(
     case 'failed':
     case 'timed_out':
     case 'blocked':
+    case 'cancelled':
       return 'error';
     case 'running':
       return 'running';
@@ -55,6 +57,16 @@ function mapDbStatusToUi(
     default:
       return 'pending';
   }
+}
+
+function isTerminalQueryStatus(s: QueryExecutionRow['status']): boolean {
+  return (
+    s === 'succeeded' ||
+    s === 'failed' ||
+    s === 'timed_out' ||
+    s === 'blocked' ||
+    s === 'cancelled'
+  );
 }
 
 function toListItem(
@@ -304,13 +316,18 @@ export async function submitQuery(
 
   await touchLabSessionAndExtendSandbox(body.learningSessionId);
 
-  await enqueueExecuteQuery({
+  const timeoutMs = getQueryExecutionTimeoutMs();
+  const jobId = await enqueueExecuteQuery({
     queryExecutionId: execution.id,
     sandboxInstanceId: sandbox.id,
     sql: body.sql,
     explainPlan: body.explainPlan,
     planMode: body.planMode,
+    timeoutMs,
   });
+  if (jobId) {
+    await queriesRepository.updateBullJobId(execution.id, jobId);
+  }
 
   return {
     blocked: false,
@@ -327,6 +344,36 @@ export async function submitQuery(
             : new Date().toISOString(),
     },
   };
+}
+
+export async function cancelQueryExecution(userId: string, executionId: string): Promise<void> {
+  const execution = await queriesRepository.findById(executionId);
+
+  if (!execution) {
+    throw new NotFoundError('Query execution not found');
+  }
+
+  if (execution.userId !== userId) {
+    throw new ForbiddenError('Access denied to this query execution');
+  }
+
+  if (isTerminalQueryStatus(execution.status)) {
+    throw new ConflictError('Query already finished');
+  }
+
+  if (execution.status === 'accepted' && execution.bullJobId) {
+    const job = await queryExecutionQueue.getJob(execution.bullJobId);
+    if (job) {
+      const st = await job.getState();
+      if (st === 'waiting' || st === 'delayed') {
+        await job.remove();
+        await queriesRepository.tryMarkCancelled(executionId, 'Cancelled by user');
+        return;
+      }
+    }
+  }
+
+  await enqueueCancelQuery({ queryExecutionId: executionId });
 }
 
 export async function getQueryExecution(

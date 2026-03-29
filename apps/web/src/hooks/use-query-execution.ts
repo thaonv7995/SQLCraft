@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryApi, sessionsApi } from '@/lib/api';
 import { useLabStore } from '@/stores/lab';
@@ -13,7 +13,14 @@ import type {
 
 const TERMINAL_STATUSES = new Set<QueryExecution['status']>(['success', 'error']);
 const POLL_INTERVAL_MS = 600;
-const POLL_TIMEOUT_MS = 35_000;
+/** Keep ~1m beyond server `QUERY_EXECUTION_TIMEOUT_MS` default (600s). */
+const DEFAULT_SERVER_STATEMENT_TIMEOUT_MS = 600_000;
+const POLL_TIMEOUT_MS =
+  typeof process !== 'undefined' &&
+  typeof process.env.NEXT_PUBLIC_QUERY_POLL_TIMEOUT_MS === 'string' &&
+  process.env.NEXT_PUBLIC_QUERY_POLL_TIMEOUT_MS.length > 0
+    ? Math.max(60_000, Number(process.env.NEXT_PUBLIC_QUERY_POLL_TIMEOUT_MS) || 660_000)
+    : DEFAULT_SERVER_STATEMENT_TIMEOUT_MS + 60_000;
 const SCHEMA_MUTATION_SQL = /^\s*(create|alter|drop|truncate|comment|rename)\b/i;
 
 function sleep(ms: number) {
@@ -24,13 +31,19 @@ function mayAffectSchema(sql: string): boolean {
   return SCHEMA_MUTATION_SQL.test(sql);
 }
 
-async function pollUntilDone(executionId: string): Promise<QueryExecution> {
+async function pollUntilDone(
+  executionId: string,
+  signal?: AbortSignal,
+): Promise<QueryExecution> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (true) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
     const execution = await queryApi.poll(executionId);
     if (TERMINAL_STATUSES.has(execution.status)) return execution;
     if (Date.now() > deadline) {
-      throw new Error(`Query timed out after ${POLL_TIMEOUT_MS / 1000}s`);
+      throw new Error(`Query timed out after ${Math.round(POLL_TIMEOUT_MS / 1000)}s`);
     }
     await sleep(POLL_INTERVAL_MS);
   }
@@ -41,15 +54,23 @@ async function pollUntilDone(executionId: string): Promise<QueryExecution> {
 export function useExecuteQuery() {
   const queryClient = useQueryClient();
   const setActiveTab = useLabStore((s) => s.setActiveTab);
+  const abortRef = useRef<AbortController | null>(null);
+  const executionIdRef = useRef<string | null>(null);
 
-  return useMutation<QueryExecution, Error, QueryExecutionRequest>({
+  const mutation = useMutation<QueryExecution, Error, QueryExecutionRequest>({
     mutationFn: async (payload) => {
-      const accepted = await queryApi.execute(payload);
-      // Backend returns status 'accepted' immediately — poll until done
-      if (!TERMINAL_STATUSES.has(accepted.status)) {
-        return pollUntilDone(accepted.id);
+      abortRef.current = new AbortController();
+      executionIdRef.current = null;
+      try {
+        const accepted = await queryApi.execute(payload);
+        executionIdRef.current = accepted.id;
+        if (!TERMINAL_STATUSES.has(accepted.status)) {
+          return await pollUntilDone(accepted.id, abortRef.current.signal);
+        }
+        return accepted;
+      } finally {
+        executionIdRef.current = null;
       }
-      return accepted;
     },
     onMutate: () => {
       useLabStore.setState({ isExecuting: true, error: null, results: null, executionPlan: null });
@@ -76,10 +97,21 @@ export function useExecuteQuery() {
       }
     },
     onError: (err) => {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        useLabStore.setState({ isExecuting: false, error: null });
+        return;
+      }
       useLabStore.setState({ isExecuting: false, error: err.message });
-      // Lab UI displays inline error state; avoid global toast noise.
     },
   });
+
+  const cancelExecution = useCallback(() => {
+    const id = executionIdRef.current;
+    abortRef.current?.abort();
+    if (id) void queryApi.cancel(id);
+  }, []);
+
+  return { ...mutation, cancelExecution };
 }
 
 // ─── Explain Query ────────────────────────────────────────────────────────────
@@ -87,14 +119,23 @@ export function useExecuteQuery() {
 export function useExplainQuery() {
   const queryClient = useQueryClient();
   const setActiveTab = useLabStore((s) => s.setActiveTab);
+  const abortRef = useRef<AbortController | null>(null);
+  const executionIdRef = useRef<string | null>(null);
 
-  return useMutation<QueryExecution, Error, QueryExecutionRequest>({
+  const mutation = useMutation<QueryExecution, Error, QueryExecutionRequest>({
     mutationFn: async (payload) => {
-      const accepted = await queryApi.explain(payload);
-      if (!TERMINAL_STATUSES.has(accepted.status)) {
-        return pollUntilDone(accepted.id);
+      abortRef.current = new AbortController();
+      executionIdRef.current = null;
+      try {
+        const accepted = await queryApi.explain(payload);
+        executionIdRef.current = accepted.id;
+        if (!TERMINAL_STATUSES.has(accepted.status)) {
+          return await pollUntilDone(accepted.id, abortRef.current.signal);
+        }
+        return accepted;
+      } finally {
+        executionIdRef.current = null;
       }
-      return accepted;
     },
     onMutate: () => {
       useLabStore.setState({ isExplaining: true, error: null, executionPlan: null });
@@ -114,10 +155,21 @@ export function useExplainQuery() {
       queryClient.invalidateQueries({ queryKey: ['query-history'] });
     },
     onError: (err) => {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        useLabStore.setState({ isExplaining: false, error: null });
+        return;
+      }
       useLabStore.setState({ isExplaining: false, error: err.message });
-      // Lab UI displays inline error state; avoid global toast noise.
     },
   });
+
+  const cancelExplain = useCallback(() => {
+    const id = executionIdRef.current;
+    abortRef.current?.abort();
+    if (id) void queryApi.cancel(id);
+  }, []);
+
+  return { ...mutation, cancelExplain };
 }
 
 // ─── Query History ────────────────────────────────────────────────────────────

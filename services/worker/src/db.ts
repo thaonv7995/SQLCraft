@@ -212,27 +212,73 @@ export async function updateQueryExecutionSuccess(
   durationMs: number,
   rowsReturned: number,
   resultPreview: unknown,
-): Promise<void> {
-  await mainDb.query(
+): Promise<boolean> {
+  const r = await mainDb.query(
     `UPDATE query_executions
      SET status = 'succeeded', duration_ms = $2, rows_returned = $3, result_preview = $4
-     WHERE id = $1`,
+     WHERE id = $1 AND status = 'running'
+     RETURNING id`,
     [executionId, durationMs, rowsReturned, JSON.stringify(resultPreview)],
   );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function updateQueryExecutionFailed(
   executionId: string,
-  status: 'failed' | 'timed_out' | 'blocked',
+  status: 'failed' | 'timed_out' | 'blocked' | 'cancelled',
   errorMessage: string,
   durationMs?: number,
 ): Promise<void> {
   await mainDb.query(
     `UPDATE query_executions
      SET status = $2, error_message = $3, duration_ms = $4
-     WHERE id = $1`,
+     WHERE id = $1 AND status IN ('accepted', 'running')`,
     [executionId, status, errorMessage, durationMs ?? null],
   );
+}
+
+export async function updateQueryExecutionBackendPid(
+  executionId: string,
+  backendPid: number,
+): Promise<void> {
+  await mainDb.query(
+    `UPDATE query_executions SET db_backend_pid = $2 WHERE id = $1`,
+    [executionId, backendPid],
+  );
+}
+
+export async function fetchQueryExecutionForCancel(executionId: string): Promise<{
+  id: string;
+  status: string;
+  sandboxInstanceId: string | null;
+  bullJobId: string | null;
+  dbBackendPid: string | null;
+} | null> {
+  const result = await mainDb.query(
+    `SELECT id,
+            status,
+            sandbox_instance_id AS "sandboxInstanceId",
+            bull_job_id AS "bullJobId",
+            db_backend_pid::text AS "dbBackendPid"
+       FROM query_executions
+      WHERE id = $1`,
+    [executionId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function tryMarkQueryExecutionCancelled(
+  executionId: string,
+  errorMessage: string,
+): Promise<boolean> {
+  const r = await mainDb.query(
+    `UPDATE query_executions
+     SET status = 'cancelled', error_message = $2
+     WHERE id = $1 AND status IN ('accepted', 'running')
+     RETURNING id`,
+    [executionId, errorMessage],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function insertQueryExecutionPlan(

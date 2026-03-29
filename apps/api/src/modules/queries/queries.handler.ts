@@ -10,6 +10,7 @@ import type {
 } from './queries.schema';
 import {
   submitQuery,
+  cancelQueryExecution,
   getQueryExecution,
   getQueryHistory,
   getGlobalQueryHistory,
@@ -57,6 +58,15 @@ export async function submitQueryHandler(
   }
 
   reply.status(201).send(created(outcome.data, MESSAGES.QUERY_SUBMITTED));
+}
+
+export async function cancelQueryHandler(
+  request: FastifyRequest<{ Params: QueryExecutionParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  await cancelQueryExecution(userId, request.params.id);
+  reply.status(204).send();
 }
 
 export async function getGlobalQueryHistoryHandler(
