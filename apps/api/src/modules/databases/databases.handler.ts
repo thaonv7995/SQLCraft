@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { created, success } from '../../lib/response';
-import { UnauthorizedError } from '../../lib/errors';
+import { ForbiddenError, UnauthorizedError } from '../../lib/errors';
+import { ADMIN_ROLE_NAME } from '../../lib/roles';
 import type { JwtPayload } from '../../plugins/auth';
 import {
   UserImportSqlDumpDatabaseSchema,
@@ -44,15 +45,31 @@ import {
   listDatabases,
 } from './databases.service';
 
+function assertAdminForIncludeAwaitingGolden(
+  includeAwaitingGolden: boolean,
+  viewerUserId: string | null | undefined,
+  roles: string[] | undefined,
+): void {
+  if (!includeAwaitingGolden) return;
+  if (!viewerUserId) {
+    throw new UnauthorizedError('Authentication required for admin database catalog');
+  }
+  if (!roles?.includes(ADMIN_ROLE_NAME)) {
+    throw new ForbiddenError('Admin role required to list databases awaiting golden snapshot');
+  }
+}
+
 export async function listDatabasesHandler(
   request: FastifyRequest<{ Querystring: ListDatabasesQuery }>,
   reply: FastifyReply,
 ): Promise<void> {
   const query = ListDatabasesQuerySchema.parse(request.query);
   const viewerUserId = (request.user as JwtPayload | undefined)?.sub ?? null;
+  const roles = (request.user as JwtPayload | undefined)?.roles;
   if (query.forChallengeAuthoring && !viewerUserId) {
     throw new UnauthorizedError('Authentication required for challenge authoring database list');
   }
+  assertAdminForIncludeAwaitingGolden(query.includeAwaitingGolden, viewerUserId, roles);
   const result = await listDatabases(query, viewerUserId ?? undefined);
   reply.send(success(result, 'Databases retrieved successfully'));
 }
@@ -64,12 +81,15 @@ export async function getDatabaseHandler(
   const { databaseId } = DatabaseParamsSchema.parse(request.params);
   const query = GetDatabaseQuerySchema.parse(request.query ?? {});
   const viewerUserId = (request.user as JwtPayload | undefined)?.sub ?? null;
+  const roles = (request.user as JwtPayload | undefined)?.roles;
   if (query.forChallengeAuthoring && !viewerUserId) {
     throw new UnauthorizedError('Authentication required for challenge authoring database detail');
   }
+  assertAdminForIncludeAwaitingGolden(query.includeAwaitingGolden, viewerUserId, roles);
   const result = await getDatabase(databaseId, {
     forChallengeAuthoring: query.forChallengeAuthoring,
     viewerUserId,
+    adminFullCatalog: query.includeAwaitingGolden === true,
   });
   reply.send(success(result, 'Database retrieved successfully'));
 }

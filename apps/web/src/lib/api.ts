@@ -2287,6 +2287,8 @@ export const databasesApi = {
     forChallengeAuthoring?: boolean;
     /** Logged-in only: all | catalog (public + shared) | mine (your uploads). */
     accessFilter?: 'all' | 'catalog' | 'mine';
+    /** Admin only: list published DBs even when golden snapshot is not ready yet. */
+    includeAwaitingGolden?: boolean;
   }) =>
     api
       .get<PaginatedResponse<Database>>('/databases', { params })
@@ -2295,12 +2297,17 @@ export const databasesApi = {
         items: r.data.items.map(normalizeDatabase),
       })),
 
-  get: (id: string, opts?: { forChallengeAuthoring?: boolean }) =>
-    api
-      .get<Database>(`/databases/${id}`, {
-        params: opts?.forChallengeAuthoring ? { forChallengeAuthoring: true } : undefined,
-      })
-      .then((r) => normalizeDatabase(r.data)),
+  get: (
+    id: string,
+    opts?: { forChallengeAuthoring?: boolean; includeAwaitingGolden?: boolean },
+  ) => {
+    const params: { forChallengeAuthoring?: boolean; includeAwaitingGolden?: boolean } = {};
+    if (opts?.forChallengeAuthoring) params.forChallengeAuthoring = true;
+    if (opts?.includeAwaitingGolden) params.includeAwaitingGolden = true;
+    return api
+      .get<Database>(`/databases/${id}`, Object.keys(params).length > 0 ? { params } : undefined)
+      .then((r) => normalizeDatabase(r.data));
+  },
 
   createSession: (databaseId: string, scale?: DatabaseScale) =>
     api

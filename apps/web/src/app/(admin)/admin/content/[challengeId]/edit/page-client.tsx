@@ -56,8 +56,8 @@ export default function AdminEditChallengePage({ params }: ClientPageProps) {
   });
 
   const databasesQuery = useQuery({
-    queryKey: ['admin-content-databases'],
-    queryFn: () => databasesApi.list({ limit: 100, page: 1 }),
+    queryKey: ['admin-content-databases', { includeAwaitingGolden: true }],
+    queryFn: () => databasesApi.list({ limit: 100, page: 1, includeAwaitingGolden: true }),
   });
 
   const databaseOptions = useMemo(() => {
@@ -83,9 +83,9 @@ export default function AdminEditChallengePage({ params }: ClientPageProps) {
   );
 
   const databaseSchemaQuery = useQuery({
-    queryKey: ['admin-challenge-form-database', databaseId],
+    queryKey: ['admin-challenge-form-database', databaseId, { includeAwaitingGolden: true }],
     enabled: Boolean(databaseId),
-    queryFn: () => databasesApi.get(databaseId),
+    queryFn: () => databasesApi.get(databaseId, { includeAwaitingGolden: true }),
   });
 
   const schemaTables = databaseSchemaQuery.data?.schema ?? [];

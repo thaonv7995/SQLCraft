@@ -35,6 +35,11 @@ export const ListDatabasesQuerySchema = z.object({
    * - `mine` — only your private uploads.
    */
   accessFilter: z.enum(['all', 'catalog', 'mine']).optional().default('all'),
+  /**
+   * Admin only: list all published public/private datasets regardless of golden snapshot status.
+   * Ignored for unauthenticated requests. Requires JWT with `admin` role.
+   */
+  includeAwaitingGolden: z.coerce.boolean().optional().default(false),
 });
 
 export const DatabaseParamsSchema = z.object({
@@ -44,6 +49,8 @@ export const DatabaseParamsSchema = z.object({
 export const GetDatabaseQuerySchema = z.object({
   /** When true (authenticated), resolve id/slug against authoring catalog (public + your private/invited DBs). */
   forChallengeAuthoring: z.coerce.boolean().optional().default(false),
+  /** Admin only: resolve DBs that are published but not yet golden-ready. Requires `admin` role. */
+  includeAwaitingGolden: z.coerce.boolean().optional().default(false),
 });
 
 export const CreateDatabaseSessionBodySchema = z.object({

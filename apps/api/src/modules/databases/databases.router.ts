@@ -83,6 +83,12 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
               description:
                 'When authenticated: all | catalog (public + shared with you) | mine (your private uploads only).',
             },
+            includeAwaitingGolden: {
+              type: 'boolean',
+              default: false,
+              description:
+                'Admin only: include published databases whose golden snapshot is not ready yet (full catalog).',
+            },
           },
         },
       },
@@ -112,6 +118,12 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
               default: false,
               description:
                 'When true, requires auth; resolves against authoring catalog (public + private/invited).',
+            },
+            includeAwaitingGolden: {
+              type: 'boolean',
+              default: false,
+              description:
+                'Admin only: return detail even when golden snapshot is not ready (matches admin list).',
             },
           },
         },

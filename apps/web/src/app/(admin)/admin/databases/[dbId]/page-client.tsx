@@ -457,7 +457,7 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
     queryFn: () =>
       pendingReview
         ? adminApi.getPendingSchemaTemplateReviewDetail(databaseId)
-        : databasesApi.get(databaseId),
+        : databasesApi.get(databaseId, { includeAwaitingGolden: true }),
     enabled: Boolean(databaseId),
     staleTime: 60_000,
   });

@@ -72,6 +72,7 @@ describe('databases router HTTP contracts', () => {
         limit: 5,
         forChallengeAuthoring: false,
         accessFilter: 'all',
+        includeAwaitingGolden: false,
       }),
       undefined,
     );
@@ -123,6 +124,7 @@ describe('databases router HTTP contracts', () => {
         difficulty: 'beginner',
         forChallengeAuthoring: false,
         accessFilter: 'all',
+        includeAwaitingGolden: false,
       }),
       undefined,
     );
@@ -138,6 +140,7 @@ describe('databases router HTTP contracts', () => {
     expect(databaseServiceMocks.getDatabase).toHaveBeenCalledWith('db-ecommerce', {
       forChallengeAuthoring: false,
       viewerUserId: null,
+      adminFullCatalog: false,
     });
     expect(response.json()).toEqual({
       success: true,
@@ -164,6 +167,7 @@ describe('databases router HTTP contracts', () => {
     expect(databaseServiceMocks.getDatabase).toHaveBeenCalledWith('db-ecommerce', {
       forChallengeAuthoring: true,
       viewerUserId: 'user-123',
+      adminFullCatalog: false,
     });
   });
 

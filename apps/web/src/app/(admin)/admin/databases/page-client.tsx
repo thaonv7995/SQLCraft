@@ -232,6 +232,7 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         q: debouncedQ || undefined,
         page: catalogPage,
         limit: CATALOG_PAGE_SIZE,
+        includeAwaitingGolden: true,
       }),
     staleTime: 60_000,
   });

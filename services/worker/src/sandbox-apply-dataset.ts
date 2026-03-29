@@ -58,6 +58,11 @@ export async function applySchemaAndDatasetToContainer(params: {
   sandboxUser: string;
   sandboxPassword: string;
   mssqlSaPassword: string;
+  /**
+   * Golden-bake must restore from the raw artifact (not a prior snapshot). User sandbox
+   * provisioning should omit this (default false) so `sandboxGoldenSnapshotUrl` is used when set.
+   */
+  preferArtifactOverGoldenSnapshot?: boolean;
 }): Promise<void> {
   const {
     logger,
@@ -70,6 +75,7 @@ export async function applySchemaAndDatasetToContainer(params: {
     sandboxUser,
     sandboxPassword,
     mssqlSaPassword,
+    preferArtifactOverGoldenSnapshot = false,
   } = params;
 
   const [schemaDef, datasetTemplate] = await Promise.all([
@@ -173,8 +179,7 @@ export async function applySchemaAndDatasetToContainer(params: {
     datasetTemplate,
     schema: schemaDef,
     ensureSchemaApplied,
-    /** Golden bake must always restore from raw artifact, not a prior snapshot. */
-    preferArtifactOverGoldenSnapshot: true,
+    preferArtifactOverGoldenSnapshot,
   });
 
   logger.info(

@@ -219,6 +219,7 @@ export async function runGoldenBakeSnapshotPipeline(params: {
         sandboxUser,
         sandboxPassword,
         mssqlSaPassword,
+        preferArtifactOverGoldenSnapshot: true,
       }),
       GOLDEN_BAKE_RESTORE_TIMEOUT_MS,
       'golden-bake applySchemaAndDataset',

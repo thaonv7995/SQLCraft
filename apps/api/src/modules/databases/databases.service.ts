@@ -377,8 +377,19 @@ export async function assertSchemaTemplateUsableForUserChallenge(
   }
 }
 
-async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
+/**
+ * Public catalog: approved published schemas with at least one matching published dataset.
+ * @param requireGoldenReady — explorer / anonymous: true (end-user provisionable only). Admin: false.
+ */
+async function loadPublicDatabaseCatalogItems(requireGoldenReady: boolean): Promise<DatabaseItem[]> {
   const db = getDb();
+
+  const datasetWhere = requireGoldenReady
+    ? and(
+        eq(dbSchema.datasetTemplates.status, 'published'),
+        eq(dbSchema.datasetTemplates.sandboxGoldenStatus, 'ready'),
+      )
+    : eq(dbSchema.datasetTemplates.status, 'published');
 
   const [schemaTemplates, datasetTemplates] = await Promise.all([
     db
@@ -399,12 +410,7 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
     db
       .select()
       .from(dbSchema.datasetTemplates)
-      .where(
-        and(
-          eq(dbSchema.datasetTemplates.status, 'published'),
-          eq(dbSchema.datasetTemplates.sandboxGoldenStatus, 'ready'),
-        ),
-      )
+      .where(datasetWhere)
       .orderBy(desc(dbSchema.datasetTemplates.createdAt)),
   ]);
 
@@ -420,14 +426,77 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
     {},
   );
 
-  return schemaTemplates.map((template) =>
-    buildDatabaseItem(template, Object.values(datasetsBySchema[template.id] ?? {}), 'public'),
-  );
+  return schemaTemplates
+    .filter((template) => Object.keys(datasetsBySchema[template.id] ?? {}).length > 0)
+    .map((template) =>
+      buildDatabaseItem(template, Object.values(datasetsBySchema[template.id] ?? {}), 'public'),
+    );
+}
+
+/** Public DBs you own that are published but no scale has golden `ready` yet (shown in explorer for management). */
+async function loadOwnerPublicDatabasesAwaitingGolden(
+  viewerUserId: string,
+  strictPublicItems: DatabaseItem[],
+): Promise<DatabaseItem[]> {
+  const covered = new Set(strictPublicItems.map((d) => d.id));
+  const db = getDb();
+  const ownedTemplates = await db
+    .select()
+    .from(dbSchema.schemaTemplates)
+    .where(
+      and(
+        eq(dbSchema.schemaTemplates.createdBy, viewerUserId),
+        eq(dbSchema.schemaTemplates.visibility, 'public'),
+        eq(dbSchema.schemaTemplates.status, 'published'),
+        isNull(dbSchema.schemaTemplates.replacedById),
+        eq(dbSchema.schemaTemplates.reviewStatus, 'approved'),
+      ),
+    );
+
+  const out: DatabaseItem[] = [];
+  for (const template of ownedTemplates) {
+    if (covered.has(template.catalogAnchorId)) continue;
+
+    const datasets = await db
+      .select()
+      .from(dbSchema.datasetTemplates)
+      .where(
+        and(
+          eq(dbSchema.datasetTemplates.schemaTemplateId, template.id),
+          eq(dbSchema.datasetTemplates.status, 'published'),
+        ),
+      )
+      .orderBy(desc(dbSchema.datasetTemplates.createdAt));
+
+    if (datasets.length === 0) continue;
+
+    const anyReady = datasets.some((row) => row.sandboxGoldenStatus === 'ready');
+    if (anyReady) continue;
+
+    out.push(buildDatabaseItem(template, datasets, 'public'));
+  }
+  return out;
 }
 
 /** Published public catalog plus private templates you own or are invited to (same IDs as Explorer when logged in). */
-async function loadViewerAccessibleCatalog(viewerUserId: string): Promise<DatabaseItem[]> {
-  const publicItems = await loadDatabaseCatalog();
+async function loadViewerAccessibleCatalog(
+  viewerUserId: string,
+  opts?: { adminFullCatalog?: boolean },
+): Promise<DatabaseItem[]> {
+  const adminFullCatalog = opts?.adminFullCatalog ?? false;
+
+  let publicItems: DatabaseItem[];
+  if (adminFullCatalog) {
+    publicItems = await loadPublicDatabaseCatalogItems(false);
+  } else {
+    const strictPublic = await loadPublicDatabaseCatalogItems(true);
+    const ownerAwaitingGolden = await loadOwnerPublicDatabasesAwaitingGolden(
+      viewerUserId,
+      strictPublic,
+    );
+    publicItems = [...strictPublic, ...ownerAwaitingGolden];
+  }
+
   const db = getDb();
   const inviteRows = await db
     .select({ sid: dbSchema.schemaTemplateInvites.schemaTemplateId })
@@ -456,6 +525,7 @@ async function loadViewerAccessibleCatalog(viewerUserId: string): Promise<Databa
     );
 
   const privateIds = privateTemplates.map((t) => t.id);
+  /** Owner / invitee: show all published scales (golden pending is OK for management). */
   const privateDatasets =
     privateIds.length > 0
       ? await db
@@ -465,7 +535,6 @@ async function loadViewerAccessibleCatalog(viewerUserId: string): Promise<Databa
             and(
               inArray(dbSchema.datasetTemplates.schemaTemplateId, privateIds),
               eq(dbSchema.datasetTemplates.status, 'published'),
-              eq(dbSchema.datasetTemplates.sandboxGoldenStatus, 'ready'),
             ),
           )
           .orderBy(desc(dbSchema.datasetTemplates.createdAt))
@@ -482,13 +551,15 @@ async function loadViewerAccessibleCatalog(viewerUserId: string): Promise<Databa
     return acc;
   }, {});
 
-  const privateItems = privateTemplates.map((template) =>
-    buildDatabaseItem(
-      template,
-      Object.values(privateDatasetsBySchema[template.id] ?? {}),
-      template.createdBy === viewerUserId ? 'private_owner' : 'private_invited',
-    ),
-  );
+  const privateItems = privateTemplates
+    .filter((template) => Object.keys(privateDatasetsBySchema[template.id] ?? {}).length > 0)
+    .map((template) =>
+      buildDatabaseItem(
+        template,
+        Object.values(privateDatasetsBySchema[template.id] ?? {}),
+        template.createdBy === viewerUserId ? 'private_owner' : 'private_invited',
+      ),
+    );
 
   const pendingPublicTemplates = await db
     .select()
@@ -568,8 +639,10 @@ export async function listDatabases(
 ): Promise<PaginatedDatabasesResult> {
   const catalog =
     viewerUserId != null && viewerUserId !== ''
-      ? await loadViewerAccessibleCatalog(viewerUserId)
-      : await loadDatabaseCatalog();
+      ? await loadViewerAccessibleCatalog(viewerUserId, {
+          adminFullCatalog: query.includeAwaitingGolden === true,
+        })
+      : await loadPublicDatabaseCatalogItems(true);
   const filtered = catalog.filter((database) => databaseMatchesListQuery(database, query));
 
   const offset = (query.page - 1) * query.limit;
@@ -586,12 +659,19 @@ export async function listDatabases(
 
 export async function getDatabase(
   databaseId: string,
-  opts?: { forChallengeAuthoring?: boolean; viewerUserId?: string | null },
+  opts?: {
+    forChallengeAuthoring?: boolean;
+    viewerUserId?: string | null;
+    /** Admin-only full catalog (same as list `includeAwaitingGolden`). */
+    adminFullCatalog?: boolean;
+  },
 ): Promise<DatabaseItem> {
   const catalog =
     opts?.viewerUserId != null && opts.viewerUserId !== ''
-      ? await loadViewerAccessibleCatalog(opts.viewerUserId)
-      : await loadDatabaseCatalog();
+      ? await loadViewerAccessibleCatalog(opts.viewerUserId, {
+          adminFullCatalog: opts.adminFullCatalog === true,
+        })
+      : await loadPublicDatabaseCatalogItems(true);
   const database = catalog.find((item) => item.id === databaseId || item.slug === databaseId);
 
   if (!database) {

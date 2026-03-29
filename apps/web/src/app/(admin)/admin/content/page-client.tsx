@@ -258,9 +258,9 @@ export default function AdminContentChallengesPage(_props: ClientPageProps) {
   const queryClient = useQueryClient();
 
   const databasesQuery = useQuery({
-    queryKey: ['admin-content-databases'],
+    queryKey: ['admin-content-databases', { includeAwaitingGolden: true }],
     // API enforces limit ≤ 100 (ListDatabasesQuerySchema); higher values fail validation.
-    queryFn: () => databasesApi.list({ limit: 100, page: 1 }),
+    queryFn: () => databasesApi.list({ limit: 100, page: 1, includeAwaitingGolden: true }),
   });
 
   const reviewQuery = useQuery({
