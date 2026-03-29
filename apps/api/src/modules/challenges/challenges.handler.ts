@@ -17,7 +17,9 @@ import {
   validateChallengeDraft,
   createChallenge,
   createChallengeVersion,
-  publishChallengeVersion,
+  listChallengeInvitesForOwner,
+  replaceChallengeInvitesForOwner,
+  publishPrivateChallengeVersion,
   reviewChallengeVersion,
 } from './challenges.service';
 import {
@@ -32,6 +34,8 @@ import {
   CreateChallengeVersionSchema,
   ValidateChallengeDraftSchema,
   ReviewChallengeVersionSchema,
+  ReplaceChallengeInvitesSchema,
+  PublishPrivateChallengeSchema,
 } from './challenges.schema';
 import type {
   ChallengeAttemptParams,
@@ -47,6 +51,8 @@ import type {
   CreateChallengeVersionBody,
   ValidateChallengeDraftBody,
   ReviewChallengeVersionBody,
+  PublishPrivateChallengeBody,
+  ReplaceChallengeInvitesBody,
 } from './challenges.schema';
 
 export async function submitAttemptHandler(
@@ -76,15 +82,17 @@ export async function getChallengeVersionHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const { id } = ChallengeVersionParamsSchema.parse(request.params);
-  const detail = await getChallengeVersionDetail(id);
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? '';
+  const detail = await getChallengeVersionDetail(id, userId);
   return reply.send(success(detail, MESSAGES.CHALLENGE_VERSION_RETRIEVED));
 }
 
 export async function listPublishedChallengesHandler(
-  _request: FastifyRequest,
+  request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const challenges = await listPublishedChallenges();
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? '';
+  const challenges = await listPublishedChallenges(userId);
   return reply.send(success(challenges, 'Published challenges retrieved successfully'));
 }
 
@@ -113,7 +121,8 @@ export async function getChallengeLeaderboardHandler(
 ): Promise<void> {
   const { id } = ChallengeVersionParamsSchema.parse(request.params);
   const query = ChallengeLeaderboardQuerySchema.parse(request.query);
-  const leaderboard = await getChallengeLeaderboard(id, query.limit);
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? '';
+  const leaderboard = await getChallengeLeaderboard(id, userId, query.limit);
   return reply.send(success(leaderboard, MESSAGES.LEADERBOARD_RETRIEVED));
 }
 
@@ -123,7 +132,7 @@ export async function getChallengeLeaderboardContextHandler(
 ): Promise<void> {
   const { id } = ChallengeVersionParamsSchema.parse(request.params);
   const query = ChallengeLeaderboardQuerySchema.parse(request.query);
-  const userId = (request.user as JwtPayload | undefined)?.sub ?? null;
+  const userId = (request.user as JwtPayload | undefined)?.sub ?? '';
   const context = await getChallengeLeaderboardContext(id, query.limit, userId);
   return reply.send(success(context, MESSAGES.LEADERBOARD_RETRIEVED));
 }
@@ -182,14 +191,42 @@ export async function createChallengeVersionHandler(
   return reply.status(201).send(created(result, 'Challenge version created successfully'));
 }
 
-export async function publishChallengeVersionHandler(
-  request: FastifyRequest<{ Params: AdminChallengeVersionParams }>,
+export async function publishPrivateChallengeVersionHandler(
+  request: FastifyRequest<{ Params: ChallengeParams; Body: PublishPrivateChallengeBody }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const { id } = request.params;
-  const reviewerId = (request.user as JwtPayload | undefined)?.sub;
-  const published = await publishChallengeVersion(id, reviewerId);
+  const { id } = ChallengeParamsSchema.parse(request.params);
+  const body = PublishPrivateChallengeSchema.parse(request.body);
+  const jwtUser = request.user as JwtPayload | undefined;
+  const userId = jwtUser?.sub ?? '';
+  const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
+  const published = await publishPrivateChallengeVersion(id, body, userId, isAdmin);
   return reply.send(success(published, MESSAGES.CONTENT_PUBLISHED));
+}
+
+export async function listChallengeInvitesHandler(
+  request: FastifyRequest<{ Params: ChallengeParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeParamsSchema.parse(request.params);
+  const jwtUser = request.user as JwtPayload | undefined;
+  const userId = jwtUser?.sub ?? '';
+  const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
+  const result = await listChallengeInvitesForOwner(id, userId, isAdmin);
+  return reply.send(success(result, 'Challenge invites retrieved successfully'));
+}
+
+export async function replaceChallengeInvitesHandler(
+  request: FastifyRequest<{ Params: ChallengeParams; Body: ReplaceChallengeInvitesBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { id } = ChallengeParamsSchema.parse(request.params);
+  const body = ReplaceChallengeInvitesSchema.parse(request.body);
+  const jwtUser = request.user as JwtPayload | undefined;
+  const userId = jwtUser?.sub ?? '';
+  const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
+  const result = await replaceChallengeInvitesForOwner(id, body, userId, isAdmin);
+  return reply.send(success(result, 'Challenge invites updated successfully'));
 }
 
 export async function reviewChallengeVersionHandler(

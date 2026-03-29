@@ -7,6 +7,7 @@ import {
   adminDeleteChallenge,
   adminUpdateChallenge,
   publishChallengeVersion as publishChallengeVersionCore,
+  validatePrivateInviteUserIds,
 } from '../challenges/challenges.service';
 import {
   challengesRepository,
@@ -113,6 +114,7 @@ export async function createChallenge(
   const databaseExists = await sessionsRepository.findSchemaTemplateById(body.databaseId);
   if (!databaseExists) throw new NotFoundError('Database not found');
 
+  const visibility = body.visibility ?? 'public';
   const challenge = await challengesRepository.createChallenge({
     databaseId: body.databaseId,
     slug: body.slug,
@@ -122,6 +124,7 @@ export async function createChallenge(
     sortOrder: body.sortOrder,
     points: body.points ?? 100,
     datasetScale: body.datasetScale ?? 'small',
+    visibility,
     status: 'draft',
     createdBy: userId,
   });
@@ -137,6 +140,11 @@ export async function createChallenge(
     validatorConfig: body.validatorConfig as unknown as Record<string, unknown>,
     createdBy: userId,
   });
+
+  if (visibility === 'private') {
+    const invitees = await validatePrivateInviteUserIds(visibility, body.invitedUserIds, userId);
+    await challengesRepository.replaceChallengeInvites(challenge.id, invitees, userId);
+  }
 
   return { challenge, version };
 }

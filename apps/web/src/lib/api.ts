@@ -196,6 +196,7 @@ export interface LessonVersion {
 export interface ChallengeVersionDetail {
   id: string;
   challengeId: string;
+  visibility?: 'public' | 'private';
   databaseId?: string;
   databaseName?: string;
   lessonId: string;
@@ -304,6 +305,7 @@ export interface ChallengeCatalogItem {
   description: string;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   sortOrder: number;
+  visibility?: 'public' | 'private';
   status: 'draft' | 'published' | 'archived';
   points: number;
   datasetScale: DatasetScale;
@@ -331,6 +333,8 @@ export interface EditableChallengeDetail {
   databaseId?: string;
   databaseName?: string;
   lessonId: string;
+  visibility?: 'public' | 'private';
+  invitedUserIds?: string[];
   slug: string;
   title: string;
   description: string;
@@ -1232,6 +1236,7 @@ function normalizeChallengeVersionDetail(
 ): ChallengeVersionDetail {
   return {
     ...detail,
+    visibility: detail.visibility ?? 'public',
     description: detail.description ?? '',
     points: detail.points ?? 100,
     hintText: detail.hintText ?? null,
@@ -1248,6 +1253,7 @@ function normalizeChallengeVersionDetail(
 function normalizeChallengeCatalogItem(item: ChallengeCatalogItem): ChallengeCatalogItem {
   return {
     ...item,
+    visibility: item.visibility ?? 'public',
     description: item.description ?? '',
     datasetScale: normalizeDatasetScale(item.datasetScale) ?? 'small',
     publishedVersionId: item.publishedVersionId ?? null,
@@ -1281,6 +1287,8 @@ function normalizeAdminChallengeCatalogItem(item: AdminChallengeCatalogItem): Ad
 function normalizeEditableChallengeDetail(detail: EditableChallengeDetail): EditableChallengeDetail {
   return {
     ...detail,
+    visibility: detail.visibility ?? 'public',
+    invitedUserIds: detail.invitedUserIds ?? [],
     description: detail.description ?? '',
     datasetScale: normalizeDatasetScale(detail.datasetScale) ?? 'small',
     publishedVersionId: detail.publishedVersionId ?? null,
@@ -1596,6 +1604,8 @@ export const challengesApi = {
     referenceSolution?: string;
     validatorType?: string;
     validatorConfig: ChallengeValidatorConfigPayload;
+    visibility?: 'public' | 'private';
+    invitedUserIds?: string[];
   }) => api.post<{ challenge: { id: string }; version: { id: string } }>('/challenges', payload).then((r) => r.data),
 
   createVersion: (
@@ -1633,6 +1643,15 @@ export const challengesApi = {
     api
       .get<ChallengeVersionDetail>(`/challenge-versions/${id}`)
       .then((r) => normalizeChallengeVersionDetail(r.data)),
+
+  publishPrivate: (challengeId: string, versionId: string) =>
+    api.post(`/challenges/${challengeId}/publish-private`, { versionId }).then((r) => r.data),
+
+  listInvites: (challengeId: string) =>
+    api.get<{ userIds: string[] }>(`/challenges/${challengeId}/invites`).then((r) => r.data),
+
+  replaceInvites: (challengeId: string, userIds: string[]) =>
+    api.put<{ userIds: string[] }>(`/challenges/${challengeId}/invites`, { userIds }).then((r) => r.data),
 
   submitAttempt: (payload: {
     learningSessionId: string;
@@ -1917,6 +1936,8 @@ export interface AdminCreateChallengePayload {
   sortOrder?: number;
   points?: number;
   datasetScale?: DatasetScale;
+  visibility?: 'public' | 'private';
+  invitedUserIds?: string[];
   problemStatement: string;
   hintText?: string;
   expectedResultColumns?: string[];
@@ -1936,6 +1957,7 @@ export interface AdminCreateChallengeResult {
     sortOrder: number;
     points: number;
     datasetScale?: DatasetScale;
+    visibility?: 'public' | 'private';
     status: string;
     publishedVersionId: string | null;
     createdBy: string | null;

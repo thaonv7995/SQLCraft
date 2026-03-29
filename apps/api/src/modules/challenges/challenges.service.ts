@@ -40,6 +40,8 @@ import type {
   CreateChallengeBody,
   CreateChallengeVersionBody,
   ListAdminChallengesCatalogQuery,
+  PublishPrivateChallengeBody,
+  ReplaceChallengeInvitesBody,
   ReviewChallengeVersionBody,
   SubmitAttemptBody,
   ValidateChallengeDraftBody,
@@ -117,6 +119,7 @@ export interface ChallengeDraftValidationResult {
 export interface ChallengeVersionDetail {
   id: string;
   challengeId: string;
+  visibility: ChallengeRow['visibility'];
   databaseId?: string | null;
   databaseName?: string | null;
   slug: string;
@@ -190,6 +193,7 @@ export interface ChallengeCatalogItem {
   description: string;
   difficulty: ChallengeRow['difficulty'];
   sortOrder: number;
+  visibility: ChallengeRow['visibility'];
   status: ChallengeRow['status'];
   points: number;
   datasetScale: ChallengeRow['datasetScale'];
@@ -227,6 +231,8 @@ export interface EditableChallengeDetail {
   sortOrder: number;
   points: number;
   datasetScale: ChallengeRow['datasetScale'];
+  visibility: ChallengeRow['visibility'];
+  invitedUserIds: string[];
   status: ChallengeRow['status'];
   publishedVersionId: string | null;
   updatedAt: Date;
@@ -305,6 +311,58 @@ function normalizeChallengeVersionDetail(
   };
 }
 
+export async function validatePrivateInviteUserIds(
+  visibility: ChallengeRow['visibility'],
+  invitedUserIds: string[] | undefined,
+  creatorUserId: string,
+): Promise<string[]> {
+  if (visibility !== 'private') {
+    return [];
+  }
+  const raw = invitedUserIds ?? [];
+  const unique = [...new Set(raw)].filter((id) => id !== creatorUserId);
+  if (unique.length === 0) {
+    return [];
+  }
+  const n = await challengesRepository.countUsersWithIds(unique);
+  if (n !== unique.length) {
+    throw new ValidationError('One or more invited users were not found');
+  }
+  return unique;
+}
+
+async function assertViewerCanAccessPublishedChallengeDetail(
+  detail: PublishedChallengeVersionDetailRow,
+  viewerUserId: string,
+): Promise<void> {
+  if (detail.visibility === 'public') {
+    return;
+  }
+  if (detail.challengeCreatedBy === viewerUserId) {
+    return;
+  }
+  const ok = await challengesRepository.isUserInvitedToChallenge(detail.challengeId, viewerUserId);
+  if (!ok) {
+    throw new ForbiddenError('You do not have access to this challenge');
+  }
+}
+
+async function assertViewerCanAccessPublishedChallengeFromVersionRow(
+  row: PublishedChallengeVersionRow,
+  viewerUserId: string,
+): Promise<void> {
+  if (row.challengeVisibility === 'public') {
+    return;
+  }
+  if (row.challengeCreatedBy === viewerUserId) {
+    return;
+  }
+  const ok = await challengesRepository.isUserInvitedToChallenge(row.challengeId, viewerUserId);
+  if (!ok) {
+    throw new ForbiddenError('You do not have access to this challenge');
+  }
+}
+
 function normalizeAttemptEvaluation(value: unknown): AttemptEvaluation | null {
   return value && typeof value === 'object' ? (value as AttemptEvaluation) : null;
 }
@@ -371,7 +429,10 @@ function normalizeReviewRow(row: ReviewChallengeRow): ChallengeReviewItem {
   };
 }
 
-function normalizeEditableChallengeDetail(row: EditableChallengeDetailRow): EditableChallengeDetail {
+function normalizeEditableChallengeDetail(
+  row: EditableChallengeDetailRow,
+  invitedUserIds: string[],
+): EditableChallengeDetail {
   return {
     id: row.id,
     databaseId: row.databaseId ?? null,
@@ -383,6 +444,8 @@ function normalizeEditableChallengeDetail(row: EditableChallengeDetailRow): Edit
     sortOrder: row.sortOrder,
     points: row.points,
     datasetScale: row.datasetScale,
+    visibility: row.visibility,
+    invitedUserIds,
     status: row.status,
     publishedVersionId: row.publishedVersionId,
     updatedAt: row.updatedAt,
@@ -1593,6 +1656,8 @@ export async function submitAttempt(
     throw new NotFoundError('Challenge version not found or not published');
   }
 
+  await assertViewerCanAccessPublishedChallengeFromVersionRow(challengeVersion, userId);
+
   const queryExecution = await challengesRepository.findQueryExecution(
     data.queryExecutionId,
     data.learningSessionId,
@@ -1656,12 +1721,17 @@ export async function submitAttempt(
   };
 }
 
-export async function getChallengeVersionDetail(id: string): Promise<ChallengeVersionDetail> {
+export async function getChallengeVersionDetail(
+  id: string,
+  viewerUserId: string,
+): Promise<ChallengeVersionDetail> {
   const detail = await challengesRepository.findPublishedVersionDetailById(id);
 
   if (!detail) {
     throw new NotFoundError('Challenge version not found or not published');
   }
+
+  await assertViewerCanAccessPublishedChallengeDetail(detail, viewerUserId);
 
   return normalizeChallengeVersionDetail(detail);
 }
@@ -1676,12 +1746,15 @@ export async function listUserAttempts(
     throw new NotFoundError('Challenge version not found or not published');
   }
 
+  await assertViewerCanAccessPublishedChallengeDetail(detail, userId);
+
   const attempts = await challengesRepository.listAttemptsForUser(userId, challengeVersionId);
   return attempts.map(mapAttemptRow);
 }
 
 export async function getChallengeLeaderboard(
   challengeVersionId: string,
+  viewerUserId: string,
   limit = 10,
 ): Promise<ChallengeLeaderboardEntry[]> {
   const detail = await challengesRepository.findPublishedVersionDetailById(challengeVersionId);
@@ -1689,6 +1762,8 @@ export async function getChallengeLeaderboard(
   if (!detail) {
     throw new NotFoundError('Challenge version not found or not published');
   }
+
+  await assertViewerCanAccessPublishedChallengeDetail(detail, viewerUserId);
 
   const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
   const rows = buildLeaderboard(attempts, limit);
@@ -1704,6 +1779,12 @@ export async function getChallengeLeaderboardContext(
 
   if (!detail) {
     throw new NotFoundError('Challenge version not found or not published');
+  }
+
+  if (viewerUserId) {
+    await assertViewerCanAccessPublishedChallengeDetail(detail, viewerUserId);
+  } else if (detail.visibility === 'private') {
+    throw new ForbiddenError('You do not have access to this challenge');
   }
 
   const attempts = await challengesRepository.listAttemptsForChallengeVersion(challengeVersionId);
@@ -1778,8 +1859,8 @@ export async function getAttempt(
   return attempt;
 }
 
-export async function listPublishedChallenges(): Promise<ChallengeCatalogItem[]> {
-  const challenges = await challengesRepository.listPublishedChallenges();
+export async function listPublishedChallenges(viewerUserId: string): Promise<ChallengeCatalogItem[]> {
+  const challenges = await challengesRepository.listPublishedChallenges(viewerUserId);
   return challenges.map(normalizeCatalogRow);
 }
 
@@ -1885,7 +1966,9 @@ export async function getEditableChallenge(
     throw new ForbiddenError('Access denied to this challenge draft');
   }
 
-  return normalizeEditableChallengeDetail(detail);
+  const invitedUserIds = await challengesRepository.listChallengeInviteUserIds(id);
+
+  return normalizeEditableChallengeDetail(detail, invitedUserIds);
 }
 
 export async function validateChallengeDraft(
@@ -1903,6 +1986,12 @@ export async function createChallenge(
     throw new ValidationError(validation.errors.join(' '));
   }
   const normalized = normalizeChallengeDraftPayload(data);
+  const visibility = data.visibility ?? 'public';
+  const normalizedInvitees = await validatePrivateInviteUserIds(
+    visibility,
+    data.invitedUserIds,
+    userId,
+  );
 
   const challenge = await challengesRepository.createChallenge({
     databaseId: normalized.databaseId,
@@ -1913,9 +2002,14 @@ export async function createChallenge(
     sortOrder: normalized.sortOrder,
     points: normalized.points,
     datasetScale: normalized.datasetScale,
+    visibility,
     status: 'draft',
     createdBy: userId,
   });
+
+  if (visibility === 'private') {
+    await challengesRepository.replaceChallengeInvites(challenge.id, normalizedInvitees, userId);
+  }
 
   const version = await challengesRepository.createVersion({
     challengeId: challenge.id,
@@ -2023,6 +2117,19 @@ export async function reviewChallengeVersion(
   reviewNote?: string,
 ): Promise<ChallengeVersionRow> {
   if (decision === 'approve') {
+    const version = await challengesRepository.findVersionById(versionId);
+    if (!version) {
+      throw new NotFoundError('Challenge version not found');
+    }
+    const challenge = await challengesRepository.findById(version.challengeId);
+    if (!challenge) {
+      throw new NotFoundError('Challenge not found');
+    }
+    if (challenge.visibility === 'private') {
+      throw new ValidationError(
+        'Private challenges are not approved through admin review. The creator publishes them directly.',
+      );
+    }
     return publishChallengeVersion(versionId, reviewerId, reviewNote);
   }
 
@@ -2080,6 +2187,7 @@ export async function adminUpdateChallenge(
       sortOrder: normalized.sortOrder,
       points: normalized.points,
       datasetScale: normalized.datasetScale,
+      visibility: body.visibility,
     })) ?? existing;
 
   const version = await challengesRepository.updateVersion(editable.versionId, {
@@ -2095,6 +2203,74 @@ export async function adminUpdateChallenge(
   }
 
   return { challenge, version };
+}
+
+export async function publishPrivateChallengeVersion(
+  challengeId: string,
+  body: PublishPrivateChallengeBody,
+  userId: string,
+  isAdmin: boolean,
+): Promise<ChallengeVersionRow> {
+  const challenge = await challengesRepository.findById(challengeId);
+  if (!challenge) {
+    throw new NotFoundError('Challenge not found');
+  }
+  if (challenge.visibility !== 'private') {
+    throw new ValidationError(
+      'Only private challenges can be self-published through this action. Public challenges require admin review.',
+    );
+  }
+  if (challenge.createdBy !== userId && !isAdmin) {
+    throw new ForbiddenError('Access denied');
+  }
+  const version = await challengesRepository.findVersionById(body.versionId);
+  if (!version || version.challengeId !== challengeId) {
+    throw new NotFoundError('Challenge version not found');
+  }
+  return publishChallengeVersion(body.versionId, userId, 'Self-published (private challenge)');
+}
+
+export async function listChallengeInvitesForOwner(
+  challengeId: string,
+  userId: string,
+  isAdmin: boolean,
+): Promise<{ userIds: string[] }> {
+  const challenge = await challengesRepository.findById(challengeId);
+  if (!challenge) {
+    throw new NotFoundError('Challenge not found');
+  }
+  if (challenge.createdBy !== userId && !isAdmin) {
+    throw new ForbiddenError('Access denied');
+  }
+  const userIds = await challengesRepository.listChallengeInviteUserIds(challengeId);
+  return { userIds };
+}
+
+export async function replaceChallengeInvitesForOwner(
+  challengeId: string,
+  body: ReplaceChallengeInvitesBody,
+  userId: string,
+  isAdmin: boolean,
+): Promise<{ userIds: string[] }> {
+  const challenge = await challengesRepository.findById(challengeId);
+  if (!challenge) {
+    throw new NotFoundError('Challenge not found');
+  }
+  if (challenge.visibility !== 'private') {
+    throw new ValidationError('Invites can only be managed for private challenges');
+  }
+  if (challenge.createdBy !== userId && !isAdmin) {
+    throw new ForbiddenError('Access denied');
+  }
+  const unique = [...new Set(body.userIds)].filter((id) => id !== challenge.createdBy);
+  if (unique.length > 0) {
+    const n = await challengesRepository.countUsersWithIds(unique);
+    if (n !== unique.length) {
+      throw new ValidationError('One or more invited users were not found');
+    }
+  }
+  await challengesRepository.replaceChallengeInvites(challengeId, unique, userId);
+  return { userIds: unique };
 }
 
 /** Admin: hard-delete challenge (cascade versions). Blocked if any attempts reference a version. */

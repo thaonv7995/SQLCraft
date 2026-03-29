@@ -22,7 +22,9 @@ const challengeServiceMocks = vi.hoisted(() => ({
   validateChallengeDraft: vi.fn(),
   createChallenge: vi.fn(),
   createChallengeVersion: vi.fn(),
-  publishChallengeVersion: vi.fn(),
+  publishPrivateChallengeVersion: vi.fn(),
+  listChallengeInvitesForOwner: vi.fn(),
+  replaceChallengeInvitesForOwner: vi.fn(),
   reviewChallengeVersion: vi.fn(),
 }));
 
@@ -77,10 +79,11 @@ describe('challenges router HTTP contracts', () => {
     challengeServiceMocks.createChallengeVersion.mockResolvedValue({
       id: 'challenge-version-1',
     });
-    challengeServiceMocks.publishChallengeVersion.mockResolvedValue({
+    challengeServiceMocks.publishPrivateChallengeVersion.mockResolvedValue({
       id: 'challenge-version-1',
-      status: 'published',
     });
+    challengeServiceMocks.listChallengeInvitesForOwner.mockResolvedValue({ userIds: [] });
+    challengeServiceMocks.replaceChallengeInvitesForOwner.mockResolvedValue({ userIds: [] });
     challengeServiceMocks.reviewChallengeVersion.mockResolvedValue({
       id: 'challenge-version-1',
       decision: 'approve',

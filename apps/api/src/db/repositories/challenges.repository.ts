@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, inArray, or, sql } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -13,6 +13,8 @@ export type InsertChallengeAttempt = InferInsertModel<typeof schema.challengeAtt
 export interface PublishedChallengeVersionRow {
   id: string;
   challengeId: string;
+  challengeVisibility: ChallengeRow['visibility'];
+  challengeCreatedBy: string | null;
   versionNo: number;
   problemStatement: string;
   hintText: string | null;
@@ -30,6 +32,8 @@ export interface PublishedChallengeVersionRow {
 export interface PublishedChallengeVersionDetailRow {
   id: string;
   challengeId: string;
+  visibility: ChallengeRow['visibility'];
+  challengeCreatedBy: string | null;
   databaseId?: string | null;
   databaseName?: string | null;
   slug: string;
@@ -111,6 +115,7 @@ export interface ChallengeCatalogRow {
   description: string | null;
   difficulty: ChallengeRow['difficulty'];
   sortOrder: number;
+  visibility: ChallengeRow['visibility'];
   status: ChallengeRow['status'];
   points: number;
   datasetScale: ChallengeRow['datasetScale'];
@@ -142,6 +147,7 @@ export interface EditableChallengeDetailRow {
   sortOrder: number;
   points: number;
   datasetScale: ChallengeRow['datasetScale'];
+  visibility: ChallengeRow['visibility'];
   status: ChallengeRow['status'];
   publishedVersionId: string | null;
   createdBy: string | null;
@@ -270,6 +276,8 @@ export class ChallengesRepository {
       .select({
         id: schema.challengeVersions.id,
         challengeId: schema.challengeVersions.challengeId,
+        challengeVisibility: schema.challenges.visibility,
+        challengeCreatedBy: schema.challenges.createdBy,
         versionNo: schema.challengeVersions.versionNo,
         problemStatement: schema.challengeVersions.problemStatement,
         hintText: schema.challengeVersions.hintText,
@@ -343,6 +351,8 @@ export class ChallengesRepository {
       .select({
         id: schema.challengeVersions.id,
         challengeId: schema.challengeVersions.challengeId,
+        visibility: schema.challenges.visibility,
+        challengeCreatedBy: schema.challenges.createdBy,
         databaseId: schema.challenges.databaseId,
         databaseName: schema.schemaTemplates.name,
         slug: schema.challenges.slug,
@@ -545,6 +555,7 @@ export class ChallengesRepository {
   ): Promise<GlobalLeaderboardAttemptRow[]> {
     const filters = [
       eq(schema.challengeAttempts.status, 'passed'),
+      eq(schema.challenges.visibility, 'public'),
       since ? gte(schema.challengeAttempts.submittedAt, since) : null,
     ].filter((value): value is NonNullable<typeof value> => value !== null);
 
@@ -582,7 +593,27 @@ export class ChallengesRepository {
     return row?.userId ?? null;
   }
 
-  async listPublishedChallenges(): Promise<ChallengeCatalogRow[]> {
+  async listPublishedChallenges(viewerUserId: string): Promise<ChallengeCatalogRow[]> {
+    const privateAccess = and(
+      eq(schema.challenges.visibility, 'private'),
+      or(
+        eq(schema.challenges.createdBy, viewerUserId),
+        exists(
+          this.db
+            .select({ v: sql`1` })
+            .from(schema.challengeInvites)
+            .where(
+              and(
+                eq(schema.challengeInvites.challengeId, schema.challenges.id),
+                eq(schema.challengeInvites.userId, viewerUserId),
+              ),
+            ),
+        ),
+      ),
+    );
+
+    const accessFilter = or(eq(schema.challenges.visibility, 'public'), privateAccess);
+
     const rows = await this.db
       .select({
         id: schema.challenges.id,
@@ -594,6 +625,7 @@ export class ChallengesRepository {
         description: schema.challenges.description,
         difficulty: schema.challenges.difficulty,
         sortOrder: schema.challenges.sortOrder,
+        visibility: schema.challenges.visibility,
         status: schema.challenges.status,
         points: schema.challenges.points,
         datasetScale: schema.challenges.datasetScale,
@@ -606,7 +638,7 @@ export class ChallengesRepository {
         schema.schemaTemplates,
         eq(schema.challenges.databaseId, schema.schemaTemplates.id),
       )
-      .where(eq(schema.challenges.status, 'published'))
+      .where(and(eq(schema.challenges.status, 'published'), accessFilter))
       .orderBy(asc(schema.challenges.sortOrder));
 
     const publishedVersionMap = await this.getVersionMetadataMap(
@@ -643,6 +675,7 @@ export class ChallengesRepository {
         description: schema.challenges.description,
         difficulty: schema.challenges.difficulty,
         sortOrder: schema.challenges.sortOrder,
+        visibility: schema.challenges.visibility,
         status: schema.challenges.status,
         points: schema.challenges.points,
         datasetScale: schema.challenges.datasetScale,
@@ -686,6 +719,7 @@ export class ChallengesRepository {
         description: schema.challenges.description,
         difficulty: schema.challenges.difficulty,
         sortOrder: schema.challenges.sortOrder,
+        visibility: schema.challenges.visibility,
         status: schema.challenges.status,
         points: schema.challenges.points,
         datasetScale: schema.challenges.datasetScale,
@@ -702,7 +736,7 @@ export class ChallengesRepository {
         eq(schema.challenges.databaseId, schema.schemaTemplates.id),
       )
       .leftJoin(schema.users, eq(schema.challenges.createdBy, schema.users.id))
-      .where(eq(schema.challenges.status, 'draft'))
+      .where(and(eq(schema.challenges.status, 'draft'), eq(schema.challenges.visibility, 'public')))
       .orderBy(desc(schema.challenges.updatedAt));
 
     const latestVersionMap = await this.getLatestVersionMap(rows.map((row) => row.id));
@@ -769,6 +803,7 @@ export class ChallengesRepository {
         description: schema.challenges.description,
         difficulty: schema.challenges.difficulty,
         sortOrder: schema.challenges.sortOrder,
+        visibility: schema.challenges.visibility,
         status: schema.challenges.status,
         points: schema.challenges.points,
         datasetScale: schema.challenges.datasetScale,
@@ -903,6 +938,7 @@ export class ChallengesRepository {
         sortOrder: schema.challenges.sortOrder,
         points: schema.challenges.points,
         datasetScale: schema.challenges.datasetScale,
+        visibility: schema.challenges.visibility,
         status: schema.challenges.status,
         publishedVersionId: schema.challenges.publishedVersionId,
         createdBy: schema.challenges.createdBy,
@@ -950,6 +986,61 @@ export class ChallengesRepository {
       )
       .where(eq(schema.challengeVersions.challengeId, challengeId));
     return Number(row?.n ?? 0);
+  }
+
+  async listChallengeInviteUserIds(challengeId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ userId: schema.challengeInvites.userId })
+      .from(schema.challengeInvites)
+      .where(eq(schema.challengeInvites.challengeId, challengeId));
+    return rows.map((r) => r.userId);
+  }
+
+  async isUserInvitedToChallenge(challengeId: string, userId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: schema.challengeInvites.id })
+      .from(schema.challengeInvites)
+      .where(
+        and(
+          eq(schema.challengeInvites.challengeId, challengeId),
+          eq(schema.challengeInvites.userId, userId),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  async countUsersWithIds(userIds: string[]): Promise<number> {
+    if (userIds.length === 0) {
+      return 0;
+    }
+    const [row] = await this.db
+      .select({ n: count() })
+      .from(schema.users)
+      .where(inArray(schema.users.id, userIds));
+    return Number(row?.n ?? 0);
+  }
+
+  async replaceChallengeInvites(
+    challengeId: string,
+    userIds: string[],
+    invitedBy: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(schema.challengeInvites)
+        .where(eq(schema.challengeInvites.challengeId, challengeId));
+      if (userIds.length === 0) {
+        return;
+      }
+      await tx.insert(schema.challengeInvites).values(
+        userIds.map((userId) => ({
+          challengeId,
+          userId,
+          invitedBy,
+        })),
+      );
+    });
   }
 
   async deleteChallenge(id: string): Promise<boolean> {

@@ -13,6 +13,8 @@ export type ChallengeVersionRow = InferSelectModel<typeof schema.challengeVersio
 export type ChallengeVersionWithDatabaseRow = ChallengeVersionRow & {
   databaseId: string;
   datasetScale: 'tiny' | 'small' | 'medium' | 'large';
+  challengeVisibility: 'public' | 'private';
+  challengeCreatedBy: string | null;
 };
 
 export class SessionsRepository {
@@ -38,6 +40,8 @@ export class SessionsRepository {
         challengeId: schema.challengeVersions.challengeId,
         databaseId: schema.challenges.databaseId,
         datasetScale: schema.challenges.datasetScale,
+        challengeVisibility: schema.challenges.visibility,
+        challengeCreatedBy: schema.challenges.createdBy,
         versionNo: schema.challengeVersions.versionNo,
         problemStatement: schema.challengeVersions.problemStatement,
         hintText: schema.challengeVersions.hintText,
@@ -66,8 +70,14 @@ export class SessionsRepository {
       )
       .limit(1);
 
-    return row && row.databaseId && row.datasetScale
-      ? { ...row, databaseId: row.databaseId, datasetScale: row.datasetScale }
+    return row && row.databaseId && row.datasetScale && row.challengeVisibility
+      ? {
+          ...row,
+          databaseId: row.databaseId,
+          datasetScale: row.datasetScale,
+          challengeVisibility: row.challengeVisibility,
+          challengeCreatedBy: row.challengeCreatedBy,
+        }
       : null;
   }
 

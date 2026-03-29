@@ -57,6 +57,8 @@ const CreateChallengeBaseSchema = z.object({
   sortOrder: z.number().int().default(0),
   points: z.number().int().min(10).max(1000).default(100),
   datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).default('small'),
+  visibility: z.enum(['public', 'private']).default('public'),
+  invitedUserIds: z.array(z.string().uuid()).max(100).optional().default([]),
   problemStatement: z.string().min(1),
   hintText: z.string().optional(),
   expectedResultColumns: z.array(z.string()).optional(),
@@ -65,16 +67,22 @@ const CreateChallengeBaseSchema = z.object({
   validatorConfig: ChallengeValidatorConfigSchema,
 });
 
-export const CreateChallengeSchema = CreateChallengeBaseSchema
-  .superRefine((value, ctx) => {
-    if (value.validatorType === 'result_set' && !value.referenceSolution?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['referenceSolution'],
-        message: 'referenceSolution is required for result_set challenges',
-      });
-    }
-  });
+export const CreateChallengeSchema = CreateChallengeBaseSchema.superRefine((value, ctx) => {
+  if (value.validatorType === 'result_set' && !value.referenceSolution?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['referenceSolution'],
+      message: 'referenceSolution is required for result_set challenges',
+    });
+  }
+  if (value.visibility === 'public' && value.invitedUserIds && value.invitedUserIds.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['invitedUserIds'],
+      message: 'invitedUserIds is only allowed when visibility is private',
+    });
+  }
+});
 
 export const CreateChallengeVersionSchema = CreateChallengeSchema;
 
@@ -95,6 +103,14 @@ export const ReviewChallengeVersionSchema = z.object({
   note: z.string().trim().max(2000).optional(),
 });
 
+export const ReplaceChallengeInvitesSchema = z.object({
+  userIds: z.array(z.string().uuid()).max(100),
+});
+
+export const PublishPrivateChallengeSchema = z.object({
+  versionId: z.string().uuid(),
+});
+
 // Inferred types
 export type ChallengeAttemptParams = z.infer<typeof ChallengeAttemptParamsSchema>;
 export type ChallengeVersionParams = z.infer<typeof ChallengeVersionParamsSchema>;
@@ -109,3 +125,5 @@ export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
 export type CreateChallengeVersionBody = z.infer<typeof CreateChallengeVersionSchema>;
 export type ValidateChallengeDraftBody = z.infer<typeof ValidateChallengeDraftSchema>;
 export type ReviewChallengeVersionBody = z.infer<typeof ReviewChallengeVersionSchema>;
+export type ReplaceChallengeInvitesBody = z.infer<typeof ReplaceChallengeInvitesSchema>;
+export type PublishPrivateChallengeBody = z.infer<typeof PublishPrivateChallengeSchema>;

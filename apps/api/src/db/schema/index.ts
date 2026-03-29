@@ -53,6 +53,7 @@ export const reviewStatusEnum = pgEnum('review_status', [
   'changes_requested',
   'rejected',
 ]);
+export const challengeVisibilityEnum = pgEnum('challenge_visibility', ['public', 'private']);
 export const jobStatusEnum = pgEnum('job_status', [
   'pending',
   'running',
@@ -136,6 +137,7 @@ export const challenges = pgTable(
     sortOrder: integer('sort_order').notNull().default(0),
     points: integer('points').notNull().default(100),
     datasetScale: datasetSizeEnum('dataset_scale').notNull().default('small'),
+    visibility: challengeVisibilityEnum('visibility').notNull().default('public'),
     status: contentStatusEnum('status').notNull().default('draft'),
     publishedVersionId: uuid('published_version_id'),
     createdBy: uuid('created_by').references(() => users.id),
@@ -176,6 +178,29 @@ export const challengeVersions = pgTable(
       table.challengeId,
       table.versionNo,
     ),
+  }),
+);
+
+export const challengeInvites = pgTable(
+  'challenge_invites',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    challengeId: uuid('challenge_id')
+      .notNull()
+      .references(() => challenges.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    challengeUserUidx: uniqueIndex('challenge_invites_challenge_user_uidx').on(
+      table.challengeId,
+      table.userId,
+    ),
+    challengeIdx: index('challenge_invites_challenge_idx').on(table.challengeId),
+    userIdx: index('challenge_invites_user_idx').on(table.userId),
   }),
 );
 

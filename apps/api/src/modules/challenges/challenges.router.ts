@@ -9,6 +9,8 @@ import type {
   CreateChallengeBody,
   CreateChallengeVersionBody,
   ListAdminChallengesCatalogQuery,
+  PublishPrivateChallengeBody,
+  ReplaceChallengeInvitesBody,
   ReviewChallengeVersionBody,
   SubmitAttemptBody,
   ValidateChallengeDraftBody,
@@ -28,6 +30,9 @@ import {
   getChallengeLeaderboardHandler,
   getChallengeLeaderboardContextHandler,
   getGlobalLeaderboardHandler,
+  listChallengeInvitesHandler,
+  replaceChallengeInvitesHandler,
+  publishPrivateChallengeVersionHandler,
   reviewChallengeVersionHandler,
   validateChallengeDraftHandler,
 } from './challenges.handler';
@@ -104,6 +109,8 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
             referenceSolution: { type: 'string' },
             validatorType: { type: 'string', default: 'result_set' },
             validatorConfig: { type: 'object', additionalProperties: true },
+            visibility: { type: 'string', enum: ['public', 'private'], default: 'public' },
+            invitedUserIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
           },
         },
       },
@@ -162,6 +169,80 @@ export default async function challengesRouter(fastify: FastifyInstance): Promis
       },
     },
     createChallengeVersionHandler,
+  );
+
+  fastify.post<{ Params: ChallengeParams; Body: PublishPrivateChallengeBody }>(
+    '/v1/challenges/:id/publish-private',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Publish a private challenge without admin review (creator or admin)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['versionId'],
+          properties: {
+            versionId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    publishPrivateChallengeVersionHandler,
+  );
+
+  fastify.get<{ Params: ChallengeParams }>(
+    '/v1/challenges/:id/invites',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'List invited user ids for a private challenge (owner or admin)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+    },
+    listChallengeInvitesHandler,
+  );
+
+  fastify.put<{ Params: ChallengeParams; Body: ReplaceChallengeInvitesBody }>(
+    '/v1/challenges/:id/invites',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Challenges'],
+        summary: 'Replace invite list for a private challenge (owner or admin)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+          },
+        },
+        body: {
+          type: 'object',
+          required: ['userIds'],
+          properties: {
+            userIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+          },
+        },
+      },
+    },
+    replaceChallengeInvitesHandler,
   );
 
   fastify.get<{ Params: ChallengeVersionParams }>(

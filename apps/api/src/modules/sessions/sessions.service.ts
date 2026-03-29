@@ -1,4 +1,4 @@
-import { sessionsRepository } from '../../db/repositories';
+import { challengesRepository, sessionsRepository } from '../../db/repositories';
 import type { SessionRow, SandboxRow } from '../../db/repositories';
 import type {
   ChallengeVersionWithDatabaseRow,
@@ -441,6 +441,24 @@ export async function listUserSessions(userId: string, limit = 20): Promise<Sess
   }));
 }
 
+async function assertUserCanAccessPublishedChallenge(
+  userId: string,
+  challengeId: string,
+  visibility: 'public' | 'private',
+  createdBy: string | null,
+): Promise<void> {
+  if (visibility === 'public') {
+    return;
+  }
+  if (createdBy === userId) {
+    return;
+  }
+  const invited = await challengesRepository.isUserInvitedToChallenge(challengeId, userId);
+  if (!invited) {
+    throw new ForbiddenError('You do not have access to this challenge');
+  }
+}
+
 export async function createSession(
   userId: string,
   body: CreateSessionBody,
@@ -453,6 +471,12 @@ export async function createSession(
     if (!challengeVersion) {
       throw new NotFoundError('Challenge version not found or not published');
     }
+    await assertUserCanAccessPublishedChallenge(
+      userId,
+      challengeVersion.challengeId,
+      challengeVersion.challengeVisibility,
+      challengeVersion.challengeCreatedBy,
+    );
   }
 
   if (!challengeVersion) {
