@@ -13,7 +13,6 @@ import {
   runPsqlInSandboxContainer,
   runPsqlInSandboxContainerStreaming,
   runSqlcmdInSandboxContainer,
-  runSqlcmdInSandboxContainerStreaming,
 } from './docker';
 import { sanitizeSqlServerDumpPayload } from './sqlserver-dump-sanitize';
 
@@ -641,14 +640,9 @@ async function restoreFromArtifact(params: {
     // Streaming skipped that rewrite — typical mysqldumps then error and exit early → EPIPE
     // on stdin while mc cat still streams (see sandbox MySQL empty DB after "ready").
 
-    if (engine === 'sqlserver' && isS3) {
-      const source = await createArtifactReadStream(artifactRef);
-      await runSqlcmdInSandboxContainerStreaming({
-        containerRef, saPassword: mssqlSaPassword, dbName, source, gzip,
-      });
-      logger.info({ artifactRef, extension, engine }, 'Dataset restored (streaming)');
-      return true;
-    }
+    // SQL Server: do not stream raw S3 bytes into `sqlcmd`. The buffer path runs
+    // {@link sanitizeSqlServerDumpPayload} (strip USE, bracket reserved names, InstPubs helpers).
+    // Streaming skipped that — dumps often fail with exit 1 and little/no stderr.
   }
 
   const bytes = await readArtifactBytes(artifactRef);
