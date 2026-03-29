@@ -471,8 +471,8 @@ function ResultsPanel() {
         <Table stickyHeader>
           <TableHeader>
             <TableRow>
-              {results.columns.map((col: QueryResultColumn) => (
-                <TableHead key={col.name}>
+              {results.columns.map((col: QueryResultColumn, colIndex) => (
+                <TableHead key={colIndex}>
                   {(() => {
                     const dataTypeLabel = typeof col.dataType === 'string' ? col.dataType.trim() : '';
                     const shouldShowDataType =
@@ -498,8 +498,8 @@ function ResultsPanel() {
             ) : (
               results.rows.map((row, i) => (
                 <TableRow key={i}>
-                  {results.columns.map((col) => (
-                    <TableCell key={col.name} className="font-mono text-xs">
+                  {results.columns.map((col, colIndex) => (
+                    <TableCell key={colIndex} className="font-mono text-xs">
                       {row[col.name] === null ? (
                         <span className="text-outline italic">NULL</span>
                       ) : (

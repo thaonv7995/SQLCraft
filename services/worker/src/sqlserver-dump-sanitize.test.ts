@@ -96,3 +96,28 @@ test('strips MySQL LOCK TABLES / SET NAMES lines', () => {
   assert.ok(!/SET\s+NAMES/i.test(out));
   assert.match(out, /INSERT INTO \[x\]/);
 });
+
+test('quotes slash-separated dates in VALUES (YYYY/MM/DD)', () => {
+  const out = sanitizeSqlServerDumpScript('INSERT INTO t (d) VALUES (2024/06/01);');
+  assert.match(out, /VALUES\s*\(\s*'2024\/06\/01'\s*\)/i);
+});
+
+test('quotes slash date with T time (YYYY/MM/DDThh:mm:ss)', () => {
+  const out = sanitizeSqlServerDumpScript(
+    'INSERT INTO t (d) VALUES (2024/06/01T12:00:00);',
+  );
+  assert.match(out, /VALUES\s*\(\s*'2024\/06\/01T12:00:00'\s*\)/i);
+  assert.ok(!/\(\s*2024\/06\/01T\d/.test(out), 'datetime must be quoted, not bare slash+T');
+});
+
+test('quotes slash date with space time', () => {
+  const out = sanitizeSqlServerDumpScript(
+    'INSERT INTO t (d) VALUES (2024/06/01 12:00:00.5);',
+  );
+  assert.match(out, /VALUES\s*\(\s*'2024\/06\/01 12:00:00\.5'\s*\)/i);
+});
+
+test('rewrites PostgreSQL TRUE/FALSE to 1/0 in value position', () => {
+  const out = sanitizeSqlServerDumpScript('INSERT INTO t (a, b, c) VALUES (1, TRUE, FALSE);');
+  assert.match(out, /VALUES\s*\(\s*1\s*,\s*1\s*,\s*0\s*\)/i);
+});

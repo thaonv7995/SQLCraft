@@ -27,22 +27,47 @@ export function stripMySqlSessionNoiseLines(sql: string): string {
 }
 
 /**
- * Unquoted ISO dates/datetimes in INSERT ... VALUES are parsed as integer subtraction in T-SQL
- * (e.g. 2024-06-01 → 2024 - 06 - 01), yielding Msg 102 "Incorrect syntax near '4'" on the year digit.
+ * In plain T-SQL (outside '…' strings, `--` line comments, and C-style block comments):
+ * - Quote unquoted **ISO** datetimes `YYYY-MM-DD` / `YYYY-MM-DD hh:mm:ss[.fff]` before `,` `)` `;`
+ *   (otherwise parsed as subtraction, Msg 102 near a year digit).
+ * - Quote unquoted **slash** datetimes `YYYY/MM/DD` / `YYYY/MM/DDThh:mm:ss[.fff]` (same time rules as ISO).
+ * - Replace PostgreSQL-style **TRUE** / **FALSE** with **1** / **0** in value position (BIT-friendly).
  *
- * Dumps often split INSERT / VALUES / row across lines; the date may appear on line 9 with no
- * "INSERT" on that line, so a line-only rewriter misses it. This pass walks the full script,
- * skips single-quoted strings and SQL comments, and quotes bare YYYY-MM-DD / datetime only in
- * plain text (typically VALUES tuples).
+ * Dumps often split INSERT / VALUES across lines; this walks the full script once.
  */
 export function quoteUnquotedIsoDatesOutsideStringsAndComments(sql: string): string {
-  const iso =
-    /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i;
   let out = '';
   let i = 0;
   let inString = false;
   let inLineComment = false;
   let inBlockComment = false;
+
+  const tryRewritePlainLiteral = (pos: number): { len: number; text: string } | null => {
+    const before = pos > 0 ? sql[pos - 1] : '';
+    const prevOk = pos === 0 || /[\s(,]/.test(before);
+    const notIdPart = !/[\w]/.test(before);
+    if (!prevOk || !notIdPart) return null;
+
+    const rest = sql.slice(pos);
+
+    const iso = rest.match(
+      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+    );
+    if (iso) return { len: iso[1].length, text: `'${iso[1]}'` };
+
+    const slash = rest.match(
+      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+    );
+    if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
+
+    const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*[,);])/i);
+    if (bool) {
+      const bit = bool[1].toUpperCase() === 'TRUE' ? '1' : '0';
+      return { len: bool[0].length, text: bit };
+    }
+
+    return null;
+  };
 
   while (i < sql.length) {
     const c = sql[i];
@@ -110,17 +135,11 @@ export function quoteUnquotedIsoDatesOutsideStringsAndComments(sql: string): str
       continue;
     }
 
-    const rest = sql.slice(i);
-    const m = rest.match(iso);
-    if (m && m.index === 0) {
-      const before = i > 0 ? sql[i - 1] : '';
-      const prevOk = i === 0 || /[\s(,]/.test(before);
-      const notIdPart = !/[\w]/.test(before);
-      if (prevOk && notIdPart) {
-        out += `'${m[1]}'`;
-        i += m[1].length;
-        continue;
-      }
+    const rw = tryRewritePlainLiteral(i);
+    if (rw) {
+      out += rw.text;
+      i += rw.len;
+      continue;
     }
 
     out += c;
