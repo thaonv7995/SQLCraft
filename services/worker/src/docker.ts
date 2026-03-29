@@ -682,8 +682,15 @@ export async function runMysqlInSandboxContainerStreaming(params: {
   try {
     await pipelinePromise;
   } catch (err) {
+    const detail = stderr.trim().slice(0, 2000);
     child.kill('SIGKILL');
-    throw err;
+    await closePromise.catch(() => {});
+    const base = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      detail
+        ? `mysql restore stream failed (${base}). mysql stderr: ${detail}`
+        : `mysql restore stream failed (${base})`,
+    );
   }
 
   const code = await closePromise;

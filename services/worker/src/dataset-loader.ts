@@ -9,7 +9,6 @@ import {
   createMcCatObjectReadStream,
   readS3ObjectViaMinioContainer,
   runMysqlInSandboxContainer,
-  runMysqlInSandboxContainerStreaming,
   runPgRestoreInSandboxContainer,
   runPsqlInSandboxContainer,
   runPsqlInSandboxContainerStreaming,
@@ -637,15 +636,10 @@ async function restoreFromArtifact(params: {
       return true;
     }
 
-    if ((engine === 'mysql' || engine === 'mariadb') && isS3) {
-      const source = await createArtifactReadStream(artifactRef);
-      await runMysqlInSandboxContainerStreaming({
-        engine: engine === 'mariadb' ? 'mariadb' : 'mysql',
-        containerRef, dbUser, dbPassword, dbName, source, gzip,
-      });
-      logger.info({ artifactRef, extension, engine }, 'Dataset restored (streaming)');
-      return true;
-    }
+    // MySQL/MariaDB: do not stream raw S3 bytes into `mysql`. The buffer path applies
+    // `prepareMysqlRestoreSqlForTargetDatabase` (strip USE, rewrite db-qualified names).
+    // Streaming skipped that rewrite — typical mysqldumps then error and exit early → EPIPE
+    // on stdin while mc cat still streams (see sandbox MySQL empty DB after "ready").
 
     if (engine === 'sqlserver' && isS3) {
       const source = await createArtifactReadStream(artifactRef);
@@ -741,8 +735,9 @@ export async function loadDatasetIntoSandbox(params: {
   } = params;
 
   if (datasetTemplate.artifactUrl) {
+    let restored: boolean;
     try {
-      const restored = await restoreFromArtifact({
+      restored = await restoreFromArtifact({
         logger,
         containerRef,
         dbUser,
@@ -752,33 +747,46 @@ export async function loadDatasetIntoSandbox(params: {
         engine,
         mssqlSaPassword,
       });
-      if (restored) {
-        if (engine === 'sqlserver' && schema?.tables?.length) {
-          try {
-            await ensureSchemaApplied?.();
-          } catch (gapErr) {
-            logger.warn(
-              {
-                err: gapErr,
-                datasetTemplateId: datasetTemplate.id,
-                containerRef,
-              },
-              'SQL Server template DDL after restore failed (continuing with artifact only)',
-            );
-          }
-        }
-        return;
-      }
-      logger.warn(
-        { artifactUrl: datasetTemplate.artifactUrl, datasetTemplateId: datasetTemplate.id },
-        'Unsupported artifact format; falling back to metadata seeding',
-      );
     } catch (error) {
-      logger.warn(
-        { error, artifactUrl: datasetTemplate.artifactUrl, datasetTemplateId: datasetTemplate.id },
-        'Artifact restore failed; falling back to metadata seeding',
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(
+        {
+          err: error,
+          artifactUrl: datasetTemplate.artifactUrl,
+          datasetTemplateId: datasetTemplate.id,
+        },
+        'Dataset artifact restore failed',
+      );
+      throw new Error(
+        `Dataset artifact restore failed (${datasetTemplate.artifactUrl}): ${msg}`,
+        { cause: error instanceof Error ? error : undefined },
       );
     }
+
+    if (!restored) {
+      const message = `Dataset artifact could not be restored (unsupported format or extension): ${datasetTemplate.artifactUrl}`;
+      logger.error(
+        { datasetTemplateId: datasetTemplate.id, artifactUrl: datasetTemplate.artifactUrl },
+        message,
+      );
+      throw new Error(message);
+    }
+
+    if (engine === 'sqlserver' && schema?.tables?.length) {
+      try {
+        await ensureSchemaApplied?.();
+      } catch (gapErr) {
+        logger.warn(
+          {
+            err: gapErr,
+            datasetTemplateId: datasetTemplate.id,
+            containerRef,
+          },
+          'SQL Server template DDL after restore failed (continuing with artifact only)',
+        );
+      }
+    }
+    return;
   }
 
   await ensureSchemaApplied?.();

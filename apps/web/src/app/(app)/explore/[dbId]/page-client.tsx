@@ -775,9 +775,9 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
               </CardHeader>
               <CardContent className="px-4 pb-4 pt-3 sm:px-5 sm:pb-4">
                 <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                  {database.relationships.map((relationship) => (
+                  {database.relationships.map((relationship, index) => (
                     <div
-                      key={`${relationship.from}-${relationship.to}`}
+                      key={`${relationship.from}-${relationship.to}-${index}`}
                       className="rounded-lg border border-outline-variant/10 bg-surface-container/80 px-2.5 py-1.5 transition-colors hover:border-outline-variant/25 hover:bg-surface-container"
                     >
                       <p className="text-xs font-medium leading-snug text-on-surface">
