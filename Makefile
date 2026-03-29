@@ -155,7 +155,11 @@ prod-logs: ## Tail production stack logs
 	@docker compose --env-file .env.production -f docker-compose.prod.yml logs -f 2>/dev/null || docker compose -f docker-compose.prod.yml logs -f
 
 prod-clean: ## Stop production stack and remove volumes
-	docker compose -f docker-compose.prod.yml down -v
+	@if [ -f .env.production ]; then \
+		docker compose --env-file .env.production -f docker-compose.prod.yml down -v; \
+	else \
+		docker compose -f docker-compose.prod.yml down -v; \
+	fi
 
 release-docker: ## Build production Docker images only (no compose up; optional: NEXT_PUBLIC_API_URL=... for web)
 	docker compose -f docker-compose.prod.yml build

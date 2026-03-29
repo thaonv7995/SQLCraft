@@ -55,6 +55,14 @@ require_cmd() {
   fi
 }
 
+require_docker_compose_v2() {
+  if docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  error "Docker Compose V2 is required (CLI: docker compose). Install the compose plugin (e.g. docker-compose-plugin on Linux)."
+  exit 1
+}
+
 bootstrap_project_if_needed() {
   update_paths
   if [[ -f "$COMPOSE_FILE" && -f "$ENV_EXAMPLE_FILE" ]]; then
@@ -529,7 +537,7 @@ bootstrap_stack() {
 }
 
 print_summary() {
-  local admin_email admin_username admin_password web_port api_port minio_console_port stack_name
+  local admin_email admin_username admin_password web_port api_port minio_console_port stack_name public_domain
   admin_email="$(get_env_value "FIRST_ADMIN_EMAIL" "$ENV_FILE")"
   admin_username="$(get_env_value "FIRST_ADMIN_USERNAME" "$ENV_FILE")"
   admin_password="$(get_env_value "FIRST_ADMIN_PASSWORD" "$ENV_FILE")"
@@ -537,10 +545,20 @@ print_summary() {
   api_port="$(get_env_value "API_PORT" "$ENV_FILE")"
   minio_console_port="$(get_env_value "MINIO_CONSOLE_PORT" "$ENV_FILE")"
   stack_name="$(get_env_value "STACK_NAME" "$ENV_FILE")"
+  public_domain="$(get_env_value "PUBLIC_DOMAIN" "$ENV_FILE")"
+  if [[ -z "$public_domain" ]]; then
+    public_domain="localhost"
+  fi
   local access_url api_url minio_url
-  access_url="http://localhost:${web_port}"
-  api_url="http://localhost:${api_port}"
-  minio_url="http://localhost:${minio_console_port}"
+  if [[ "$public_domain" == "localhost" || "$public_domain" == "127.0.0.1" ]]; then
+    access_url="http://localhost:${web_port}"
+    api_url="http://localhost:${api_port}"
+    minio_url="http://localhost:${minio_console_port}"
+  else
+    access_url="https://${public_domain}"
+    api_url="https://${public_domain}/v1 (or host:${api_port})"
+    minio_url="http://127.0.0.1:${minio_console_port} (host console)"
+  fi
 
   print_logo
 
@@ -562,12 +580,19 @@ print_summary() {
   printf "${GREEN}|${RESET} • Stop stack: make prod-stop                                     ${GREEN}|${RESET}\n"
   printf "${GREEN}|${RESET} • Clean volumes: make prod-clean                                 ${GREEN}|${RESET}\n"
   printf "${GREEN}+------------------------------------------------------------------+${RESET}\n"
+
+  if [[ "$public_domain" != "localhost" && "$public_domain" != "127.0.0.1" ]]; then
+    printf "\n"
+    warn "PUBLIC_DOMAIN is a public hostname — configure TLS + reverse proxy, host firewall, Docker access for the worker, and ghcr.io auth if images are private."
+    warn "See: docs/deployment-guide.md (sections 7–10) and example configs under docs/examples/."
+  fi
 }
 
 main() {
   headline "SQLCraft installer (production-first)"
   bootstrap_project_if_needed
   require_cmd docker
+  require_docker_compose_v2
   require_cmd openssl
   require_cmd awk
   wait_for_docker

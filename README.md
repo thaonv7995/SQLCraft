@@ -2,176 +2,184 @@
 
 **Master SQL — from correctness to performance.**
 
-SQLCraft is an open-source SQL platform for sandboxed query execution, realistic datasets, execution-plan analysis, and admin-reviewed content workflows.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Open-source SQL platform for **sandboxed query execution**, **realistic datasets**, **execution-plan analysis**, and **admin-reviewed** lessons, challenges, and catalog content.
+
 <p align="center">
-  <img src="docs/system-architecture.png" alt="System Architecture" width="300" />
+  <img src="docs/system-architecture.png" alt="System architecture" width="300" />
 </p>
 
 ## Features
 
-- **SQL Lab** — Browser-based SQL editor with execution plans, query history, and result comparison.
-- **Isolated Sandboxes** — Each session gets a dedicated PostgreSQL container, auto-cleaned on expiry.
-- **Dataset Scaling** — Same schema across 4 scales (100 → 10M+ rows) to reveal real performance differences.
-- **Optimization Labs** — Side-by-side query benchmarking with index management and schema diff.
+- **SQL Lab** — Browser SQL editor, execution plans, history, result comparison.
+- **Isolated sandboxes** — Per-session database containers (engine from the schema template), auto-expiry.
+- **Dataset scaling** — Same schema from tiny to large row counts for real performance tradeoffs.
+- **Optimization labs** — Side-by-side runs, index tooling, schema diff.
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
-|---|---|
+|------|------------|
 | Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS |
-| Backend API | Fastify, TypeScript, Drizzle ORM |
+| API | Fastify, TypeScript, Drizzle ORM |
 | Worker | Node.js, BullMQ |
-| Database | PostgreSQL 16 |
-| Cache / Queue | Redis 7 |
-| Storage | MinIO (S3-compatible) |
-| Monorepo | pnpm workspaces + Turborepo |
-| Containers | Docker + Docker Compose |
+| App DB | PostgreSQL 16 |
+| Queue / cache | Redis 7 |
+| Object storage | MinIO (S3-compatible) |
+| Repo | pnpm workspaces, Turborepo |
+| Runtime | Docker, Docker Compose |
 
-## Databases
+## Requirements
 
-**Today:** the stack is built around **PostgreSQL** for both metadata and learner sandboxes.
+**Production (`install.sh` or `make prod-build`):**
 
-**PostgreSQL vs other engines** (MySQL, MariaDB, SQLite, SQL Server, …): **in progress** — those dialects are not available in sandboxes or the Lab yet; work to support additional engines is ongoing. Until then, assume **PostgreSQL-only** for SQL execution, `EXPLAIN`, and plan tooling.
+- **Docker Engine** with **Compose V2** (`docker compose` — not only legacy `docker-compose`)
+- **`openssl`** (secrets generation)
+- **Linux** recommended for the **worker** (Docker socket + sandbox containers)
 
-## Quick Start
+**Development** (optional): Node **≥ 20.9**, **pnpm ≥ 9** — see [Development](#development).
 
-### Prerequisites
+## Production install
 
-- Docker + Docker Compose
-
-### 1) One-command install (recommended)
+### One-liner (downloads installer from `main`)
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/install.sh)
 ```
-What `./install.sh` does:
 
-- Generates/updates `.env.production` from `.env.production.example`
-- Auto-generates secrets (`JWT_SECRET`, DB/storage/sandbox passwords)
-- Prompts for first admin (or uses defaults)
-- Prompts for `PUBLIC_DOMAIN` and configures app/API URLs for reverse proxy
-- Pulls prebuilt release images from GHCR first (fast path)
-- Falls back to local Docker build automatically if image pull fails
-- Bootstraps DB (`migrate` + `seed`)
-- Starts production services (`api`, `web`, `worker`)
-
-Reverse proxy note (single-domain):
-
-- Point the public domain to the **web service** (`localhost:13029`)
-- Keep API on same domain via path routing: `https://your-domain/v1/*` -> `localhost:4000`
-- Route storage objects for presigned URLs: `https://your-domain/sqlcraft/*` -> `localhost:9000/sqlcraft/*`
-- Keep the storage route **above** `/` catch-all in your proxy config.
-  (`sqlcraft` comes from `STORAGE_BUCKET`; if you change bucket name, update this route accordingly.)
-- Frontend API base is `/v1` (same-origin), so both `localhost:13029` and domain reverse-proxy setups work without rebuild.
-
-After startup:
-
-- **Web**: http://localhost:13029
-- **API**: http://localhost:4000
-- **MinIO Console**: http://localhost:9001
-- First admin credentials are printed in terminal
-
-If a session shows **"Sandbox could not start"** on Linux:
-
-- Pull latest and restart worker (`docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build worker`)
-- Ensure `.env.production` has `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod`
-- Check worker errors: `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker`
-
-### 2) Useful production commands
+### From a clone
 
 ```bash
-make prod         # Start production stack (no rebuild)
-make prod-stop    # Stop production stack
-make prod-logs    # Tail production logs
-make prod-clean   # Stop + remove production volumes
+git clone https://github.com/thaonv7995/SQLCraft.git
+cd SQLCraft
+./install.sh
+```
+
+The installer will:
+
+1. Bootstrap a copy under `SQLCRAFT_INSTALL_DIR` (default `~/.sqlcraft`) **only if** compose/env templates are missing from the current directory.
+2. Create or preserve **`.env.production`** from **`.env.production.example`**.
+3. Generate secrets (`JWT_SECRET`, DB, MinIO, sandbox passwords) where needed.
+4. Prompt for **first admin** and **`PUBLIC_DOMAIN`** (sets browser/API/storage URLs).
+5. Start **postgres**, **redis**, **minio**; **pull** GHCR images or **build** locally if pull fails.
+6. Run **migrations** + **seed** inside the API image.
+7. Start **api**, **web**, **worker**.
+
+Default host ports (adjustable in `.env.production`): web **13029**, API **4000**, MinIO API **9000**, console **9001**.
+
+## After install
+
+| Service | URL (defaults) |
+|--------|----------------|
+| Web | http://localhost:13029 |
+| API (direct) | http://localhost:4000 |
+| MinIO console | http://localhost:9001 |
+
+Credentials for the **first admin** are printed at the end of the run (also in `.env.production`).
+
+The API container **runs migrations on each start** (`apps/api/docker-entrypoint.sh`) — safe to restart.
+
+## Public internet (HTTPS)
+
+For a **real domain**, `install.sh` alone does **not** configure TLS or firewall. After install:
+
+1. Point **DNS** at the server.
+2. Add a **reverse proxy** (TLS) — routes: **`/v1/*`** → API, **`/<STORAGE_BUCKET>/*`** → MinIO (default bucket `sqlcraft`), **`/`** → web. Details: **[docs/deployment-guide.md](docs/deployment-guide.md)** §7–10 and **[docs/examples/](docs/examples/)** (Caddy / nginx).
+3. Open firewall **80/443** (and SSH); avoid exposing Postgres, Redis, or MinIO console publicly unless required.
+4. **Private GHCR images:** `docker login ghcr.io` before pull (see deployment guide §10).
+
+## Commands
+
+```bash
+make prod            # Start stack (no image rebuild)
+make prod-stop       # Stop stack
+make prod-logs       # Tail logs
+make prod-clean      # Stop and remove volumes (uses .env.production when present)
+make prod-build      # Interactive .env + full bootstrap (from repo clone)
 make release-docker  # Build production images only
-./uninstall.sh    # Uninstall stack (containers/network/volumes)
+./uninstall.sh       # Tear down stack (see script for --purge-env / --remove-source)
 ```
 
-### 3) Manual path (without installer)
+Compose always uses **`docker-compose.prod.yml`** and **`.env.production`** for production.
 
-If you prefer manual setup:
+## Development
 
 ```bash
-make prod-build
+make setup    # One-time dev dependencies
+make dev      # Hot-reload API + web (+ local infra per Makefile)
 ```
 
-### Development (optional)
+Typical dev URLs match production defaults on localhost.
 
-If you want local development with hot-reload:
-
-```bash
-make setup
-make dev
-```
-
-Dev URLs:
-
-- **Web**: http://localhost:13029
-- **API**: http://localhost:4000
-
-### Docker (dev images)
-
-`docker-compose.dev.yml` builds **api**, **web**, and **worker** from `Dockerfile.dev`. Those Dockerfiles copy **`pnpm-lock.yaml`** and run **`pnpm install --frozen-lockfile`**, so the versions inside the image match the committed lockfile. After you change any `package.json` at the repo root or in a workspace, run **`pnpm install`** at the monorepo root, commit the updated **`pnpm-lock.yaml`**, then rebuild: `docker compose -f docker-compose.dev.yml build`.
-
-To rebuild and start the full development stack in one step:
+**Full dev stack in Docker:**
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build -d
 ```
 
-This brings up **postgres**, **redis**, **minio**, **api**, **web**, and **worker**.
+After changing workspace `package.json` files, run **`pnpm install`** at the repo root, commit **`pnpm-lock.yaml`**, then rebuild dev images.
 
-### Production release (Docker)
+## Docker images & releases
 
-Optimized images (no bind mounts) are defined in **`docker-compose.prod.yml`** with **`apps/api/Dockerfile`**, **`apps/web/Dockerfile`**, and **`services/worker/Dockerfile`**. The API container runs **migrations on startup** (`drizzle-kit migrate`) via `apps/api/docker-entrypoint.sh`.
+- **Production compose:** [`docker-compose.prod.yml`](docker-compose.prod.yml) — `apps/api/Dockerfile`, `apps/web/Dockerfile`, `services/worker/Dockerfile`.
+- **CI build:** [`.github/workflows/docker.yml`](.github/workflows/docker.yml).
+- **Publish to GHCR:** push a tag **`v*`** (e.g. `v0.1.0`) — [`.github/workflows/release.yml`](.github/workflows/release.yml) pushes `sqlcraft-api`, `sqlcraft-web`, `sqlcraft-worker`. Use lowercase owner in image URLs. Set package visibility to **public** on GitHub if you want unauthenticated `docker pull`.
 
-1. Run installer:
+Installer env knobs: `USE_PREBUILT_IMAGES`, `SQLCRAFT_GHCR_OWNER`, `SQLCRAFT_VERSION`, `API_IMAGE`, `WEB_IMAGE`, `WORKER_IMAGE` (see `.env.production.example`).
 
-   ```bash
-   ./install.sh
-   ```
+## Troubleshooting
 
-2. The installer auto-creates/updates `.env.production`, ensures secrets, prompts first admin, migrates + seeds DB, then starts services.
+**“Sandbox could not start” (Linux)**
 
-3. Optional make targets: **`make prod`** (no rebuild), **`make prod-stop`**, **`make prod-logs`**, **`make prod-clean`** (removes volumes), **`make release-docker`** (images only).
+- Restart worker:  
+  `docker compose --env-file .env.production -f docker-compose.prod.yml up -d worker`
+- Ensure `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod` in `.env.production`.
+- Logs:  
+  `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker`
 
-**CI:** [`.github/workflows/docker.yml`](.github/workflows/docker.yml) runs `docker compose … build` on pushes/PRs. Tag a release as **`v*`** (e.g. `v0.1.0`) to push **`api`**, **`web`**, and **`worker`** images to **GHCR** ([`.github/workflows/release.yml`](.github/workflows/release.yml)). Pull them as `ghcr.io/<owner>/sqlcraft-api:<tag>` (same pattern for `sqlcraft-web`, `sqlcraft-worker`). Package visibility may need to be set to public in GitHub for unauthenticated pulls.
+**Compose / pull**
 
-## Project Structure
+- Requires **`docker compose`** (v2 plugin).  
+- If GHCR pull fails, the installer falls back to **local build** when possible.
+
+## Repository layout
 
 ```
-sqlcraft/
 ├── apps/
-│   ├── api/          # Fastify API server
-│   └── web/          # Next.js 16 frontend
+│   ├── api/                 # Fastify API
+│   └── web/                 # Next.js frontend
 ├── services/
-│   └── worker/       # Background job worker (BullMQ)
+│   └── worker/              # BullMQ worker + sandbox provisioning
 ├── packages/
-│   ├── types/        # Shared TypeScript types
-│   └── config/       # Shared ESLint & TS config
-├── docs/             # Architecture & design docs
+│   ├── types/               # Shared TypeScript types
+│   └── config/              # Shared ESLint / TS config
+├── docs/                    # PRD, architecture, deployment, examples
 ├── docker-compose.dev.yml
 ├── docker-compose.prod.yml
+├── install.sh
+├── uninstall.sh
 ├── Makefile
 └── turbo.json
 ```
 
 ## Documentation
 
-The `docs/` directory contains comprehensive specifications and architecture decisions. Key entry points include:
-
-- [Product Requirements (PRD)](./docs/PRD.md)
-- [Architecture Overview](./docs/architecture.md)
-- [Database Design](./docs/database-design.md)
-- [API Specification](./docs/api-spec.md)
-- [Contributing Guide](./CONTRIBUTING.md)
-- [Environment Variables](./.env.example) — production: [`.env.production.example`](./.env.production.example)
+| Doc | Purpose |
+|-----|---------|
+| [docs/deployment-guide.md](docs/deployment-guide.md) | Production deploy, TLS, firewall, worker, GHCR |
+| [docs/examples/](docs/examples/) | Caddy / nginx samples |
+| [docs/PRD.md](docs/PRD.md) | Product requirements |
+| [docs/architecture.md](docs/architecture.md) | System architecture |
+| [docs/database-design.md](docs/database-design.md) | Data model |
+| [docs/api-spec.md](docs/api-spec.md) | API specification |
+| [.env.production.example](.env.production.example) | Production environment template |
+| [.env.example](.env.example) | Development env reference |
 
 ## Contributing
 
-Contributions are welcome! Please read the [Contributing Guide](./CONTRIBUTING.md) before opening a pull request.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Pull requests welcome.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE) for details.
+[MIT](LICENSE)
