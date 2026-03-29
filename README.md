@@ -178,6 +178,7 @@ Installer env knobs: `USE_PREBUILT_IMAGES`, `SQLCRAFT_GHCR_OWNER`, `SQLCRAFT_VER
 | [docs/architecture.md](docs/architecture.md) | System architecture |
 | [docs/database-design.md](docs/database-design.md) | Data model |
 | [docs/api-spec.md](docs/api-spec.md) | API specification |
+| [docs/sqlite-dump-from-db.md](docs/sqlite-dump-from-db.md) | Export SQLite `.db` to `.sql` before catalog / admin import |
 | [.env.production.example](.env.production.example) | Production environment template |
 | [.env.example](.env.example) | Development env reference |
 

@@ -52,7 +52,7 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 | P4 | Trung bình | ✅ Done | **Trước**: artifact-only dump bị ép 1 row/table → classify `tiny` sai. **Sau**: `ensurePositiveDatasetRowCounts` skip khi `artifactOnly: true` → giữ nguyên placeholder. | `dataset-scales.ts` + `admin.service.ts` |
 | P5 | Thấp | 🔵 Accepted | Scale chỉ dựa trên row count, không byte size. | `sandbox-provision-estimate.ts` đã dùng byte size cho thời gian ước lượng. Hybrid metric = future. |
 | P6 | Thông tin | 🔵 Accepted | Row count detection đầy đủ cho các dialect. | Đã documented. |
-| P7 | Thấp | ✅ Done | Upload scan chỉ `.sql`. | API/UI hỗ trợ `.sql`, `.txt`, `.sql.gz`, `.zip` (chứa ≥1 `.sql`); giải nén trước khi lưu artifact canonical `.sql`. Giới hạn nén: `SQL_DUMP_MAX_UNCOMPRESSED_MB` (mặc định min(8192, 4×`SQL_DUMP_MAX_FILE_MB`)). |
+| P7 | Thấp | ✅ Done | Upload scan chỉ `.sql`. | API/UI hỗ trợ `.sql`, `.txt`, `.sql.gz`, `.zip` (chứa ≥1 `.sql`); giải nén trước khi lưu artifact canonical `.sql`. Giới hạn nén: `SQL_DUMP_MAX_UNCOMPRESSED_MB` (mặc định min(8192, 4×`SQL_DUMP_MAX_FILE_MB`)). SQLite `.db`: không upload — xem [sqlite-dump-from-db.md](./sqlite-dump-from-db.md). |
 
 ---
 
@@ -92,6 +92,7 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 - `apps/api/src/modules/admin/real-dataset-artifact.ts` — `materializeDerivedSqlDumpArtifacts`, cycle detection
 - `apps/api/src/lib/sandbox-provision-estimate.ts` — ước lượng thời gian provision
 - `docs/sandbox-design.md` — nguyên tắc reprovision / artifact
+- `docs/sqlite-dump-from-db.md` — SQLite `.db` → `.sql` trước khi import
 
 ---
 
