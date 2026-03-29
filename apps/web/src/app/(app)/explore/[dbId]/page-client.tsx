@@ -638,7 +638,7 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
         <span className="mx-1.5 text-outline">·</span>
         {database.tableCount} tables
         <span className="mx-1.5 text-outline">·</span>
-        {database.estimatedSizeGb.toFixed(1)} GB
+        ~{database.estimatedSizeGb.toFixed(1)} GB est.
       </p>
 
       <p className="text-[11px] text-outline">

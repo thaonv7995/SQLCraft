@@ -17,6 +17,93 @@ function quoteMysqlIdentifier(name: string): string {
   return '`' + name.replace(/`/g, '``') + '`';
 }
 
+/**
+ * Apply `transform` only to SQL **outside** single-quoted string literals (and outside
+ * `b'…'`, `x'…'`, `n'…'` style literals). mysqldump INSERT data often contains substrings
+ * like `sourcedb.tablename` or `` `db`.`tbl` `` inside quotes; blind regex rewrites there
+ * break syntax (ERROR 1064 near the next value).
+ */
+function mapMysqlSqlOutsideSingleQuotedStrings(
+  sql: string,
+  transform: (outsideFragment: string) => string,
+): string {
+  let out = '';
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    const prev = i > 0 ? sql[i - 1] : '';
+    const isPrefixedLiteral =
+      i + 1 < sql.length &&
+      sql[i + 1] === "'" &&
+      /[bBxXnN]/.test(ch) &&
+      (i === 0 || /[^0-9A-Za-z_$]/.test(prev));
+
+    if (isPrefixedLiteral) {
+      let j = i + 2;
+      while (j < sql.length) {
+        if (sql[j] === '\\' && j + 1 < sql.length) {
+          j += 2;
+          continue;
+        }
+        if (sql[j] === "'") {
+          j++;
+          break;
+        }
+        j++;
+      }
+      out += sql.slice(i, j);
+      i = j;
+      continue;
+    }
+
+    if (ch === "'") {
+      let j = i + 1;
+      let literal = "'";
+      while (j < sql.length) {
+        if (sql[j] === '\\' && j + 1 < sql.length) {
+          literal += sql[j] + sql[j + 1];
+          j += 2;
+          continue;
+        }
+        if (sql[j] === "'") {
+          if (sql[j + 1] === "'") {
+            literal += "''";
+            j += 2;
+            continue;
+          }
+          literal += "'";
+          j++;
+          break;
+        }
+        literal += sql[j];
+        j++;
+      }
+      out += literal;
+      i = j;
+      continue;
+    }
+
+    let k = i + 1;
+    while (k < sql.length) {
+      const c = sql[k];
+      if (c === "'") break;
+      const prevK = k > 0 ? sql[k - 1] : '';
+      if (
+        k + 1 < sql.length &&
+        /[bBxXnN]/.test(c) &&
+        sql[k + 1] === "'" &&
+        (k === 0 || /[^0-9A-Za-z_$]/.test(prevK))
+      ) {
+        break;
+      }
+      k++;
+    }
+    out += transform(sql.slice(i, k));
+    i = k;
+  }
+  return out;
+}
+
 /** mysqldump conditional / versioned comments between keywords and identifiers. */
 const MYSQL_DUMP_COMMENT_GAP = String.raw`(?:/\*[^*]*\*+(?:[^/*][^*]*\*+)*/\s*)*`;
 
@@ -86,23 +173,25 @@ function extractMysqlSourceDatabase(sql: string): string | null {
  */
 function rewriteMysqlQualifiedDbPrefix(sql: string, sourceDb: string, targetDb: string): string {
   if (!sourceDb || sourceDb === targetDb) return sql;
-  const srcLit = quoteMysqlIdentifier(sourceDb);
-  const dstLit = quoteMysqlIdentifier(targetDb);
-  const escaped = srcLit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const reBt = new RegExp(escaped + '\\.(`[^`]*`)', 'g');
-  let out = sql.replace(reBt, `${dstLit}.$1`);
+  return mapMysqlSqlOutsideSingleQuotedStrings(sql, (fragment) => {
+    const srcLit = quoteMysqlIdentifier(sourceDb);
+    const dstLit = quoteMysqlIdentifier(targetDb);
+    const escaped = srcLit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const reBt = new RegExp(escaped + '\\.(`[^`]*`)', 'g');
+    let out = fragment.replace(reBt, `${dstLit}.$1`);
 
-  if (/^[a-zA-Z0-9_$]+$/.test(sourceDb)) {
-    const escPlain = sourceDb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const rePlain = new RegExp('(?<=[\\s(,])' + escPlain + '\\s*\\.\\s*(`[^`]*`)', 'g');
-    out = out.replace(rePlain, `${dstLit}.$1`);
-  }
+    if (/^[a-zA-Z0-9_$]+$/.test(sourceDb)) {
+      const escPlain = sourceDb.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rePlain = new RegExp('(?<=[\\s(,])' + escPlain + '\\s*\\.\\s*(`[^`]*`)', 'g');
+      out = out.replace(rePlain, `${dstLit}.$1`);
+    }
 
-  // `db`.tablename (backticks on database only — common in some dumps)
-  const reBareTbl = new RegExp(escaped + '\\.([a-zA-Z0-9_$]+)(?![a-zA-Z0-9_$`])', 'g');
-  out = out.replace(reBareTbl, (_m, tbl) => `${dstLit}.${quoteMysqlIdentifier(tbl)}`);
+    // `db`.tablename (backticks on database only — common in some dumps)
+    const reBareTbl = new RegExp(escaped + '\\.([a-zA-Z0-9_$]+)(?![a-zA-Z0-9_$`])', 'g');
+    out = out.replace(reBareTbl, (_m, tbl) => `${dstLit}.${quoteMysqlIdentifier(tbl)}`);
 
-  return out;
+    return out;
+  });
 }
 
 /** CREATE TABLE pdns.domains (…) without backticks on the database name. */
@@ -112,19 +201,21 @@ function rewriteUnquotedMysqlCreateDbTable(
   targetDb: string,
 ): string {
   const dst = quoteMysqlIdentifier(targetDb);
-  let out = sql;
-  for (const src of Array.from(sourceDbs).sort((a, b) => b.length - a.length)) {
-    if (src === targetDb || !/^[a-zA-Z0-9_$]+$/.test(src)) continue;
-    const esc = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(
-      `CREATE\\s+TABLE\\s+((?:IF\\s+NOT\\s+EXISTS\\s+)?)${esc}\\.([a-zA-Z0-9_$]+)(\\s*\\()`,
-      'gi',
-    );
-    out = out.replace(re, (_m, ifNe, tbl, paren) => {
-      return `CREATE TABLE ${ifNe}${dst}.${quoteMysqlIdentifier(tbl)}${paren}`;
-    });
-  }
-  return out;
+  return mapMysqlSqlOutsideSingleQuotedStrings(sql, (fragment) => {
+    let out = fragment;
+    for (const src of Array.from(sourceDbs).sort((a, b) => b.length - a.length)) {
+      if (src === targetDb || !/^[a-zA-Z0-9_$]+$/.test(src)) continue;
+      const esc = src.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(
+        `CREATE\\s+TABLE\\s+((?:IF\\s+NOT\\s+EXISTS\\s+)?)${esc}\\.([a-zA-Z0-9_$]+)(\\s*\\()`,
+        'gi',
+      );
+      out = out.replace(re, (_m, ifNe, tbl, paren) => {
+        return `CREATE TABLE ${ifNe}${dst}.${quoteMysqlIdentifier(tbl)}${paren}`;
+      });
+    }
+    return out;
+  });
 }
 
 /**

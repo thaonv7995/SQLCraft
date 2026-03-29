@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
@@ -68,40 +68,51 @@ function appendCapped(existing: string, chunk: string, cap: number): string {
 }
 
 async function runDockerWithInput(args: string[], input: string | Buffer): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn('docker', args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk) => {
-      stdout = appendCapped(stdout, chunk, DOCKER_OUTPUT_CAP_BYTES);
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
-    });
-    child.on('error', (error) => {
-      reject(error);
-    });
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-        return;
-      }
-      const errText = stderr.trim() || stdout.trim();
-      const detail =
-        errText.length > 2000 ? `${errText.slice(0, 2000)}…` : errText || '(no output)';
-      reject(new Error(`docker ${args.join(' ')} failed with code ${code}: ${detail}`));
-    });
-
-    child.stdin.write(input);
-    child.stdin.end();
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
+  const child = spawn('docker', args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+
+  child.stdout.on('data', (chunk) => {
+    stdout = appendCapped(stdout, chunk, DOCKER_OUTPUT_CAP_BYTES);
+  });
+  child.stderr.on('data', (chunk) => {
+    stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
+  });
+
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+    // EPIPE: mysql/psql exited before stdin finished — pipeline will also reject; avoid unhandled.
+    if (err.code !== 'EPIPE') {
+      child.kill('SIGKILL');
+    }
+  });
+
+  try {
+    await pipeline(Readable.from([buf]), child.stdin);
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e?.code !== 'EPIPE') {
+      throw err;
+    }
+  }
+
+  const code = await closePromise;
+
+  if (code === 0) {
+    return stdout.trim();
+  }
+  const errText = stderr.trim() || stdout.trim();
+  const detail =
+    errText.length > 2000 ? `${errText.slice(0, 2000)}…` : errText || '(no output)';
+  throw new Error(`docker ${args.join(' ')} failed with code ${code}: ${detail}`);
 }
 
 async function runDockerBinary(args: string[]): Promise<Buffer> {

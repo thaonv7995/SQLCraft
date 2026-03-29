@@ -171,9 +171,15 @@ function buildRelationships(tables: SchemaTableDefinition[]): DatabaseRelationsh
   );
 }
 
-function estimateSizeGb(rowCount: number, tableCount: number): number {
+/**
+ * Catalog-only size hint from row counts — not dump file bytes or live engine footprint.
+ * Previous formula incorrectly multiplied by table count (as if every row existed in every table).
+ * ~100–120 B/row matches typical compressed SQL text scale for OLTP dumps.
+ */
+function estimateSizeGb(rowCount: number, _tableCount: number): number {
   if (rowCount <= 0) return 0;
-  const estimated = (rowCount * Math.max(tableCount, 1) * 180) / 1_000_000_000;
+  const bytesPerRow = 110;
+  const estimated = (rowCount * bytesPerRow) / 1_000_000_000;
   return Number(estimated.toFixed(1));
 }
 

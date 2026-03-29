@@ -194,3 +194,21 @@ test('rewriteMysqlRestoreSqlForTargetDatabase upgrades MySQL 4 TYPE= storage to 
   assert.match(out, /ENGINE=MyISAM/i);
   assert.doesNotMatch(out, /\bTYPE\s*=/i);
 });
+
+test('rewriteMysqlRestoreSqlForTargetDatabase does not rewrite db.table inside string literals', () => {
+  const input =
+    "INSERT INTO `pdns`.`domains` VALUES (1, 'again', 'product-751-factor-like-section', 'Skill contain evening recognize sens');\n" +
+    "INSERT INTO `pdns`.`domains` VALUES (2, 'see pdns.slots in text', 'x');\n";
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_x', input);
+  assert.match(out, /INSERT INTO `s_x`\.`domains`/);
+  assert.match(out, /'see pdns\.slots in text'/);
+  assert.match(out, /'again'/);
+});
+
+test('rewriteMysqlRestoreSqlForTargetDatabase does not rewrite backtick-qualified names inside quoted strings', () => {
+  const input =
+    "INSERT INTO `pdns`.`domains` VALUES (1, 'note `pdns`.`domains` copied');\n";
+  const out = __private__.rewriteMysqlRestoreSqlForTargetDatabase('s_x', input);
+  assert.match(out, /INSERT INTO `s_x`\.`domains`/);
+  assert.match(out, /'note `pdns`\.`domains` copied'/);
+});
