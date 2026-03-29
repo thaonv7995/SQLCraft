@@ -110,6 +110,8 @@ export interface ImportCanonicalDatabaseResult {
   derivedDatasetTemplates: AdminDatasetTemplateRow[];
   sourceScale: DatasetSize;
   sourceTotalRows: number;
+  /** Stable catalog id (unchanged when uploading a new version). */
+  databaseId: string;
   jobs: {
     importJob: AdminSystemJobRow;
     datasetGenerationJob: AdminSystemJobRow | null;

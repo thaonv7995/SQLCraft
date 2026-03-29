@@ -927,6 +927,8 @@ export interface Database {
   scale: DatabaseScale;
   difficulty: DatabaseDifficulty;
   dialect?: SchemaSqlDialect;
+  /** From schema template; used when locking metadata on “upload new version”. */
+  engineVersion?: string | null;
   engine: string;
   domainIcon: string;
   tags: string[];
@@ -1029,6 +1031,8 @@ export interface SqlDumpImportPayload {
   dialect?: SchemaSqlDialect;
   /** Non-empty string overrides {@link SqlDumpScanResult.inferredEngineVersion}. Omit to use scan value. */
   engineVersion?: string | null;
+  /** When set, publish as a new version of this catalog database (stable URL id unchanged). */
+  replaceSchemaTemplateId?: string;
 }
 
 export interface SqlDumpImportResult {
@@ -1319,17 +1323,21 @@ function normalizeSqlDumpImportResult(payload: unknown): SqlDumpImportResult {
     schemaTemplateId?: string;
     datasetTemplateId?: string | null;
     databaseId?: string;
-    schemaTemplate?: { id?: string };
+    schemaTemplate?: { id?: string; catalogAnchorId?: string };
     sourceDatasetTemplate?: { id?: string };
   };
 
+  const schemaTemplateId = result.schemaTemplateId ?? result.schemaTemplate?.id ?? '';
   return {
-    schemaTemplateId: result.schemaTemplateId ?? result.schemaTemplate?.id ?? '',
+    schemaTemplateId,
     datasetTemplateId:
       result.datasetTemplateId ??
       result.sourceDatasetTemplate?.id ??
       null,
-    databaseId: result.databaseId,
+    databaseId:
+      result.databaseId ??
+      result.schemaTemplate?.catalogAnchorId ??
+      schemaTemplateId,
   };
 }
 

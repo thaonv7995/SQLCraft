@@ -131,33 +131,42 @@ export const AdminDatabaseDomainSchema = z.enum([
   'other',
 ]);
 
-export const DirectCanonicalDatabaseImportSchema = z.object({
-  name: z.string().min(1).max(100),
-  description: z.string().optional(),
-  definition: z.record(z.unknown()),
-  canonicalDataset: z.object({
-    name: z.string().min(1).max(100).optional(),
-    rowCounts: z.record(z.string(), z.coerce.number().int().min(0)),
-    artifactUrl: z.string().url().optional().nullable(),
-  }),
-  generateDerivedDatasets: z.boolean().default(true),
-  status: z.enum(['draft', 'published', 'archived']).default('published'),
-  dialect: SchemaSqlDialectDefaultPostgresqlSchema,
-  engineVersion: EngineVersionFieldSchema,
+const ReplaceSchemaTemplateFieldSchema = z.object({
+  /** Published head (or any row in chain) to supersede with this import; stable catalog id stays the anchor. */
+  replaceSchemaTemplateId: z.string().uuid().optional(),
 });
 
-export const SqlDumpScanImportSchema = z.object({
-  scanId: z.string().uuid(),
-  schemaName: z.string().min(1).max(100),
-  domain: AdminDatabaseDomainSchema,
-  datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).optional().nullable(),
-  description: z.string().optional().nullable(),
-  tags: z.array(z.string().min(1).max(50)).max(20).optional(),
-  /** When set, overrides {@link SqlDumpScanResult.inferredDialect} from the scan step. */
-  dialect: OptionalSchemaSqlDialectSchema,
-  /** When set, overrides inferred engine version from the dump scan. */
-  engineVersion: EngineVersionFieldSchema,
-});
+export const DirectCanonicalDatabaseImportSchema = z
+  .object({
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    definition: z.record(z.unknown()),
+    canonicalDataset: z.object({
+      name: z.string().min(1).max(100).optional(),
+      rowCounts: z.record(z.string(), z.coerce.number().int().min(0)),
+      artifactUrl: z.string().url().optional().nullable(),
+    }),
+    generateDerivedDatasets: z.boolean().default(true),
+    status: z.enum(['draft', 'published', 'archived']).default('published'),
+    dialect: SchemaSqlDialectDefaultPostgresqlSchema,
+    engineVersion: EngineVersionFieldSchema,
+  })
+  .merge(ReplaceSchemaTemplateFieldSchema);
+
+export const SqlDumpScanImportSchema = z
+  .object({
+    scanId: z.string().uuid(),
+    schemaName: z.string().min(1).max(100),
+    domain: AdminDatabaseDomainSchema,
+    datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).optional().nullable(),
+    description: z.string().optional().nullable(),
+    tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+    /** When set, overrides {@link SqlDumpScanResult.inferredDialect} from the scan step. */
+    dialect: OptionalSchemaSqlDialectSchema,
+    /** When set, overrides inferred engine version from the dump scan. */
+    engineVersion: EngineVersionFieldSchema,
+  })
+  .merge(ReplaceSchemaTemplateFieldSchema);
 
 export const ImportCanonicalDatabaseSchema = z.union([
   DirectCanonicalDatabaseImportSchema,

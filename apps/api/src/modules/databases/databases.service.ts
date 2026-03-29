@@ -1,6 +1,6 @@
 import type { SchemaSqlDialect } from '@sqlcraft/types';
 import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
 import { NotFoundError, ValidationError } from '../../lib/errors';
@@ -249,7 +249,7 @@ function buildDatabaseItem(
   const dialect = normalizeSchemaDialect(schemaTemplate.dialect);
 
   return {
-    id: schemaTemplate.id,
+    id: schemaTemplate.catalogAnchorId,
     name: schemaTemplate.name,
     slug: slugify(schemaTemplate.name),
     description,
@@ -258,6 +258,7 @@ function buildDatabaseItem(
     sourceScale,
     difficulty: inferDifficulty(tables.length),
     dialect,
+    engineVersion: schemaTemplate.engineVersion ?? null,
     engine: dialectToEngineLabel(dialect, schemaTemplate.engineVersion ?? null),
     domainIcon: DOMAIN_ICONS[domain],
     tags: buildTags(domain, tables),
@@ -290,7 +291,12 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
     db
       .select()
       .from(dbSchema.schemaTemplates)
-      .where(eq(dbSchema.schemaTemplates.status, 'published'))
+      .where(
+        and(
+          eq(dbSchema.schemaTemplates.status, 'published'),
+          isNull(dbSchema.schemaTemplates.replacedById),
+        ),
+      )
       .orderBy(
         desc(dbSchema.schemaTemplates.createdAt),
         desc(dbSchema.schemaTemplates.name),

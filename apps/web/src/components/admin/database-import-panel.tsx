@@ -1,6 +1,6 @@
 'use client';
 
-import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,10 @@ import {
   type SqlDumpScanResult,
   databasesApi,
 } from '@/lib/api';
+import {
+  formatSqlDumpMaxUploadLabel,
+  SQL_DUMP_FULL_PARSE_MAX_MB,
+} from '@/lib/sql-dump-limits';
 
 interface DatabaseImportPanelProps {
   onClose?: () => void;
@@ -20,6 +24,19 @@ interface DatabaseImportPanelProps {
   /** When set, load this scan from storage (same payload as after a fresh upload scan). */
   resumeScanId?: string | null;
   onResumeConsumed?: () => void;
+  /** Publish as a new version of this catalog entry (pass current published head template id). */
+  replaceSchemaTemplateId?: string;
+  /** Must match server validation; schema name field stays fixed when replacing. */
+  lockedSchemaName?: string;
+  /** When replacing, keep catalog classification aligned (disable domain picker). */
+  lockedCatalogDomain?: DatabaseDomain;
+  /** When replacing, keep stored SQL engine family (disable dialect picker). */
+  lockedDialect?: SchemaSqlDialect;
+  /**
+   * When replacing, engine version from catalog (`null` = none stored; field disabled, import uses scan/header).
+   * Omit prop entirely for a non-locked engine field.
+   */
+  lockedEngineVersion?: string | null;
 }
 
 const DOMAIN_OPTIONS: Array<{ value: DatabaseDomain; label: string }> = [
@@ -56,6 +73,11 @@ export function DatabaseImportPanel({
   onImported,
   resumeScanId,
   onResumeConsumed,
+  replaceSchemaTemplateId,
+  lockedSchemaName,
+  lockedCatalogDomain,
+  lockedDialect,
+  lockedEngineVersion,
 }: DatabaseImportPanelProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [scanResult, setScanResult] = useState<SqlDumpScanResult | null>(null);
@@ -71,21 +93,70 @@ export function DatabaseImportPanel({
   const [resumeLoading, setResumeLoading] = useState(false);
   /** When true, next scan skips strict CREATE TABLE parsing (MySQL/SQL Server dumps, odd DDL). */
   const [skipStrictSchemaScan, setSkipStrictSchemaScan] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const applyScanResult = useCallback((result: SqlDumpScanResult) => {
-    setScanResult(result);
-    const fallbackName = result.fileName.replace(/\.sql$/i, '').slice(0, 32);
-    setSchemaName(result.schemaName?.trim() ?? fallbackName);
-    setDomain(result.domain);
-    setDatasetScale(result.inferredScale ?? '');
-    setDialect(result.inferredDialect);
-    setEngineVersion(result.inferredEngineVersion?.trim() ?? '');
-    setDescription('');
-    setTags('');
-    setImportSuccess(null);
-    setSelectedFile(null);
-    setSkipStrictSchemaScan(Boolean(result.artifactOnly));
-  }, []);
+  const applyScanResult = useCallback(
+    (result: SqlDumpScanResult) => {
+      setScanResult(result);
+      const fallbackName = result.fileName.replace(/\.sql$/i, '').slice(0, 32);
+      const nameFromScan = result.schemaName?.trim() ?? fallbackName;
+      setSchemaName(
+        replaceSchemaTemplateId && lockedSchemaName?.trim()
+          ? lockedSchemaName.trim()
+          : nameFromScan,
+      );
+      setDomain(
+        replaceSchemaTemplateId && lockedCatalogDomain ? lockedCatalogDomain : result.domain,
+      );
+      setDatasetScale(result.inferredScale ?? '');
+      setDialect(
+        replaceSchemaTemplateId && lockedDialect ? lockedDialect : result.inferredDialect,
+      );
+      setEngineVersion(
+        replaceSchemaTemplateId && lockedEngineVersion !== undefined
+          ? (lockedEngineVersion?.trim() ?? '')
+          : (result.inferredEngineVersion?.trim() ?? ''),
+      );
+      setDescription('');
+      setTags('');
+      setImportSuccess(null);
+      setSelectedFile(null);
+      setSkipStrictSchemaScan(Boolean(result.artifactOnly));
+    },
+    [
+      replaceSchemaTemplateId,
+      lockedSchemaName,
+      lockedCatalogDomain,
+      lockedDialect,
+      lockedEngineVersion,
+    ],
+  );
+
+  useEffect(() => {
+    if (lockedSchemaName?.trim()) {
+      setSchemaName(lockedSchemaName.trim());
+    }
+  }, [lockedSchemaName]);
+
+  useEffect(() => {
+    if (!replaceSchemaTemplateId) {
+      return;
+    }
+    if (lockedCatalogDomain) {
+      setDomain(lockedCatalogDomain);
+    }
+    if (lockedDialect) {
+      setDialect(lockedDialect);
+    }
+    if (lockedEngineVersion !== undefined) {
+      setEngineVersion(lockedEngineVersion?.trim() ?? '');
+    }
+  }, [
+    replaceSchemaTemplateId,
+    lockedCatalogDomain,
+    lockedDialect,
+    lockedEngineVersion,
+  ]);
 
   useEffect(() => {
     if (!resumeScanId?.trim()) {
@@ -137,11 +208,27 @@ export function DatabaseImportPanel({
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setScanResult(null);
-    setSchemaName('');
-    setDomain('');
+    if (replaceSchemaTemplateId && lockedSchemaName?.trim()) {
+      setSchemaName(lockedSchemaName.trim());
+    } else {
+      setSchemaName('');
+    }
+    if (replaceSchemaTemplateId && lockedCatalogDomain) {
+      setDomain(lockedCatalogDomain);
+    } else {
+      setDomain('');
+    }
     setDatasetScale('');
-    setDialect('postgresql');
-    setEngineVersion('');
+    if (replaceSchemaTemplateId && lockedDialect) {
+      setDialect(lockedDialect);
+    } else {
+      setDialect('postgresql');
+    }
+    if (replaceSchemaTemplateId && lockedEngineVersion !== undefined) {
+      setEngineVersion(lockedEngineVersion?.trim() ?? '');
+    } else {
+      setEngineVersion('');
+    }
     setDescription('');
     setTags('');
     setImportSuccess(null);
@@ -152,6 +239,10 @@ export function DatabaseImportPanel({
     () => (scanResult?.tables ? scanResult.tables.slice(0, 3) : []),
     [scanResult],
   );
+
+  const domainLocked = Boolean(replaceSchemaTemplateId && lockedCatalogDomain);
+  const dialectLocked = Boolean(replaceSchemaTemplateId && lockedDialect);
+  const engineVersionLocked = replaceSchemaTemplateId && lockedEngineVersion !== undefined;
 
   const allowImport =
     Boolean(scanResult) &&
@@ -188,6 +279,7 @@ export function DatabaseImportPanel({
         : {}),
       description: description.trim() || undefined,
       tags: normalizedTags.length ? normalizedTags : undefined,
+      ...(replaceSchemaTemplateId ? { replaceSchemaTemplateId } : {}),
     };
 
     importMutation.mutate(payload);
@@ -200,10 +292,7 @@ export function DatabaseImportPanel({
           <div className="flex w-full items-start justify-between gap-3">
             <div>
               <CardTitle>SQL Import</CardTitle>
-              <CardDescription className="mt-1">
-                Upload a `.sql` dump, inspect the discovered schema, then publish it as a reusable
-                training database.
-              </CardDescription>
+              <CardDescription className="mt-1">Upload a .sql file, scan, then publish.</CardDescription>
             </div>
             {onClose ? (
               <Button variant="ghost" size="sm" onClick={onClose}>
@@ -213,25 +302,53 @@ export function DatabaseImportPanel({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {replaceSchemaTemplateId ? (
+            <p className="rounded-lg border border-secondary/30 bg-secondary/5 px-3 py-2 text-xs text-on-surface">
+              New version replaces the default template; public catalog links stay the same.
+            </p>
+          ) : null}
           {resumeLoading ? (
             <p className="text-xs text-on-surface-variant">Loading saved scan…</p>
           ) : null}
           {resumeError ? <p className="text-xs text-error">{resumeError}</p> : null}
-          <label className="block rounded-lg border border-dashed border-outline-variant px-4 py-6 text-sm">
-            <span className="text-xs uppercase tracking-[0.35em] text-outline">SQL Dump</span>
-            <p className="mt-2 font-medium text-on-surface">
-              {selectedFile ? selectedFile.name : 'No file chosen'}
-            </p>
-            <p className="text-xs text-on-surface-variant">
-              Supported file types: <span className="font-medium">.sql</span> (up to 400MB)
+          <div className="rounded-lg border border-dashed border-outline-variant/60 bg-surface-container-low/40 px-4 py-4 text-sm ring-offset-surface focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/25">
+            <span className="text-xs uppercase tracking-[0.35em] text-outline">SQL dump</span>
+            <p className="mt-2 text-xs text-on-surface-variant">
+              <span className="font-medium text-on-surface">.sql</span> · max{' '}
+              <span className="font-medium text-on-surface">{formatSqlDumpMaxUploadLabel()}</span>
             </p>
             <input
+              ref={fileInputRef}
               type="file"
-              accept=".sql"
+              accept=".sql,.SQL"
+              aria-label="Choose SQL dump file"
               onChange={handleFileSelection}
-              className="mt-4 w-full cursor-pointer text-sm text-on-surface file:mr-4 file:rounded-lg file:border file:border-outline-variant file:bg-surface-container-low file:px-3 file:py-1.5 file:text-sm file:font-medium"
+              className="sr-only"
             />
-          </label>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                className="shrink-0 border-primary/35 bg-primary/12 text-on-surface hover:bg-primary/20 hover:border-primary/50"
+                leftIcon={
+                  <span className="material-symbols-outlined text-lg text-primary" aria-hidden>
+                    upload_file
+                  </span>
+                }
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose SQL file
+              </Button>
+              <p className="min-w-0 text-sm text-on-surface-variant">
+                {selectedFile ? (
+                  <span className="font-medium text-on-surface break-all">{selectedFile.name}</span>
+                ) : (
+                  <span>No file</span>
+                )}
+              </p>
+            </div>
+          </div>
 
           <label className="flex cursor-pointer items-start gap-2 text-sm text-on-surface">
             <input
@@ -241,9 +358,8 @@ export function DatabaseImportPanel({
               className="mt-0.5 size-4 rounded border-outline-variant"
             />
             <span>
-              Skip strict schema scan — store the file as the canonical SQL artifact only (no table
-              graph). Choose the correct SQL dialect below before publishing. Use for MySQL, SQL Server,
-              or dumps our parser does not understand.
+              Artifact only — required above {SQL_DUMP_FULL_PARSE_MAX_MB} MB, or for MySQL / SQL
+              Server / odd dumps.
             </span>
           </label>
 
@@ -268,12 +384,10 @@ export function DatabaseImportPanel({
             <div className="rounded-xl border border-outline-variant/40 bg-surface-container-low p-4">
               {scanResult.artifactOnly ? (
                 <p className="mb-3 rounded-lg border border-secondary/30 bg-secondary/5 px-3 py-2 text-xs text-on-surface">
-                  Artifact-only scan: schema was not parsed. The full dump will be restored in the
-                  sandbox; confirm dialect and engine version before publishing. Derived tiny/small
-                  datasets are not generated for non-PostgreSQL or artifact-only imports.
+                  No table graph — confirm dialect / engine below before publish.
                 </p>
               ) : null}
-              <p className="text-xs uppercase tracking-[0.35em] text-outline">Scan Summary</p>
+              <p className="text-xs uppercase tracking-[0.35em] text-outline">Summary</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div>
                   <p className="text-[11px] text-on-surface-variant">Detected Tables</p>
@@ -293,17 +407,18 @@ export function DatabaseImportPanel({
                 </div>
               </div>
               <p className="mt-3 text-xs text-on-surface-variant">
-                Inferred SQL dialect:{' '}
+                Dialect:{' '}
                 <span className="font-medium text-on-surface">
                   {DIALECT_OPTIONS.find((o) => o.value === scanResult.inferredDialect)?.label ??
                     scanResult.inferredDialect}
                 </span>{' '}
-                ({scanResult.dialectConfidence} confidence). Adjust below if this is wrong.
+                <span className="text-on-surface-variant/80">({scanResult.dialectConfidence})</span>
+                {!dialectLocked ? ' · fix below if wrong' : null}
               </p>
-              <p className="mt-2 text-xs text-on-surface-variant">
-                Inferred engine version:{' '}
+              <p className="mt-1 text-xs text-on-surface-variant">
+                Engine:{' '}
                 <span className="font-medium text-on-surface">
-                  {scanResult.inferredEngineVersion?.trim() || '— (header not found; sandbox uses default major)'}
+                  {scanResult.inferredEngineVersion?.trim() || '—'}
                 </span>
               </p>
             </div>
@@ -314,10 +429,7 @@ export function DatabaseImportPanel({
       <div className="space-y-4">
         <Card className="border border-outline-variant/10">
           <CardHeader className="flex-col items-start gap-2">
-            <CardTitle>Review Before Publish</CardTitle>
-            <CardDescription>
-              Confirm metadata before this dump becomes part of the reusable database catalog.
-            </CardDescription>
+            <CardTitle>Publish</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <Input
@@ -325,12 +437,14 @@ export function DatabaseImportPanel({
               value={schemaName}
               onChange={(event) => setSchemaName(event.target.value)}
               placeholder="Enter schema name"
+              disabled={Boolean(replaceSchemaTemplateId && lockedSchemaName?.trim())}
             />
 
             <Select
               label="Domain"
               value={domain}
               onChange={(event) => setDomain(event.target.value as DatabaseDomain | '')}
+              disabled={domainLocked}
               options={[
                 { value: '', label: 'Select a domain' },
                 ...DOMAIN_OPTIONS,
@@ -348,17 +462,19 @@ export function DatabaseImportPanel({
             />
 
             <Select
-              label="SQL dialect (stored on template)"
+              label="Dialect"
               value={dialect}
               onChange={(event) => setDialect(event.target.value as SchemaSqlDialect)}
+              disabled={dialectLocked}
               options={DIALECT_OPTIONS}
             />
 
             <Input
-              label="Engine version (optional)"
+              label="Engine version"
               value={engineVersion}
               onChange={(event) => setEngineVersion(event.target.value)}
-              placeholder="e.g. 16.2 — leave empty to use value from scan"
+              placeholder="e.g. 16.2"
+              disabled={Boolean(engineVersionLocked)}
             />
 
             <Textarea
@@ -366,7 +482,7 @@ export function DatabaseImportPanel({
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               rows={3}
-              placeholder="Optional: summarize the schema or dataset"
+              placeholder="Optional"
             />
 
             <Input
@@ -377,7 +493,7 @@ export function DatabaseImportPanel({
             />
 
             <Button variant="primary" fullWidth onClick={handleImport} disabled={!allowImport}>
-              {importMutation.isPending ? 'Publishing…' : 'Publish Database'}
+              {importMutation.isPending ? 'Publishing…' : 'Publish'}
             </Button>
 
             {importMutation.isError ? (
@@ -395,10 +511,7 @@ export function DatabaseImportPanel({
         {scanResult ? (
           <Card className="border border-outline-variant/10">
             <CardHeader className="flex-col items-start gap-2">
-              <CardTitle>Tables Preview</CardTitle>
-              <CardDescription>
-                A quick read of the extracted tables before you publish the database.
-              </CardDescription>
+              <CardTitle>Tables</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {tablePreview.length === 0 ? (

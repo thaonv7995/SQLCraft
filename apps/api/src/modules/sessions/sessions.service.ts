@@ -259,8 +259,16 @@ async function loadSchemaDatasetTemplates(
 async function resolveRequestedDatasetTemplate(
   schemaTemplateId: string | null,
   requestedScale?: DatasetSize,
-): Promise<{ selectedTemplate: DatasetTemplateRow | null; summary: SessionDatasetSummary }> {
-  const schemaTemplates = await loadSchemaDatasetTemplates(schemaTemplateId);
+): Promise<{
+  selectedTemplate: DatasetTemplateRow | null;
+  summary: SessionDatasetSummary;
+  provisionSchemaTemplateId: string | null;
+}> {
+  const effectiveSchemaTemplateId = schemaTemplateId
+    ? await sessionsRepository.resolvePublishedHeadSchemaTemplateId(schemaTemplateId)
+    : null;
+
+  const schemaTemplates = await loadSchemaDatasetTemplates(effectiveSchemaTemplateId);
   const sourceScale = getLargestDatasetScale(
     schemaTemplates.map((datasetTemplate) => datasetTemplate.size as DatasetSize),
   );
@@ -282,8 +290,12 @@ async function resolveRequestedDatasetTemplate(
     }
   }
 
-  const summary = buildDatasetSummary(schemaTemplateId, selectedTemplate, schemaTemplates);
-  return { selectedTemplate, summary };
+  const summary = buildDatasetSummary(effectiveSchemaTemplateId, selectedTemplate, schemaTemplates);
+  return {
+    selectedTemplate,
+    summary,
+    provisionSchemaTemplateId: effectiveSchemaTemplateId,
+  };
 }
 
 async function resolveSandboxDatasetSummary(
@@ -451,6 +463,11 @@ export async function createSession(
   selectedTemplate = resolved.selectedTemplate;
   dataset = resolved.summary;
 
+  const provisionSchemaTemplateId = resolved.provisionSchemaTemplateId;
+  if (!provisionSchemaTemplateId) {
+    throw new NotFoundError('Database template for this challenge is not available');
+  }
+
   const session = await sessionsRepository.createSession({
     userId,
     challengeVersionId: body.challengeVersionId,
@@ -459,7 +476,7 @@ export async function createSession(
 
   const sandbox = await sessionsRepository.createSandbox({
     learningSessionId: session.id,
-    schemaTemplateId: challengeVersion.databaseId,
+    schemaTemplateId: provisionSchemaTemplateId,
     datasetTemplateId: selectedTemplate?.id ?? undefined,
     status: 'requested',
   });
@@ -467,11 +484,12 @@ export async function createSession(
   await enqueueProvisionSandbox({
     sandboxInstanceId: sandbox.id,
     learningSessionId: session.id,
-    schemaTemplateId: challengeVersion.databaseId,
+    schemaTemplateId: provisionSchemaTemplateId,
     datasetTemplateId: selectedTemplate?.id ?? null,
   });
 
-  const schemaTemplate = await sessionsRepository.findSchemaTemplateById(challengeVersion.databaseId);
+  const schemaTemplate =
+    await sessionsRepository.findSchemaTemplateById(provisionSchemaTemplateId);
 
   return {
     session: {

@@ -39,6 +39,8 @@ export interface DatabaseItem {
   difficulty: DatabaseDifficulty;
   /** Stored template target engine (from import or admin). */
   dialect: SchemaSqlDialect;
+  /** Parsed dump / admin override; drives sandbox image major where applicable. */
+  engineVersion: string | null;
   engine: string;
   domainIcon: string;
   tags: string[];

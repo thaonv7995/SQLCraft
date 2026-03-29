@@ -177,9 +177,11 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   const queryClient = useQueryClient();
   const requestedView = searchParamFirst(searchParams, 'view');
   const requestedTab = searchParamFirst(searchParams, 'tab');
+  const replaceParam = searchParamFirst(searchParams, 'replace');
+  const lockedCatalogName = searchParamFirst(searchParams, 'schemaName');
 
   const [showImportPanel, setShowImportPanel] = useState(
-    requestedView === 'import' || requestedTab === 'sql-imports',
+    requestedView === 'import' || requestedTab === 'sql-imports' || Boolean(replaceParam),
   );
   const [resumeScanId, setResumeScanId] = useState<string | null>(null);
   const [pendingPage, setPendingPage] = useState(1);
@@ -198,6 +200,12 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   useEffect(() => {
     setCatalogPage(1);
   }, [domain, scale, dialect, debouncedQ]);
+
+  useEffect(() => {
+    if (replaceParam) {
+      setShowImportPanel(true);
+    }
+  }, [replaceParam]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin-database-catalog', domain, scale, dialect, debouncedQ, catalogPage],
@@ -223,6 +231,11 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   const clearResumeScan = useCallback(() => setResumeScanId(null), []);
 
   const databases = useMemo(() => data?.items ?? [], [data?.items]);
+  const replaceCatalogMatch = useMemo(() => {
+    const id = replaceParam?.trim();
+    if (!id) return null;
+    return databases.find((d) => d.schemaTemplateId === id || d.id === id) ?? null;
+  }, [replaceParam, databases]);
   const datasetVariantCount = useMemo(
     () =>
       databases.reduce((sum, database) => sum + (database.availableScales?.length ?? 0), 0),
@@ -280,6 +293,13 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         <DatabaseImportPanel
           resumeScanId={resumeScanId}
           onResumeConsumed={clearResumeScan}
+          replaceSchemaTemplateId={replaceParam ?? undefined}
+          lockedSchemaName={lockedCatalogName ?? undefined}
+          lockedCatalogDomain={replaceCatalogMatch?.domain}
+          lockedDialect={replaceCatalogMatch ? (replaceCatalogMatch.dialect ?? 'postgresql') : undefined}
+          lockedEngineVersion={
+            replaceCatalogMatch ? (replaceCatalogMatch.engineVersion ?? null) : undefined
+          }
           onClose={() => {
             setShowImportPanel(false);
             setResumeScanId(null);

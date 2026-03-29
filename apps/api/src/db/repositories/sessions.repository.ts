@@ -1,4 +1,4 @@
-import { eq, and, desc, inArray, lte, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNull, lte, sql } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -284,6 +284,33 @@ export class SessionsRepository {
       .limit(1);
 
     return row ?? null;
+  }
+
+  /**
+   * Published head template id for the lineage of `schemaTemplateId`, or null if the row is missing.
+   * Challenges may store an older template id; provisioning should use the head.
+   */
+  async resolvePublishedHeadSchemaTemplateId(schemaTemplateId: string): Promise<string | null> {
+    const [seed] = await this.db
+      .select({ catalogAnchorId: schema.schemaTemplates.catalogAnchorId })
+      .from(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.id, schemaTemplateId))
+      .limit(1);
+    if (!seed) {
+      return null;
+    }
+    const [head] = await this.db
+      .select({ id: schema.schemaTemplates.id })
+      .from(schema.schemaTemplates)
+      .where(
+        and(
+          eq(schema.schemaTemplates.catalogAnchorId, seed.catalogAnchorId),
+          isNull(schema.schemaTemplates.replacedById),
+          eq(schema.schemaTemplates.status, 'published'),
+        ),
+      )
+      .limit(1);
+    return head?.id ?? schemaTemplateId;
   }
 
 }

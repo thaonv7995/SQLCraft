@@ -1224,15 +1224,26 @@ export interface CreateStoredSqlDumpScanOptions {
   artifactOnly?: boolean;
 }
 
-export async function createStoredSqlDumpScan(
-  buffer: Buffer,
-  fileName: string,
-  options?: CreateStoredSqlDumpScanOptions,
-): Promise<SqlDumpScanResult> {
-  const scan = options?.artifactOnly
-    ? parseSqlDumpBufferArtifactOnly(buffer, fileName)
-    : parseSqlDumpBuffer(buffer, fileName);
-  const [{ uploadFile }, { config }] = await Promise.all([
+/** Matches {@link inferSqlDialectFromDump} window. */
+const SQL_DUMP_INFERENCE_HEAD_BYTES = 12 * 1024 * 1024;
+
+async function readFilePrefixBytes(filePath: string, byteLength: number): Promise<Buffer> {
+  const { open } = await import('node:fs/promises');
+  const fh = await open(filePath, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(byteLength);
+    const { bytesRead } = await fh.read(buf, 0, byteLength, 0);
+    return bytesRead === byteLength ? buf : buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
+async function persistSqlDumpScanPayload(
+  scan: StoredSqlDumpScan,
+  sqlPayload: Buffer | { path: string; size: number },
+): Promise<StoredSqlDumpScan> {
+  const [{ uploadFile, uploadFileFromPath }, { config }] = await Promise.all([
     import('../../lib/storage'),
     import('../../lib/config'),
   ]);
@@ -1241,7 +1252,17 @@ export async function createStoredSqlDumpScan(
     artifactUrl: `s3://${config.STORAGE_BUCKET}/${scan.artifactObjectName}`,
   };
 
-  await uploadFile(persistedScan.artifactObjectName, buffer, 'application/sql');
+  if (Buffer.isBuffer(sqlPayload)) {
+    await uploadFile(persistedScan.artifactObjectName, sqlPayload, 'application/sql');
+  } else {
+    await uploadFileFromPath(
+      persistedScan.artifactObjectName,
+      sqlPayload.path,
+      sqlPayload.size,
+      'application/sql',
+    );
+  }
+
   await uploadFile(
     makeScanMetadataObjectName(persistedScan.scanId),
     Buffer.from(JSON.stringify(persistedScan), 'utf8'),
@@ -1249,6 +1270,57 @@ export async function createStoredSqlDumpScan(
   );
 
   setCachedScan(persistedScan);
+  return persistedScan;
+}
+
+export async function createStoredSqlDumpScan(
+  buffer: Buffer,
+  fileName: string,
+  options?: CreateStoredSqlDumpScanOptions,
+): Promise<SqlDumpScanResult> {
+  const scan = options?.artifactOnly
+    ? parseSqlDumpBufferArtifactOnly(buffer, fileName)
+    : parseSqlDumpBuffer(buffer, fileName);
+  const persistedScan = await persistSqlDumpScanPayload(scan, buffer);
+  return toSqlDumpScanResult(persistedScan);
+}
+
+/** Scan + persist from a temp file path (streams the artifact to object storage). */
+export async function createStoredSqlDumpScanFromFile(
+  filePath: string,
+  byteSize: number,
+  fileName: string,
+  options?: CreateStoredSqlDumpScanOptions,
+): Promise<SqlDumpScanResult> {
+  const { config } = await import('../../lib/config');
+  const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
+  const artifactOnly = Boolean(options?.artifactOnly);
+  const { readFile } = await import('node:fs/promises');
+
+  if (!artifactOnly && byteSize > maxFullParse) {
+    throw new ValidationError(
+      `SQL dump is about ${Math.ceil(byteSize / (1024 * 1024))} MiB. Full schema scan supports up to ${config.SQL_DUMP_FULL_PARSE_MAX_MB} MiB. Enable artifact-only for larger dumps (file streams to storage; only the file head is used for dialect heuristics).`,
+    );
+  }
+
+  const scanId = randomUUID();
+  let scan: StoredSqlDumpScan;
+
+  if (artifactOnly) {
+    if (byteSize <= maxFullParse) {
+      const buf = await readFile(filePath);
+      scan = parseSqlDumpBufferArtifactOnly(buf, fileName, scanId);
+    } else {
+      const headLen = Math.min(SQL_DUMP_INFERENCE_HEAD_BYTES, byteSize);
+      const head = await readFilePrefixBytes(filePath, headLen);
+      scan = parseSqlDumpBufferArtifactOnly(head, fileName, scanId);
+    }
+  } else {
+    const buf = await readFile(filePath);
+    scan = parseSqlDumpBuffer(buf, fileName, scanId);
+  }
+
+  const persistedScan = await persistSqlDumpScanPayload(scan, { path: filePath, size: byteSize });
   return toSqlDumpScanResult(persistedScan);
 }
 

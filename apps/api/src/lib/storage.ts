@@ -1,3 +1,4 @@
+import { createReadStream } from 'node:fs';
 import * as Minio from 'minio';
 import { config } from './config';
 
@@ -54,6 +55,22 @@ export async function uploadFile(
   await ensureBucket();
   const client = getClient();
   await client.putObject(config.STORAGE_BUCKET, objectName, buffer, buffer.length, {
+    'Content-Type': contentType,
+  });
+  return objectName;
+}
+
+/** Stream a local file to object storage (for large SQL dumps without buffering in RAM). */
+export async function uploadFileFromPath(
+  objectName: string,
+  filePath: string,
+  byteLength: number,
+  contentType: string,
+): Promise<string> {
+  await ensureBucket();
+  const client = getClient();
+  const stream = createReadStream(filePath);
+  await client.putObject(config.STORAGE_BUCKET, objectName, stream, byteLength, {
     'Content-Type': contentType,
   });
   return objectName;

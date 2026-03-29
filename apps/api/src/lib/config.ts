@@ -48,6 +48,18 @@ const EnvSchema = z.object({
 
   // ── Misc ──────────────────────────────────────────────────────────────────
   API_DOMAIN: z.string().default('api.sqlcraft.dev'),
+
+  /**
+   * Admin SQL dump multipart upload cap (MiB). Default ~50 GiB for large tuning datasets.
+   * Lower in dev if needed. Raise reverse-proxy `client_max_body_size` (etc.) to match.
+   */
+  SQL_DUMP_MAX_FILE_MB: z.coerce.number().int().positive().max(131072).default(51200),
+
+  /**
+   * Dumps larger than this (MiB) cannot use full in-memory CREATE TABLE scan; use artifact-only
+   * (streams file to object storage, reads only the first ~12 MiB for dialect heuristics).
+   */
+  SQL_DUMP_FULL_PARSE_MAX_MB: z.coerce.number().int().positive().max(4096).default(256),
 });
 
 const result = EnvSchema.safeParse(process.env);

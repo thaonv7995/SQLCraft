@@ -1,5 +1,6 @@
 import { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { config } from '../lib/config';
 import { AppError } from '../lib/errors';
 import { ApiCode } from '@sqlcraft/types';
 
@@ -52,10 +53,21 @@ export function errorHandler(
     multipartCode === 'FST_PARTS_LIMIT'
   ) {
     request.log.warn({ err: error }, 'Multipart upload rejected');
+    const path = (request.url ?? '').split('?')[0];
+    const isSqlDumpScan = path.includes('/admin/databases/scan');
+    const isAvatar = path.includes('/users/me/avatar');
+    let message: string;
+    if (isSqlDumpScan) {
+      message = `SQL dump is too large. Maximum is ${config.SQL_DUMP_MAX_FILE_MB} MB (configure SQL_DUMP_MAX_FILE_MB).`;
+    } else if (isAvatar) {
+      message = 'Avatar file is too large. Maximum allowed size is 5 MB.';
+    } else {
+      message = 'Uploaded file is too large.';
+    }
     return reply.status(413).send({
       success: false,
       code: ApiCode.VALIDATION_ERROR,
-      message: 'Avatar file is too large. Maximum allowed size is 5 MB.',
+      message,
       data: null,
     });
   }

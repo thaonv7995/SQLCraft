@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
@@ -20,6 +20,7 @@ import {
   TableRow,
   TableSkeleton,
 } from '@/components/ui/table';
+import { DatabaseImportPanel } from '@/components/admin/database-import-panel';
 import { adminApi, databasesApi, type Database } from '@/lib/api';
 import {
   DATABASE_DIFFICULTY_STYLES,
@@ -419,6 +420,7 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
     isDetailTab(requestedTab) ? requestedTab : 'schema-template',
   );
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [showUploadVersionPanel, setShowUploadVersionPanel] = useState(false);
 
   const { data: database, isLoading, isError } = useQuery({
     queryKey: ['admin-database-detail', databaseId],
@@ -454,6 +456,17 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
     },
     staleTime: 30_000,
   });
+
+  const handleVersionImported = useCallback(
+    (_importedAnchorId: string) => {
+      void queryClient.invalidateQueries({ queryKey: ['admin-database-detail', databaseId] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-database-catalog'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-pending-scans'] });
+      setShowUploadVersionPanel(false);
+      toast.success('New version published. This page will show the updated schema.');
+    },
+    [databaseId, queryClient],
+  );
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adminApi.deleteDatabase(id),
@@ -520,10 +533,14 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            <Link href="/admin/databases?view=import">
-              <Button variant="secondary">SQL Import</Button>
-            </Link>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setShowUploadVersionPanel((open) => !open)}
+              disabled={!database.schemaTemplateId}
+            >
+              {showUploadVersionPanel ? 'Hide SQL upload' : 'Upload new version'}
+            </Button>
             <Link href={`/explore/${database.id}`}>
               <Button variant="ghost">Open in Explorer</Button>
             </Link>
@@ -537,6 +554,18 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
           </div>
         </div>
       </div>
+
+      {showUploadVersionPanel && database.schemaTemplateId ? (
+        <DatabaseImportPanel
+          replaceSchemaTemplateId={database.schemaTemplateId}
+          lockedSchemaName={database.name}
+          lockedCatalogDomain={database.domain}
+          lockedDialect={database.dialect ?? 'postgresql'}
+          lockedEngineVersion={database.engineVersion ?? null}
+          onClose={() => setShowUploadVersionPanel(false)}
+          onImported={handleVersionImported}
+        />
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-4">
         <DetailStat

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { InferInsertModel, InferSelectModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 
@@ -46,7 +46,15 @@ export class AdminRepository {
     const [userCount, databaseCount, challengeCount, activeSessionCount, pendingJobCount] =
       await Promise.all([
       this.db.select({ count: count() }).from(schema.users),
-      this.db.select({ count: count() }).from(schema.schemaTemplates),
+      this.db
+        .select({ count: count() })
+        .from(schema.schemaTemplates)
+        .where(
+          and(
+            eq(schema.schemaTemplates.status, 'published'),
+            isNull(schema.schemaTemplates.replacedById),
+          ),
+        ),
       this.db.select({ count: count() }).from(schema.challenges),
       this.db
         .select({ count: count() })
@@ -86,6 +94,127 @@ export class AdminRepository {
       .limit(1);
 
     return row ?? null;
+  }
+
+  /** Current published catalog head for the lineage containing `schemaTemplateId` (any row in chain). */
+  async resolvePublishedCatalogHead(schemaTemplateId: string): Promise<SchemaTemplateRow | null> {
+    const [seed] = await this.db
+      .select()
+      .from(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.id, schemaTemplateId))
+      .limit(1);
+    if (!seed) {
+      return null;
+    }
+    const anchor = seed.catalogAnchorId;
+    const [head] = await this.db
+      .select()
+      .from(schema.schemaTemplates)
+      .where(
+        and(
+          eq(schema.schemaTemplates.catalogAnchorId, anchor),
+          isNull(schema.schemaTemplates.replacedById),
+          eq(schema.schemaTemplates.status, 'published'),
+        ),
+      )
+      .limit(1);
+    return head ?? null;
+  }
+
+  async listLineageSchemaTemplateIds(catalogAnchorId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: schema.schemaTemplates.id })
+      .from(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.catalogAnchorId, catalogAnchorId));
+    return rows.map((r) => r.id);
+  }
+
+  async getDatabaseReferenceSummaryLineage(schemaTemplateIds: string[]): Promise<DatabaseReferenceSummary> {
+    if (schemaTemplateIds.length === 0) {
+      return { challengeCount: 0, sandboxInstanceCount: 0 };
+    }
+    const datasetRows = await this.db
+      .select({ id: schema.datasetTemplates.id })
+      .from(schema.datasetTemplates)
+      .where(inArray(schema.datasetTemplates.schemaTemplateId, schemaTemplateIds));
+    const datasetIds = datasetRows.map((r) => r.id);
+    const challengeFilter = inArray(schema.challenges.databaseId, schemaTemplateIds);
+    const sandboxParts: SQL[] = [
+      inArray(schema.sandboxInstances.schemaTemplateId, schemaTemplateIds),
+    ];
+    if (datasetIds.length > 0) {
+      sandboxParts.push(inArray(schema.sandboxInstances.datasetTemplateId, datasetIds));
+    }
+    const sandboxWhere = sandboxParts.length === 1 ? sandboxParts[0]! : or(...sandboxParts)!;
+
+    const [challengeCount, sandboxInstanceCount] = await Promise.all([
+      this.db.select({ count: count() }).from(schema.challenges).where(challengeFilter),
+      this.db.select({ count: count() }).from(schema.sandboxInstances).where(sandboxWhere),
+    ]);
+
+    return {
+      challengeCount: challengeCount[0]?.count ?? 0,
+      sandboxInstanceCount: sandboxInstanceCount[0]?.count ?? 0,
+    };
+  }
+
+  async listSandboxInstancesForLineage(
+    schemaTemplateIds: string[],
+    allDatasetTemplateIds: string[],
+  ): Promise<Array<{ id: string; learningSessionId: string; status: string }>> {
+    if (schemaTemplateIds.length === 0) {
+      return [];
+    }
+    const parts: SQL[] = [inArray(schema.sandboxInstances.schemaTemplateId, schemaTemplateIds)];
+    if (allDatasetTemplateIds.length > 0) {
+      parts.push(inArray(schema.sandboxInstances.datasetTemplateId, allDatasetTemplateIds));
+    }
+    const whereClause = parts.length === 1 ? parts[0]! : or(...parts)!;
+    return this.db
+      .select({
+        id: schema.sandboxInstances.id,
+        learningSessionId: schema.sandboxInstances.learningSessionId,
+        status: schema.sandboxInstances.status,
+      })
+      .from(schema.sandboxInstances)
+      .where(whereClause);
+  }
+
+  async clearSandboxTemplateRefsForLineage(
+    schemaTemplateIds: string[],
+    allDatasetTemplateIds: string[],
+  ): Promise<void> {
+    if (schemaTemplateIds.length === 0) {
+      return;
+    }
+    const parts: SQL[] = [inArray(schema.sandboxInstances.schemaTemplateId, schemaTemplateIds)];
+    if (allDatasetTemplateIds.length > 0) {
+      parts.push(inArray(schema.sandboxInstances.datasetTemplateId, allDatasetTemplateIds));
+    }
+    const whereClause = parts.length === 1 ? parts[0]! : or(...parts)!;
+    await this.db
+      .update(schema.sandboxInstances)
+      .set({ schemaTemplateId: null, datasetTemplateId: null })
+      .where(whereClause);
+  }
+
+  async deleteDatasetTemplatesForSchemaTemplateIds(schemaTemplateIds: string[]): Promise<number> {
+    if (schemaTemplateIds.length === 0) {
+      return 0;
+    }
+    const deleted = await this.db
+      .delete(schema.datasetTemplates)
+      .where(inArray(schema.datasetTemplates.schemaTemplateId, schemaTemplateIds))
+      .returning({ id: schema.datasetTemplates.id });
+    return deleted.length;
+  }
+
+  async deleteSchemaTemplatesByCatalogAnchor(catalogAnchorId: string): Promise<number> {
+    const deleted = await this.db
+      .delete(schema.schemaTemplates)
+      .where(eq(schema.schemaTemplates.catalogAnchorId, catalogAnchorId))
+      .returning({ id: schema.schemaTemplates.id });
+    return deleted.length;
   }
 
   async createSchemaTemplate(

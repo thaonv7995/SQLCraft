@@ -180,21 +180,31 @@ export const challengeVersions = pgTable(
 );
 
 // Templates
-export const schemaTemplates = pgTable('schema_templates', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  name: varchar('name', { length: 100 }).notNull(),
-  description: text('description'),
-  version: integer('version').notNull().default(1),
-  /** Target engine family (postgresql | mysql | mariadb | sqlserver | sqlite). */
-  dialect: varchar('dialect', { length: 32 }).notNull().default('postgresql'),
-  /** Parsed from dump (e.g. pg_dump / mysqldump header); drives sandbox image major for Postgres. */
-  engineVersion: varchar('engine_version', { length: 64 }),
-  definition: jsonb('definition').notNull(),
-  status: contentStatusEnum('status').notNull().default('draft'),
-  createdBy: uuid('created_by').references(() => users.id),
-  createdAt: timestamp('created_at').notNull().default(sql`now()`),
-  updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
-});
+export const schemaTemplates = pgTable(
+  'schema_templates',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar('name', { length: 100 }).notNull(),
+    description: text('description'),
+    version: integer('version').notNull().default(1),
+    /** Stable catalog id (first template in chain); Explore URLs use this. */
+    catalogAnchorId: uuid('catalog_anchor_id').notNull(),
+    /** Newer template that replaced this row as the published catalog default (FK in migration). */
+    replacedById: uuid('replaced_by_id'),
+    /** Target engine family (postgresql | mysql | mariadb | sqlserver | sqlite). */
+    dialect: varchar('dialect', { length: 32 }).notNull().default('postgresql'),
+    /** Parsed from dump (e.g. pg_dump / mysqldump header); drives sandbox image major for Postgres. */
+    engineVersion: varchar('engine_version', { length: 64 }),
+    definition: jsonb('definition').notNull(),
+    status: contentStatusEnum('status').notNull().default('draft'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    catalogAnchorIdx: index('schema_templates_catalog_anchor_idx').on(table.catalogAnchorId),
+  }),
+);
 
 export const datasetTemplates = pgTable('dataset_templates', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { eq, or } from 'drizzle-orm';
@@ -223,12 +224,15 @@ async function seed() {
       ],
     };
 
+    const ecommerceTemplateId = randomUUID();
     const [tmpl] = await db
       .insert(schema.schemaTemplates)
       .values({
+        id: ecommerceTemplateId,
         name: 'Ecommerce',
         description: 'A sample ecommerce database with users, products, orders, and categories',
         version: 1,
+        catalogAnchorId: ecommerceTemplateId,
         definition: ecommerceDefinition,
         status: 'published',
         createdBy: adminUser.id,

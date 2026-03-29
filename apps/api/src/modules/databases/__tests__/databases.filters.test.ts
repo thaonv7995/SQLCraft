@@ -14,6 +14,7 @@ function sampleDb(overrides: Partial<DatabaseItem> = {}): DatabaseItem {
     sourceScale: 'small',
     difficulty: 'beginner',
     dialect: 'postgresql',
+    engineVersion: '16.2',
     engine: 'PostgreSQL 16.2',
     domainIcon: 'storefront',
     tags: ['Orders', 'Inventory'],

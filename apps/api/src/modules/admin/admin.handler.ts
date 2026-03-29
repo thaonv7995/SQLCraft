@@ -1,4 +1,11 @@
+import { createWriteStream } from 'node:fs';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { finished } from 'node:stream/promises';
+import { pipeline } from 'node:stream/promises';
 import { FastifyRequest, FastifyReply } from 'fastify';
+import { config } from '../../lib/config';
 import { success, created, MESSAGES } from '../../lib/response';
 import { ValidationError } from '../../lib/errors';
 import { clientIpForAudit, clientUserAgentForAudit } from '../../lib/request-audit';
@@ -48,7 +55,7 @@ import {
   listAuditLogs,
   recordAuditLog,
   resetAdminConfig,
-  scanSqlDump,
+  scanSqlDumpFromUploadedFile,
   listPendingScans,
   getAdminSqlDumpScan,
   updateAdminConfig,
@@ -257,35 +264,49 @@ export async function scanSqlDumpHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const multipartLimits = {
-    limits: { fileSize: 400 * 1024 * 1024 },
+    limits: { fileSize: config.SQL_DUMP_MAX_FILE_MB * 1024 * 1024 },
   };
 
-  let dumpBuffer: Buffer | null = null;
+  let tempDir: string | null = null;
   let dumpFileName = '';
   let artifactOnly = false;
 
-  for await (const part of request.parts(multipartLimits)) {
-    if (part.type === 'file') {
-      if (!dumpBuffer) {
-        const chunks: Buffer[] = [];
-        for await (const chunk of part.file) {
-          chunks.push(chunk);
+  try {
+    for await (const part of request.parts(multipartLimits)) {
+      if (part.type === 'file') {
+        if (!tempDir) {
+          tempDir = await mkdtemp(path.join(tmpdir(), 'sqlforge-dump-'));
+          const tmpPath = path.join(tempDir, 'upload.sql');
+          await pipeline(part.file, createWriteStream(tmpPath));
+          dumpFileName = part.filename?.trim() || 'dump.sql';
+        } else {
+          await finished(part.file);
         }
-        dumpBuffer = Buffer.concat(chunks);
-        dumpFileName = part.filename;
+      } else if (part.type === 'field' && part.fieldname === 'artifactOnly') {
+        const raw = String(part.value).trim().toLowerCase();
+        artifactOnly = raw === 'true' || raw === '1' || raw === 'yes';
       }
-    } else if (part.type === 'field' && part.fieldname === 'artifactOnly') {
-      const raw = String(part.value).trim().toLowerCase();
-      artifactOnly = raw === 'true' || raw === '1' || raw === 'yes';
+    }
+
+    if (!tempDir) {
+      throw new ValidationError('No SQL dump uploaded');
+    }
+
+    const tmpPath = path.join(tempDir, 'upload.sql');
+    const st = await stat(tmpPath);
+    if (st.size === 0) {
+      throw new ValidationError('Uploaded SQL dump is empty');
+    }
+
+    const result = await scanSqlDumpFromUploadedFile(dumpFileName, tmpPath, st.size, {
+      artifactOnly,
+    });
+    reply.send(success(result, 'SQL dump scanned successfully'));
+  } finally {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
-
-  if (!dumpBuffer || !dumpFileName) {
-    throw new ValidationError('No SQL dump uploaded');
-  }
-
-  const result = await scanSqlDump(dumpFileName, dumpBuffer, { artifactOnly });
-  reply.send(success(result, 'SQL dump scanned successfully'));
 }
 
 export async function listPendingScansHandler(

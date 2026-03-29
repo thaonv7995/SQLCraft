@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { eq } from 'drizzle-orm';
 import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
+import { getDb, schema } from '../../db';
 import {
   adminDeleteChallenge,
   adminUpdateChallenge,
@@ -58,6 +61,7 @@ import type {
 } from './admin.types';
 import {
   createStoredSqlDumpScan,
+  createStoredSqlDumpScanFromFile,
   loadStoredSqlDumpScan,
 } from './sql-dump-scan';
 import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
@@ -358,9 +362,13 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
     throw new NotFoundError('Database not found');
   }
 
-  const datasetTemplates = await adminRepository.listDatasetTemplatesBySchemaTemplateId(id);
-  const datasetTemplateIds = datasetTemplates.map((datasetTemplate) => datasetTemplate.id);
-  const referenceSummary = await adminRepository.getDatabaseReferenceSummary(id, datasetTemplateIds);
+  const catalogAnchorId = schemaTemplate.catalogAnchorId;
+  const lineageSchemaIds = await adminRepository.listLineageSchemaTemplateIds(catalogAnchorId);
+  const allDatasetRows = await Promise.all(
+    lineageSchemaIds.map((sid) => adminRepository.listDatasetTemplatesBySchemaTemplateId(sid)),
+  );
+  const allDatasetTemplateIds = allDatasetRows.flat().map((row) => row.id);
+  const referenceSummary = await adminRepository.getDatabaseReferenceSummaryLineage(lineageSchemaIds);
 
   if (referenceSummary.challengeCount > 0) {
     throw new ConflictError(
@@ -368,7 +376,10 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
     );
   }
 
-  const sandboxes = await adminRepository.listSandboxInstancesForDatabase(id, datasetTemplateIds);
+  const sandboxes = await adminRepository.listSandboxInstancesForLineage(
+    lineageSchemaIds,
+    allDatasetTemplateIds,
+  );
   await Promise.all(
     sandboxes
       .filter((sandbox) => sandbox.status !== 'destroyed')
@@ -380,20 +391,17 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
       ),
   );
   if (sandboxes.length > 0) {
-    await adminRepository.clearSandboxTemplateRefsForDatabase(id, datasetTemplateIds);
+    await adminRepository.clearSandboxTemplateRefsForLineage(lineageSchemaIds, allDatasetTemplateIds);
   }
 
-  await adminRepository.deleteDatasetTemplatesBySchemaTemplateId(id);
-
-  const deletedSchemaTemplate = await adminRepository.deleteSchemaTemplateById(id);
-  if (!deletedSchemaTemplate) {
-    throw new NotFoundError('Database not found');
-  }
+  const deletedDatasetCount =
+    await adminRepository.deleteDatasetTemplatesForSchemaTemplateIds(lineageSchemaIds);
+  await adminRepository.deleteSchemaTemplatesByCatalogAnchor(catalogAnchorId);
 
   return {
-    id: deletedSchemaTemplate.id,
+    id: catalogAnchorId,
     name: schemaTemplate.name,
-    deletedDatasetTemplates: datasetTemplates.length,
+    deletedDatasetTemplates: deletedDatasetCount,
     reclaimedSandboxInstances: sandboxes.length,
   };
 }
@@ -603,6 +611,7 @@ async function persistCanonicalDatabaseImport(
       rowCounts: Record<string, number>;
       artifactUrl: string;
     }>;
+    replaceSchemaTemplateId?: string;
   },
 ): Promise<ImportCanonicalDatabaseResult> {
   const normalizedRowCounts = normalizeDatasetRowCounts(body.canonicalDataset.rowCounts);
@@ -612,100 +621,175 @@ async function persistCanonicalDatabaseImport(
     throw new ValidationError('canonicalDataset.rowCounts must contain at least one positive table count');
   }
 
+  let replaceHead: Awaited<ReturnType<typeof adminRepository.resolvePublishedCatalogHead>> = null;
+  if (options?.replaceSchemaTemplateId) {
+    replaceHead = await adminRepository.resolvePublishedCatalogHead(options.replaceSchemaTemplateId);
+    if (!replaceHead) {
+      throw new NotFoundError(
+        'Schema template to replace was not found, or it has no published catalog head.',
+      );
+    }
+    if (replaceHead.name.trim() !== body.name.trim()) {
+      throw new ValidationError(
+        `Schema name must match the database being replaced ("${replaceHead.name}")`,
+      );
+    }
+  }
+
   const latestSchema = await adminRepository.findLatestSchemaTemplateByName(body.name);
-  const schemaTemplate = await adminRepository.createSchemaTemplate({
-    name: body.name,
-    description: body.description,
-    version: (latestSchema?.version ?? 0) + 1,
-    dialect: body.dialect,
-    engineVersion: body.engineVersion ?? null,
-    definition: body.definition,
-    status: body.status,
-    createdBy: userId,
-  });
+  const nextVersion = replaceHead
+    ? replaceHead.version + 1
+    : (latestSchema?.version ?? 0) + 1;
 
+  const newSchemaId = randomUUID();
+  const catalogAnchorId = replaceHead ? replaceHead.catalogAnchorId : newSchemaId;
   const sourceScale = classifyDatasetScaleFromTotalRows(sourceTotalRows);
-  const sourceDatasetTemplate = await adminRepository.createDatasetTemplate({
-    schemaTemplateId: schemaTemplate.id,
-    name: body.canonicalDataset.name?.trim() || formatDatasetTemplateName(body.name, sourceScale),
-    size: sourceScale,
-    rowCounts: normalizedRowCounts,
-    artifactUrl: body.canonicalDataset.artifactUrl ?? null,
-    status: body.status,
-  });
-
   const materializedDerivedDatasetsBySize = new Map(
     (options?.materializedDerivedDatasets ?? []).map((dataset) => [dataset.size, dataset]),
   );
-  const derivedDatasetTemplates =
+  const derivedSpecs =
     body.generateDerivedDatasets === false
       ? []
-      : await Promise.all(
-          buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts).map((dataset) => {
-            const materializedDataset = materializedDerivedDatasetsBySize.get(dataset.size);
-            return adminRepository.createDatasetTemplate({
-              schemaTemplateId: schemaTemplate.id,
-              name: formatDatasetTemplateName(body.name, dataset.size),
-              size: dataset.size,
-              rowCounts: materializedDataset?.rowCounts ?? dataset.rowCounts,
-              artifactUrl: materializedDataset?.artifactUrl ?? null,
-              status: body.status,
-            });
-          }),
-        );
+      : buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts);
 
-  const now = new Date();
-  const importJob = await adminRepository.createSystemJob({
-    type: 'canonical-dataset-import',
-    status: 'completed',
-    payload: {
-      schemaName: body.name,
-      generateDerivedDatasets: body.generateDerivedDatasets !== false,
-      sourceScale,
-      sourceTotalRows,
-    },
-    result: {
-      schemaTemplateId: schemaTemplate.id,
-      sourceDatasetTemplateId: sourceDatasetTemplate.id,
-      derivedDatasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
-    },
-    attempts: 1,
-    maxAttempts: 1,
-    scheduledAt: now,
-    startedAt: now,
-    completedAt: now,
-  });
+  const txResult = await getDb().transaction(async (tx) => {
+    const now = new Date();
 
-  const datasetGenerationJob =
-    derivedDatasetTemplates.length === 0
-      ? null
-      : await adminRepository.createSystemJob({
+    const [schemaTemplate] = await tx
+      .insert(schema.schemaTemplates)
+      .values({
+        id: newSchemaId,
+        name: body.name,
+        description: body.description ?? null,
+        version: nextVersion,
+        catalogAnchorId,
+        replacedById: null,
+        dialect: body.dialect,
+        engineVersion: body.engineVersion ?? null,
+        definition: body.definition,
+        status: body.status,
+        createdBy: userId,
+      })
+      .returning();
+
+    if (!schemaTemplate) {
+      throw new ValidationError('Failed to create schema template');
+    }
+
+    if (replaceHead) {
+      await tx
+        .update(schema.schemaTemplates)
+        .set({ replacedById: newSchemaId, updatedAt: now })
+        .where(eq(schema.schemaTemplates.id, replaceHead.id));
+    }
+
+    const [sourceDatasetTemplate] = await tx
+      .insert(schema.datasetTemplates)
+      .values({
+        schemaTemplateId: newSchemaId,
+        name: body.canonicalDataset.name?.trim() || formatDatasetTemplateName(body.name, sourceScale),
+        size: sourceScale,
+        rowCounts: normalizedRowCounts,
+        artifactUrl: body.canonicalDataset.artifactUrl ?? null,
+        status: body.status,
+      })
+      .returning();
+
+    if (!sourceDatasetTemplate) {
+      throw new ValidationError('Failed to create source dataset template');
+    }
+
+    const derivedDatasetTemplates: NonNullable<typeof sourceDatasetTemplate>[] = [];
+    for (const dataset of derivedSpecs) {
+      const materializedDataset = materializedDerivedDatasetsBySize.get(dataset.size);
+      const [row] = await tx
+        .insert(schema.datasetTemplates)
+        .values({
+          schemaTemplateId: newSchemaId,
+          name: formatDatasetTemplateName(body.name, dataset.size),
+          size: dataset.size,
+          rowCounts: materializedDataset?.rowCounts ?? dataset.rowCounts,
+          artifactUrl: materializedDataset?.artifactUrl ?? null,
+          status: body.status,
+        })
+        .returning();
+      if (row) {
+        derivedDatasetTemplates.push(row);
+      }
+    }
+
+    const [importJob] = await tx
+      .insert(schema.systemJobs)
+      .values({
+        type: 'canonical-dataset-import',
+        status: 'completed',
+        payload: {
+          schemaName: body.name,
+          generateDerivedDatasets: body.generateDerivedDatasets !== false,
+          sourceScale,
+          sourceTotalRows,
+        },
+        result: {
+          schemaTemplateId: newSchemaId,
+          sourceDatasetTemplateId: sourceDatasetTemplate.id,
+          derivedDatasetTemplateIds: derivedDatasetTemplates.map((d) => d.id),
+        },
+        attempts: 1,
+        maxAttempts: 1,
+        scheduledAt: now,
+        startedAt: now,
+        completedAt: now,
+      })
+      .returning();
+
+    if (!importJob) {
+      throw new ValidationError('Failed to record import job');
+    }
+
+    let datasetGenerationJob: (typeof importJob) | null = null;
+    if (derivedDatasetTemplates.length > 0) {
+      const [job] = await tx
+        .insert(schema.systemJobs)
+        .values({
           type: 'dataset-template-generation',
           status: 'completed',
           payload: {
-            schemaTemplateId: schemaTemplate.id,
+            schemaTemplateId: newSchemaId,
             sourceDatasetTemplateId: sourceDatasetTemplate.id,
           },
           result: {
-            generatedSizes: derivedDatasetTemplates.map((dataset) => dataset.size),
-            datasetTemplateIds: derivedDatasetTemplates.map((dataset) => dataset.id),
+            generatedSizes: derivedDatasetTemplates.map((d) => d.size),
+            datasetTemplateIds: derivedDatasetTemplates.map((d) => d.id),
           },
           attempts: 1,
           maxAttempts: 1,
           scheduledAt: now,
           startedAt: now,
           completedAt: now,
-        });
+        })
+        .returning();
+      datasetGenerationJob = job ?? null;
+    }
 
-  return {
-    schemaTemplate,
-    sourceDatasetTemplate,
-    derivedDatasetTemplates,
-    sourceScale,
-    sourceTotalRows,
-    jobs: {
+    return {
+      schemaTemplate,
+      sourceDatasetTemplate,
+      derivedDatasetTemplates,
       importJob,
       datasetGenerationJob,
+    };
+  });
+
+  return {
+    schemaTemplate: txResult.schemaTemplate,
+    sourceDatasetTemplate: txResult.sourceDatasetTemplate,
+    derivedDatasetTemplates: txResult.derivedDatasetTemplates,
+    sourceScale,
+    sourceTotalRows,
+    databaseId: catalogAnchorId,
+    jobs: {
+      importJob: txResult.importJob,
+      datasetGenerationJob: txResult.datasetGenerationJob,
     },
   };
 }
@@ -720,6 +804,20 @@ export async function scanSqlDump(
   }
 
   return createStoredSqlDumpScan(buffer, fileName, options);
+}
+
+/** Multipart handler: scan from a temp file path (streams artifact to storage for large dumps). */
+export async function scanSqlDumpFromUploadedFile(
+  fileName: string,
+  filePath: string,
+  byteSize: number,
+  options?: { artifactOnly?: boolean },
+): Promise<SqlDumpScanResult> {
+  if (!/\.sql$/i.test(fileName)) {
+    throw new ValidationError('Only .sql dump files are supported');
+  }
+
+  return createStoredSqlDumpScanFromFile(filePath, byteSize, fileName, options);
 }
 
 export async function listPendingScans(query: ListPendingScansQuery) {
@@ -738,8 +836,11 @@ export async function importCanonicalDatabase(
   userId: string,
   body: ImportCanonicalDatabaseBody,
 ): Promise<ImportCanonicalDatabaseResult> {
+  const replaceSchemaTemplateId =
+    'replaceSchemaTemplateId' in body ? body.replaceSchemaTemplateId : undefined;
+
   if (!isSqlDumpScanImport(body)) {
-    return persistCanonicalDatabaseImport(userId, body);
+    return persistCanonicalDatabaseImport(userId, body, { replaceSchemaTemplateId });
   }
 
   const storedScan = await loadStoredSqlDumpScan(body.scanId);
@@ -814,28 +915,33 @@ export async function importCanonicalDatabase(
     });
   }
 
-  return persistCanonicalDatabaseImport(userId, {
-    name: body.schemaName,
-    description: body.description?.trim() || undefined,
-    definition: mergeDefinitionMetadata(storedScan.definition, {
-      reviewedDomain: body.domain,
-      reviewedScale: sourceScale,
-      reviewedDialect,
-      reviewedEngineVersion,
-      tags: body.tags ?? [],
-      scanId: storedScan.scanId,
-      sourceArtifactUrl: storedScan.artifactUrl,
-    }),
-    canonicalDataset: {
-      name: `${body.schemaName} Canonical`,
-      rowCounts: rowCountsForImport,
-      artifactUrl: storedScan.artifactUrl,
+  return persistCanonicalDatabaseImport(
+    userId,
+    {
+      name: body.schemaName,
+      description: body.description?.trim() || undefined,
+      definition: mergeDefinitionMetadata(storedScan.definition, {
+        reviewedDomain: body.domain,
+        reviewedScale: sourceScale,
+        reviewedDialect,
+        reviewedEngineVersion,
+        tags: body.tags ?? [],
+        scanId: storedScan.scanId,
+        sourceArtifactUrl: storedScan.artifactUrl,
+      }),
+      canonicalDataset: {
+        name: `${body.schemaName} Canonical`,
+        rowCounts: rowCountsForImport,
+        artifactUrl: storedScan.artifactUrl,
+      },
+      generateDerivedDatasets: allowDerivedMaterialization,
+      status: 'published',
+      dialect: reviewedDialect,
+      engineVersion: reviewedEngineVersion,
     },
-    generateDerivedDatasets: allowDerivedMaterialization,
-    status: 'published',
-    dialect: reviewedDialect,
-    engineVersion: reviewedEngineVersion,
-  }, {
-    materializedDerivedDatasets,
-  });
+    {
+      materializedDerivedDatasets,
+      replaceSchemaTemplateId,
+    },
+  );
 }
