@@ -18,6 +18,21 @@ export function formatRows(count: number): string {
   return count.toString();
 }
 
+/**
+ * Format optimizer estimated cost for display. PostgreSQL costs are often large;
+ * SQL Server subtree costs are often below 1, so `toFixed(1)` shows "0.0" incorrectly.
+ */
+export function formatPlannerEstimatedCost(cost: number): string {
+  if (!Number.isFinite(cost)) return '—';
+  const a = Math.abs(cost);
+  if (a === 0) return '0';
+  if (a < 1) {
+    const s = cost.toFixed(6);
+    return s.replace(/\.?0+$/, '') || '0';
+  }
+  return cost.toFixed(1);
+}
+
 export function formatMinutes(totalMinutes: number): string {
   if (totalMinutes < 60) {
     return `${totalMinutes} min`;

@@ -26,7 +26,15 @@ import {
   TableCell,
   TableEmpty,
 } from '@/components/ui/table';
-import { cn, formatDuration, formatRows, formatRelativeTime, getExplainPlanMode, truncateSql } from '@/lib/utils';
+import {
+  cn,
+  formatDuration,
+  formatPlannerEstimatedCost,
+  formatRows,
+  formatRelativeTime,
+  getExplainPlanMode,
+  truncateSql,
+} from '@/lib/utils';
 import {
   challengesApi,
   sandboxesApi,
@@ -1095,18 +1103,15 @@ function ComparePlanMetricsTable({ items }: { items: CompareSlot[] }) {
     {
       key: 'cost',
       label: 'Cost',
-      values: items.map((item) =>
-        item.execution.executionPlan?.totalCost != null
-          ? Math.round(item.execution.executionPlan.totalCost)
-          : null,
-      ),
-      display: items.map((item) =>
-        formatCompareMetric(
-          item.execution.executionPlan?.totalCost != null
-            ? Math.round(item.execution.executionPlan.totalCost)
-            : null,
-        ),
-      ),
+      values: items.map((item) => {
+        const c = item.execution.executionPlan?.totalCost;
+        return c != null && Number.isFinite(c) ? c : null;
+      }),
+      display: items.map((item) => {
+        const c = item.execution.executionPlan?.totalCost;
+        if (c == null || !Number.isFinite(c)) return '—';
+        return formatPlannerEstimatedCost(c);
+      }),
       preference: 'lower',
     },
   ];

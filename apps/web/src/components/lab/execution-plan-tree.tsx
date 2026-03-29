@@ -1,7 +1,7 @@
 import type { QueryExecutionPlan } from '@/lib/api';
 import { isSqlServerWrappedPlan, tryMssqlPlanToPgShapedRoot } from '@/lib/mssql-plan-adapter';
 import { tryMysqlJsonToPgRoot } from '@/lib/mysql-explain-adapter';
-import { cn, formatDuration, formatRows } from '@/lib/utils';
+import { cn, formatDuration, formatPlannerEstimatedCost, formatRows } from '@/lib/utils';
 
 type PgPlanNode = {
   'Node Type'?: string;
@@ -171,7 +171,7 @@ function getNodeHighlight(
   if (totalCost >= 1_000 && scannedRows >= 1_000) {
     return {
       label: 'Hot Path',
-      reason: `High estimated cost (${totalCost.toFixed(1)})`,
+      reason: `High estimated cost (${formatPlannerEstimatedCost(totalCost)})`,
       tone: 'warning',
     };
   }
@@ -308,7 +308,7 @@ function PlanNodeCard({
 
             <div className="flex flex-wrap gap-2">
               {totalCost != null && (
-                <MetricPill label="Cost" value={totalCost.toFixed(1)} />
+                <MetricPill label="Cost" value={formatPlannerEstimatedCost(totalCost)} />
               )}
               {scannedRows != null && (
                 <MetricPill
@@ -478,7 +478,7 @@ export function ExecutionPlanTree({
         <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
           <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>Estimated cost</p>
           <p className={cn('font-semibold text-on-surface font-mono', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
-            {rootTotalCost != null ? rootTotalCost.toFixed(1) : '—'}
+            {rootTotalCost != null ? formatPlannerEstimatedCost(rootTotalCost) : '—'}
           </p>
         </div>
         <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>

@@ -104,6 +104,7 @@ describe('ExecutionPlanTree', () => {
 
     expect(markup).toContain('Clustered Index Scan');
     expect(markup).toContain('authors');
+    expect(markup).toContain('0.003283');
     expect(markup).toContain('SQL Server operator time');
     expect(markup).not.toContain('"ShowPlanXML"');
   });

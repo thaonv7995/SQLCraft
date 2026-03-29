@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   cn,
   formatDuration,
+  formatPlannerEstimatedCost,
   formatRows,
   truncateSql,
   formatRelativeTime,
@@ -62,6 +63,29 @@ describe('formatRows()', () => {
   it('uses M suffix for millions', () => {
     expect(formatRows(1_000_000)).toBe('1.0M');
     expect(formatRows(2_500_000)).toBe('2.5M');
+  });
+});
+
+// ─── formatPlannerEstimatedCost() ─────────────────────────────────────────────
+
+describe('formatPlannerEstimatedCost()', () => {
+  it('keeps precision for SQL Server–scale costs below 1', () => {
+    expect(formatPlannerEstimatedCost(0.003315)).toBe('0.003315');
+    expect(formatPlannerEstimatedCost(0.0032831)).toBe('0.003283');
+  });
+
+  it('trims trailing zeros for small costs', () => {
+    expect(formatPlannerEstimatedCost(0.5)).toBe('0.5');
+    expect(formatPlannerEstimatedCost(0.125)).toBe('0.125');
+  });
+
+  it('uses one decimal for costs >= 1 (Postgres-style)', () => {
+    expect(formatPlannerEstimatedCost(180)).toBe('180.0');
+    expect(formatPlannerEstimatedCost(12.34)).toBe('12.3');
+  });
+
+  it('formats zero without decimals', () => {
+    expect(formatPlannerEstimatedCost(0)).toBe('0');
   });
 });
 
