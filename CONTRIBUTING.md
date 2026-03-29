@@ -147,5 +147,6 @@ Never edit existing migration files — always generate new ones.
 ## Need Help?
 
 - Check the `docs/` folder for architecture and design documentation.
+- Maintainer & support: [docs/authors.md](docs/authors.md) (LinkedIn, [Buy Me a Coffee](https://buymeacoffee.com/thaonv795)).
 - Open a [GitHub Discussion](https://github.com/sqlcraft/sqlcraft/discussions) for questions.
 - Open an [Issue](https://github.com/sqlcraft/sqlcraft/issues) for bugs.

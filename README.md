@@ -163,10 +163,15 @@ Installer env knobs: `USE_PREBUILT_IMAGES`, `SQLCRAFT_GHCR_OWNER`, `SQLCRAFT_VER
 └── turbo.json
 ```
 
+## Author & support
+
+**Thao Nguyen** — [LinkedIn](https://www.linkedin.com/in/thaonv795/) · [Buy Me a Coffee](https://buymeacoffee.com/thaonv795)
+
 ## Documentation
 
 | Doc | Purpose |
 |-----|---------|
+| [docs/authors.md](docs/authors.md) | Maintainer, social links, ways to support the project |
 | [docs/deployment-guide.md](docs/deployment-guide.md) | Production deploy, TLS, firewall, worker, GHCR |
 | [docs/examples/](docs/examples/) | Caddy / nginx samples |
 | [docs/PRD.md](docs/PRD.md) | Product requirements |

@@ -14,6 +14,7 @@ const TOC = [
   { href: '#screens', label: 'Screens' },
   { href: '#concepts', label: 'Concepts' },
   { href: '#shortcuts', label: 'Shortcuts' },
+  { href: '#author', label: 'Author & support' },
 ] as const;
 
 const APP_SECTIONS = [
@@ -239,6 +240,42 @@ export default function DocsPage() {
         <p className="mt-4 text-xs text-outline">
           A similar hint appears below the editor in Lab.
         </p>
+      </section>
+
+      <section id="author" className="scroll-mt-24 section-card card-padding">
+        <h2 className="page-section-title">Author & support</h2>
+        <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">
+          SQLCraft is maintained by <strong className="text-on-surface">Thao Nguyen</strong>. If the
+          project helps you learn or teach SQL, you can connect or show support via the links below.
+        </p>
+        <ul className="mt-4 flex flex-col gap-3 text-sm">
+          <li>
+            <a
+              href="https://www.linkedin.com/in/thaonv795/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 font-medium text-primary underline-offset-2 hover:underline"
+            >
+              <span className="material-symbols-outlined text-lg" aria-hidden>
+                work
+              </span>
+              LinkedIn — Thao Nguyen
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://buymeacoffee.com/thaonv795"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 font-medium text-primary underline-offset-2 hover:underline"
+            >
+              <span className="material-symbols-outlined text-lg" aria-hidden>
+                local_cafe
+              </span>
+              Buy Me a Coffee
+            </a>
+          </li>
+        </ul>
       </section>
 
       <div className="rounded-xl border border-dashed border-outline-variant/25 bg-surface-container-low/50 p-5 text-sm text-on-surface-variant">
