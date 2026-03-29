@@ -14,7 +14,6 @@ import { DatabaseImportPanel } from '@/components/admin/database-import-panel';
 import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DIALECT_OPTIONS,
-  DATABASE_DIFFICULTY_FILTER_OPTIONS,
   DATABASE_DOMAIN_LABELS,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
@@ -187,7 +186,6 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   const [catalogPage, setCatalogPage] = useState(1);
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');
-  const [difficulty, setDifficulty] = useState('all');
   const [dialect, setDialect] = useState('all');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -199,23 +197,14 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
 
   useEffect(() => {
     setCatalogPage(1);
-  }, [domain, scale, difficulty, dialect, debouncedQ]);
+  }, [domain, scale, dialect, debouncedQ]);
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: [
-      'admin-database-catalog',
-      domain,
-      scale,
-      difficulty,
-      dialect,
-      debouncedQ,
-      catalogPage,
-    ],
+    queryKey: ['admin-database-catalog', domain, scale, dialect, debouncedQ, catalogPage],
     queryFn: () =>
       databasesApi.list({
         domain: domain === 'all' ? undefined : domain,
         scale: scale === 'all' ? undefined : scale,
-        difficulty: difficulty === 'all' ? undefined : difficulty,
         dialect: dialect === 'all' ? undefined : dialect,
         q: debouncedQ || undefined,
         page: catalogPage,
@@ -323,11 +312,6 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
           <div className="flex flex-wrap items-center gap-2">
             <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
             <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
-            <FilterSelect
-              value={difficulty}
-              onChange={setDifficulty}
-              options={DATABASE_DIFFICULTY_FILTER_OPTIONS}
-            />
             <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
           </div>
         </div>

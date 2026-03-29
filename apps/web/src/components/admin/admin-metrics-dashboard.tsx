@@ -14,7 +14,6 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  TableSkeleton,
 } from '@/components/ui/table';
 import { formatRelativeTime } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -41,7 +40,7 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
     staleTime: 10_000,
   });
 
-  const { data: jobs, isLoading: jobsLoading } = useQuery({
+  const { data: jobs, isPending: jobsPending, isFetching: jobsFetching } = useQuery({
     queryKey: ['admin-jobs-dashboard'],
     queryFn: () => adminApi.systemJobs({ limit: 8 }),
     staleTime: 15_000,
@@ -150,10 +149,16 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.9fr_1fr]">
         <div className="overflow-hidden rounded-xl bg-surface-container-low">
-          <div className="px-5 py-4">
+          <div className="flex items-center justify-between gap-3 px-5 py-4">
             <h2 className="font-headline text-base font-semibold text-on-surface">
               Recent Worker Jobs
             </h2>
+            {jobsFetching && !jobsPending ? (
+              <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-on-surface-variant flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-on-surface-variant animate-pulse" />
+                Refreshing
+              </span>
+            ) : null}
           </div>
           <Table>
             <TableHeader>
@@ -165,8 +170,14 @@ export function AdminMetricsDashboard({ variant }: AdminMetricsDashboardProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobsLoading ? (
-                <TableSkeleton rows={4} cols={4} />
+              {jobsPending ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="py-9 text-center">
+                    <p className="text-xs text-on-surface-variant">
+                      Loading recent jobs…
+                    </p>
+                  </TableCell>
+                </TableRow>
               ) : displayJobs.length === 0 ? (
                 <TableEmpty message="No recent jobs" colSpan={4} />
               ) : (

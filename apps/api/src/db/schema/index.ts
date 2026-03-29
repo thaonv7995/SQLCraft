@@ -339,20 +339,26 @@ export const auditLogs = pgTable('audit_logs', {
   createdAt: timestamp('created_at').notNull().default(sql`now()`),
 });
 
-export const systemJobs = pgTable('system_jobs', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  type: varchar('type', { length: 100 }).notNull(),
-  status: jobStatusEnum('status').notNull().default('pending'),
-  payload: jsonb('payload'),
-  result: jsonb('result'),
-  errorMessage: text('error_message'),
-  attempts: integer('attempts').notNull().default(0),
-  maxAttempts: integer('max_attempts').notNull().default(3),
-  scheduledAt: timestamp('scheduled_at').notNull().default(sql`now()`),
-  startedAt: timestamp('started_at'),
-  completedAt: timestamp('completed_at'),
-  createdAt: timestamp('created_at').notNull().default(sql`now()`),
-});
+export const systemJobs = pgTable(
+  'system_jobs',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    type: varchar('type', { length: 100 }).notNull(),
+    status: jobStatusEnum('status').notNull().default('pending'),
+    payload: jsonb('payload'),
+    result: jsonb('result'),
+    errorMessage: text('error_message'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(3),
+    scheduledAt: timestamp('scheduled_at').notNull().default(sql`now()`),
+    startedAt: timestamp('started_at'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    createdAtIdx: index('system_jobs_created_at_idx').on(table.createdAt),
+  }),
+);
 
 export const adminConfigs = pgTable(
   'admin_configs',

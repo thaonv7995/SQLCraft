@@ -63,13 +63,6 @@ export const DATABASE_DIALECT_OPTIONS = [
   { value: 'sqlite', label: 'SQLite' },
 ];
 
-export const DATABASE_DIFFICULTY_FILTER_OPTIONS = [
-  { value: 'all', label: 'Any difficulty' },
-  { value: 'beginner', label: 'Novice' },
-  { value: 'intermediate', label: 'Intermediate' },
-  { value: 'advanced', label: 'Advanced' },
-];
-
 export const DATABASE_DIFFICULTY_STYLES: Record<
   string,
   { badge: string; label: string; accent: string }

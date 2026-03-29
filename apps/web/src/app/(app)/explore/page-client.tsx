@@ -9,7 +9,6 @@ import type { Database } from '@/lib/api';
 import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DIALECT_OPTIONS,
-  DATABASE_DIFFICULTY_FILTER_OPTIONS,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
   databaseScaleDisplayLabelFromRowCount,
@@ -149,7 +148,6 @@ export default function ExplorePage(_props: ClientPageProps) {
   const router = useRouter();
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');
-  const [difficulty, setDifficulty] = useState('all');
   const [dialect, setDialect] = useState('all');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
@@ -162,7 +160,7 @@ export default function ExplorePage(_props: ClientPageProps) {
 
   useEffect(() => {
     setCatalogPage(1);
-  }, [domain, scale, difficulty, dialect, debouncedQ]);
+  }, [domain, scale, dialect, debouncedQ]);
 
   const {
     data: apiData,
@@ -171,12 +169,11 @@ export default function ExplorePage(_props: ClientPageProps) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['databases', domain, scale, difficulty, dialect, debouncedQ, catalogPage],
+    queryKey: ['databases', domain, scale, dialect, debouncedQ, catalogPage],
     queryFn: () =>
       databasesApi.list({
         domain: domain === 'all' ? undefined : domain,
         scale: scale === 'all' ? undefined : scale,
-        difficulty: difficulty === 'all' ? undefined : difficulty,
         dialect: dialect === 'all' ? undefined : dialect,
         q: debouncedQ || undefined,
         page: catalogPage,
@@ -201,32 +198,30 @@ export default function ExplorePage(_props: ClientPageProps) {
         </p>
       </div>
 
-      {/* Filters row */}
-      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <h2 className="font-headline flex items-center gap-2 text-xl font-medium">
-          <span className="w-1.5 h-6 bg-tertiary rounded-full shrink-0" />
-          Available Databases
-          <span className="text-sm font-normal text-outline ml-1">({totalMatching})</span>
+      {/* Toolbar: one band — title | search + filters (wrap on small screens) */}
+      <div className="mb-6 flex flex-col gap-3 lg:mb-8 lg:flex-row lg:items-end lg:justify-between lg:gap-4">
+        <h2 className="font-headline flex shrink-0 items-center gap-1.5 text-sm font-semibold tracking-tight text-on-surface">
+          <span className="h-3 w-0.5 shrink-0 rounded-full bg-tertiary" aria-hidden />
+          <span className="whitespace-nowrap">
+            Available databases{' '}
+            <span className="font-normal tabular-nums text-on-surface-variant">
+              ({totalMatching})
+            </span>
+          </span>
         </h2>
-
-        <div className="flex w-full max-w-3xl flex-col gap-3 sm:max-w-none sm:items-end">
-          <Input
-            label="Search"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Name, engine, tags…"
-            className="min-w-[12rem] sm:w-64"
-          />
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
-            <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
-            <FilterSelect
-              value={difficulty}
-              onChange={setDifficulty}
-              options={DATABASE_DIFFICULTY_FILTER_OPTIONS}
+        <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2 lg:justify-end">
+          <div className="w-full min-w-[11rem] sm:max-w-sm lg:w-56 lg:max-w-none lg:shrink-0">
+            <Input
+              label="Search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Name, engine, tags…"
+              className="w-full min-w-0"
             />
-            <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
           </div>
+          <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
+          <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
+          <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
         </div>
       </div>
 

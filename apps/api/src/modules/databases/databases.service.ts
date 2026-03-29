@@ -1,6 +1,6 @@
 import type { SchemaSqlDialect } from '@sqlcraft/types';
 import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
 import { NotFoundError, ValidationError } from '../../lib/errors';
@@ -291,7 +291,10 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
       .select()
       .from(dbSchema.schemaTemplates)
       .where(eq(dbSchema.schemaTemplates.status, 'published'))
-      .orderBy(asc(dbSchema.schemaTemplates.name)),
+      .orderBy(
+        desc(dbSchema.schemaTemplates.createdAt),
+        desc(dbSchema.schemaTemplates.name),
+      ),
     db
       .select()
       .from(dbSchema.datasetTemplates)
