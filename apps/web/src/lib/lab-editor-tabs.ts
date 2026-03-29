@@ -12,8 +12,9 @@ export interface PersistedLabEditorState {
 
 const LAB_EDITOR_TABS_PREFIX = 'sqlcraft-lab-editor:';
 
+/** Dialect-neutral probe: valid on PostgreSQL, MySQL/MariaDB, SQL Server (no LIMIT/TOP, no real table). */
 export const DEFAULT_LAB_QUERY =
-  '-- Welcome to SQLCraft!\n-- Start writing your SQL query here...\n\nSELECT * FROM employees LIMIT 10;';
+  '-- Welcome to SQLCraft!\n-- Write your SQL below. This line is a harmless probe on any supported engine.\n\nSELECT 1 AS ok;';
 
 function getStorageKey(sessionId: string): string {
   return `${LAB_EDITOR_TABS_PREFIX}${sessionId}`;
@@ -51,10 +52,12 @@ export function createLabEditorTab(params?: Partial<Pick<LabEditorTab, 'name' | 
   };
 }
 
-export function createDefaultLabEditorState(initialSql: string = DEFAULT_LAB_QUERY): PersistedLabEditorState {
+export function createDefaultLabEditorState(initialSql?: string | null): PersistedLabEditorState {
+  const sql =
+    typeof initialSql === 'string' && initialSql.trim().length > 0 ? initialSql : DEFAULT_LAB_QUERY;
   const tab = createLabEditorTab({
     name: 'query.sql',
-    sql: initialSql,
+    sql,
   });
 
   return {
