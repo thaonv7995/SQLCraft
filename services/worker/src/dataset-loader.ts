@@ -1,19 +1,16 @@
 import { gunzipSync } from 'node:zlib';
-import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { Readable } from 'node:stream';
 import pino from 'pino';
 import type { DatasetTemplateDefinition, SchemaDefinition } from './db';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
 import {
-  createMcCatObjectReadStream,
   readS3ObjectViaMinioContainer,
   runMysqlInSandboxContainer,
   runPgRestoreInSandboxContainer,
   runPsqlInSandboxContainer,
-  runPsqlInSandboxContainerStreaming,
   runSqlcmdInSandboxContainer,
 } from './docker';
+import { sanitizePostgresDumpForPsql } from './postgres-dump-sanitize';
 import { sanitizeSqlServerDumpPayload } from './sqlserver-dump-sanitize';
 
 function quoteMysqlIdentifier(name: string): string {
@@ -504,25 +501,6 @@ async function readArtifactBytes(artifactRef: string): Promise<Buffer> {
   return readFile(artifactRef);
 }
 
-async function createArtifactReadStream(artifactRef: string): Promise<Readable> {
-  if (/^s3:\/\//i.test(artifactRef)) {
-    return createMcCatObjectReadStream(artifactRef);
-  }
-
-  if (/^https?:\/\//i.test(artifactRef)) {
-    const response = await fetch(artifactRef);
-    if (!response.ok) {
-      throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
-    }
-    if (!response.body) {
-      throw new Error(`No response body for artifact: ${artifactRef}`);
-    }
-    return Readable.fromWeb(response.body as import('node:stream/web').ReadableStream);
-  }
-
-  return createReadStream(artifactRef);
-}
-
 function getArtifactExtension(pathLike: string): string {
   const normalized = pathLike.split('?')[0].toLowerCase();
   if (normalized.endsWith('.sql.gz')) return '.sql.gz';
@@ -593,7 +571,12 @@ async function restoreFromArtifact(params: {
 
   if (inlineSql) {
     if (engine === 'postgresql') {
-      await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: inlineSql });
+      await runPsqlInSandboxContainer({
+        containerRef,
+        dbUser,
+        dbName,
+        sql: sanitizePostgresDumpForPsql(dbName, inlineSql),
+      });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
         engine: mysqlFamilyEngine,
@@ -623,33 +606,19 @@ async function restoreFromArtifact(params: {
     return false;
   }
 
-  const isS3 = /^s3:\/\//i.test(artifactRef);
-  const canStream = isS3 || /^https?:\/\//i.test(artifactRef) || !artifactRef.startsWith('{');
-  const gzip = extension === '.sql.gz';
-
-  if (canStream && (extension === '.sql' || extension === '.sql.gz')) {
-    if (engine === 'postgresql') {
-      const source = await createArtifactReadStream(artifactRef);
-      await runPsqlInSandboxContainerStreaming({ containerRef, dbUser, dbName, source, gzip });
-      logger.info({ artifactRef, extension, engine }, 'Dataset restored (streaming)');
-      return true;
-    }
-
-    // MySQL/MariaDB: do not stream raw S3 bytes into `mysql`. The buffer path applies
-    // `prepareMysqlRestoreSqlForTargetDatabase` (strip USE, rewrite db-qualified names).
-    // Streaming skipped that rewrite — typical mysqldumps then error and exit early → EPIPE
-    // on stdin while mc cat still streams (see sandbox MySQL empty DB after "ready").
-
-    // SQL Server: do not stream raw S3 bytes into `sqlcmd`. The buffer path runs
-    // {@link sanitizeSqlServerDumpPayload} (strip USE, bracket reserved names, InstPubs helpers).
-    // Streaming skipped that — dumps often fail with exit 1 and little/no stderr.
-  }
+  // Load full artifact bytes (S3/HTTP/local). We do not stream `.sql` / `.sql.gz` into engines:
+  // PostgreSQL needs {@link sanitizePostgresDumpForPsql}; MySQL/SQL Server need their sanitizers too.
 
   const bytes = await readArtifactBytes(artifactRef);
 
   if (extension === '.sql') {
     if (engine === 'postgresql') {
-      await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: bytes });
+      await runPsqlInSandboxContainer({
+        containerRef,
+        dbUser,
+        dbName,
+        sql: sanitizePostgresDumpForPsql(dbName, bytes),
+      });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
         engine: mysqlFamilyEngine,
@@ -671,7 +640,12 @@ async function restoreFromArtifact(params: {
   if (extension === '.sql.gz') {
     const sqlBuf = gunzipSync(bytes);
     if (engine === 'postgresql') {
-      await runPsqlInSandboxContainer({ containerRef, dbUser, dbName, sql: sqlBuf });
+      await runPsqlInSandboxContainer({
+        containerRef,
+        dbUser,
+        dbName,
+        sql: sanitizePostgresDumpForPsql(dbName, sqlBuf),
+      });
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
         engine: mysqlFamilyEngine,
