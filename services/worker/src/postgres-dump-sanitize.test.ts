@@ -51,6 +51,41 @@ SELECT 1;
     assert.ok(out.includes('\\copy'));
   });
 
+  it('removes MySQL-only SET session lines (mysqldump / derived tiny.sql fed to psql)', () => {
+    const sql = `SET FOREIGN_KEY_CHECKS=0;
+SET UNIQUE_CHECKS=0;
+SET NAMES utf8mb4;
+SET @OLD_SQL_MODE=@@SQL_MODE;
+INSERT INTO t VALUES (1);
+SET FOREIGN_KEY_CHECKS=1;
+`;
+    const out = sanitizePostgresDumpForPsql('s_abc', sql).toString('utf8');
+    assert.ok(!out.includes('FOREIGN_KEY_CHECKS'));
+    assert.ok(!out.includes('UNIQUE_CHECKS'));
+    assert.ok(!out.includes('NAMES utf8mb4'));
+    assert.ok(!out.includes('@OLD_SQL_MODE'));
+    assert.ok(out.includes('INSERT INTO t'));
+  });
+
+  it('removes USE db lines from MySQL dumps', () => {
+    const sql = `USE \`banking\`;
+SELECT 1;
+`;
+    const out = sanitizePostgresDumpForPsql('s_abc', sql).toString('utf8');
+    assert.ok(!/^USE\s/im.test(out));
+    assert.ok(out.includes('SELECT 1'));
+  });
+
+  it('keeps PostgreSQL SET statements', () => {
+    const sql = `SET client_encoding = 'UTF8';
+SET search_path = public;
+SELECT 1;
+`;
+    const out = sanitizePostgresDumpForPsql('s_abc', sql).toString('utf8');
+    assert.ok(out.includes('client_encoding'));
+    assert.ok(out.includes('search_path'));
+  });
+
   it('rewrites 0/1 to false/true for BOOLEAN columns when schema is provided', () => {
     const sql = `INSERT INTO doctors (id, dept, license, rating, fee, is_active, created_at) VALUES (1, 'Cardiology', 'LIC00000001', 4, 265.28, 1, '2026-01-01');`;
     const out = sanitizePostgresDumpForPsql('s_abc', sql, sampleSchema).toString('utf8');
@@ -113,6 +148,13 @@ describe('createPostgresSanitizeTransform (streaming equivalence)', () => {
 
   it('matches buffer output preserving \\copy', async () => {
     const sql = `\\copy t FROM stdin\n1\n\\.\n`;
+    const bufferOut = sanitizePostgresDumpForPsql('s_abc', sql).toString('utf8');
+    const streamOut = await collectStreamOutput(sql);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer output for MySQL-only session lines', async () => {
+    const sql = `SET FOREIGN_KEY_CHECKS=0;\nINSERT INTO t VALUES (1);\nUSE banking;\n`;
     const bufferOut = sanitizePostgresDumpForPsql('s_abc', sql).toString('utf8');
     const streamOut = await collectStreamOutput(sql);
     assert.strictEqual(normalize(streamOut), normalize(bufferOut));

@@ -29,6 +29,7 @@ import {
   tryMarkQueryExecutionCancelled,
   updateQueryExecutionBackendPid,
   updateDatasetGoldenBakeFailed,
+  updateDatasetGoldenBakeFailedIfPending,
   fetchDatasetTemplateIdsPendingGoldenBake,
 } from './db';
 import { normalizeSchemaSqlEngine, type SchemaSqlEngine } from '@sqlcraft/types';
@@ -303,14 +304,108 @@ async function applySchemaAndDataset(params: {
 
 // ─── Worker: provision_sandbox ────────────────────────────────────────────────
 
-// Raised from 10 min → 30 min to prevent BullMQ from marking large-dump restore jobs as stalled.
-const LONG_JOB_LOCK_DURATION_MS = 30 * 60 * 1000;
-const LONG_JOB_STALLED_INTERVAL_MS = 15 * 60 * 1000;
+// BullMQ stalls a job when the Redis lock expires before renewal (e.g. very long Docker restore).
+// Defaults are generous so large MariaDB/MySQL dumps do not hit "job stalled more than allowable limit"
+// (see moveStalledJobsToWait: stc > maxStalledCount). Tune via env on slow hosts.
+const LONG_JOB_LOCK_DURATION_MS = Math.max(
+  60_000,
+  Number(process.env.LONG_JOB_LOCK_DURATION_MS) || 120 * 60 * 1000,
+);
+const LONG_JOB_STALLED_INTERVAL_MS = Math.max(
+  30_000,
+  Number(process.env.LONG_JOB_STALLED_INTERVAL_MS) || 15 * 60 * 1000,
+);
+const LONG_JOB_MAX_STALLED_COUNT = (() => {
+  const raw = process.env.WORKER_LONG_JOB_MAX_STALLED_COUNT?.trim();
+  if (!raw) return 5;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 5;
+})();
 const longJobOpts = {
   ...queueOptions,
   lockDuration: LONG_JOB_LOCK_DURATION_MS,
   stalledInterval: LONG_JOB_STALLED_INTERVAL_MS,
+  maxStalledCount: LONG_JOB_MAX_STALLED_COUNT,
 };
+
+/**
+ * BullMQ can fail jobs (stalled, UnrecoverableError) while the processor promise is still running.
+ * The handler's catch/finally may not run in time; golden-bake also skips catch if the job is failed externally.
+ * These listeners align Docker + DB with the failed job.
+ */
+function attachSandboxProvisioningFailedCleanup(worker: Worker): void {
+  worker.on('failed', async (job, err) => {
+    if (!job?.data) {
+      logger.warn({ err }, 'provision_sandbox failed with no job payload; cannot cleanup');
+      return;
+    }
+    const { sandboxInstanceId, learningSessionId } = job.data as {
+      sandboxInstanceId?: string;
+      learningSessionId?: string;
+    };
+    if (!sandboxInstanceId) return;
+    const containerRef = sandboxContainerName(sandboxInstanceId);
+    logger.warn(
+      { sandboxInstanceId, learningSessionId, jobId: job.id, err },
+      'provision_sandbox BullMQ failed; forcing container removal and session/sandbox failed state',
+    );
+    await ensureSandboxContainerRemoved(containerRef).catch((cleanupErr) =>
+      logger.warn({ cleanupErr, containerRef }, 'provision_sandbox failed-handler container removal'),
+    );
+    await updateSandboxStatus(sandboxInstanceId, 'failed').catch((e) =>
+      logger.warn({ e, sandboxInstanceId }, 'provision_sandbox failed-handler updateSandboxStatus'),
+    );
+    if (learningSessionId) {
+      await updateSessionStatus(learningSessionId, 'failed').catch((e) =>
+        logger.warn({ e, learningSessionId }, 'provision_sandbox failed-handler updateSessionStatus'),
+      );
+    }
+  });
+}
+
+function attachSandboxResetFailedCleanup(worker: Worker): void {
+  worker.on('failed', async (job, err) => {
+    if (!job?.data) {
+      logger.warn({ err }, 'reset_sandbox failed with no job payload');
+      return;
+    }
+    const { sandboxInstanceId } = job.data as { sandboxInstanceId?: string };
+    if (!sandboxInstanceId) return;
+    const containerRef = sandboxContainerName(sandboxInstanceId);
+    logger.warn(
+      { sandboxInstanceId, jobId: job.id, err },
+      'reset_sandbox BullMQ failed; forcing container removal and sandbox failed state',
+    );
+    await ensureSandboxContainerRemoved(containerRef).catch((cleanupErr) =>
+      logger.warn({ cleanupErr, containerRef }, 'reset_sandbox failed-handler container removal'),
+    );
+    await updateSandboxStatus(sandboxInstanceId, 'failed').catch((e) =>
+      logger.warn({ e, sandboxInstanceId }, 'reset_sandbox failed-handler updateSandboxStatus'),
+    );
+  });
+}
+
+function attachGoldenBakeFailedCleanup(worker: Worker): void {
+  worker.on('failed', async (job, err) => {
+    if (!job?.data) {
+      logger.warn({ err }, 'dataset_golden_bake failed with no job payload');
+      return;
+    }
+    const { datasetTemplateId } = job.data as { datasetTemplateId?: string };
+    if (!datasetTemplateId) return;
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      { datasetTemplateId, jobId: job.id, err },
+      'dataset_golden_bake BullMQ failed; marking sandbox_golden_status failed if still pending',
+    );
+    await updateDatasetGoldenBakeFailedIfPending(
+      datasetTemplateId,
+      `Golden bake job failed: ${message}`,
+    ).catch((e) =>
+      logger.warn({ e, datasetTemplateId }, 'golden-bake failed-handler updateDatasetGoldenBakeFailedIfPending'),
+    );
+  });
+}
 
 const sandboxProvisioningWorker = sandboxQueuesEnabled
   ? new Worker(
@@ -585,6 +680,16 @@ const datasetGoldenBakeWorker = sandboxQueuesEnabled
       longJobOpts,
     )
   : null;
+
+if (sandboxProvisioningWorker) {
+  attachSandboxProvisioningFailedCleanup(sandboxProvisioningWorker);
+}
+if (sandboxResetWorker) {
+  attachSandboxResetFailedCleanup(sandboxResetWorker);
+}
+if (datasetGoldenBakeWorker) {
+  attachGoldenBakeFailedCleanup(datasetGoldenBakeWorker);
+}
 
 // ─── Worker: execute_query / cancel_query ─────────────────────────────────────
 

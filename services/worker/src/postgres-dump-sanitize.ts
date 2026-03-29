@@ -24,6 +24,30 @@ function shouldDropPsqlConnectLine(line: string): boolean {
   return false;
 }
 
+/** Strip mysqldump versioned comment prefix (e.g. 40101) for line classification only. */
+function stripMysqlVersionedCommentPrefix(line: string): string {
+  return line.replace(/^\s*\/\*![0-9]+\s*/, '').replace(/\s*\*\/\s*$/, '').trimStart();
+}
+
+/**
+ * mysqldump / MySQL-derived SQL fed into `psql` breaks on session vars PostgreSQL does not have
+ * (e.g. `foreign_key_checks`, `SET NAMES`, `SET @x`). Drop those lines; keep normal PostgreSQL `SET`.
+ */
+export function shouldDropMysqlIncompatibleSqlLine(line: string): boolean {
+  const t = stripMysqlVersionedCommentPrefix(line);
+  if (!t.length) return false;
+  if (/^USE\s+/i.test(t)) return true;
+  if (!/^SET\s+/i.test(t)) return false;
+  if (/\bFOREIGN_KEY_CHECKS\b/i.test(t)) return true;
+  if (/\bUNIQUE_CHECKS\b/i.test(t)) return true;
+  if (/\bSQL_LOG_BIN\b/i.test(t)) return true;
+  if (/\bSQL_MODE\b/i.test(t)) return true;
+  if (/^SET\s+NAMES\b/i.test(t)) return true;
+  if (/\bCHARACTER_SET_(CLIENT|RESULTS|CONNECTION)\b/i.test(t)) return true;
+  if (/^SET\s+@/i.test(t)) return true;
+  return false;
+}
+
 function normalizeTableIdent(name: string): string {
   let s = name.trim().replace(/^"/, '').replace(/"$/, '');
   const dot = s.lastIndexOf('.');
@@ -258,6 +282,7 @@ export function sanitizePostgresDumpForPsql(
   const kept: string[] = [];
   for (const line of lines) {
     if (shouldDropPsqlConnectLine(line)) continue;
+    if (shouldDropMysqlIncompatibleSqlLine(line)) continue;
     kept.push(line);
   }
   let joined = kept.join('\n');
@@ -286,6 +311,7 @@ export function createPostgresSanitizeTransform(
 
   function processLine(line: string): string | null {
     if (shouldDropPsqlConnectLine(line)) return null;
+    if (shouldDropMysqlIncompatibleSqlLine(line)) return null;
     return line;
   }
 

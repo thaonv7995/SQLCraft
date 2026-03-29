@@ -152,6 +152,20 @@ export async function updateDatasetGoldenBakeFailed(
   );
 }
 
+/** When BullMQ fails the job (e.g. stalled) without the processor throwing, only update if still pending. */
+export async function updateDatasetGoldenBakeFailedIfPending(
+  datasetTemplateId: string,
+  errorMessage: string,
+): Promise<void> {
+  await mainDb.query(
+    `UPDATE dataset_templates
+     SET sandbox_golden_status = 'failed',
+         sandbox_golden_error = $2
+     WHERE id = $1 AND sandbox_golden_status = 'pending'`,
+    [datasetTemplateId, errorMessage],
+  );
+}
+
 /** Published datasets with pending golden and a non-empty artifact — eligible for enqueue (worker scan). */
 export async function fetchDatasetTemplateIdsPendingGoldenBake(): Promise<string[]> {
   const result = await mainDb.query<{ id: string }>(
