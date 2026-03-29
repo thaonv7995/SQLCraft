@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { __private__ } from './dataset-loader';
 
 test('seeds non-serial fixed-width primary keys', () => {

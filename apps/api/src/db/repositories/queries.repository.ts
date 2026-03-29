@@ -123,7 +123,20 @@ export class QueriesRepository {
     userId: string,
     page: number,
     limit: number,
-  ): Promise<Pick<QueryExecutionRow, 'id' | 'learningSessionId' | 'sqlText' | 'status' | 'durationMs' | 'rowsReturned' | 'errorMessage' | 'submittedAt'>[]> {
+  ): Promise<
+    Pick<
+      QueryExecutionRow,
+      | 'id'
+      | 'learningSessionId'
+      | 'sqlText'
+      | 'status'
+      | 'durationMs'
+      | 'rowsReturned'
+      | 'errorMessage'
+      | 'submittedAt'
+      | 'schemaDiffSnapshot'
+    >[]
+  > {
     const offset = (page - 1) * limit;
     return this.db
       .select({
@@ -135,6 +148,7 @@ export class QueriesRepository {
         rowsReturned: schema.queryExecutions.rowsReturned,
         errorMessage: schema.queryExecutions.errorMessage,
         submittedAt: schema.queryExecutions.submittedAt,
+        schemaDiffSnapshot: schema.queryExecutions.schemaDiffSnapshot,
       })
       .from(schema.queryExecutions)
       .where(eq(schema.queryExecutions.userId, userId))

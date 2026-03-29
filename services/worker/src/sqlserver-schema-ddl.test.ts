@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { buildCreateTableDdlSqlServer } from './sqlserver-schema-ddl';
 
 test('buildCreateTableDdlSqlServer emits IF NOT EXISTS and dbo bracketed names', () => {
@@ -10,6 +10,11 @@ test('buildCreateTableDdlSqlServer emits IF NOT EXISTS and dbo bracketed names',
         { name: 'id', type: 'int IDENTITY(1,1) NOT NULL PRIMARY KEY' },
         { name: 'name', type: 'nvarchar(255) NOT NULL' },
       ],
+    },
+    // Second table so batches are joined with `\nGO\n` (single-table output has no GO).
+    {
+      name: 'Order',
+      columns: [{ name: 'id', type: 'int NOT NULL PRIMARY KEY' }],
     },
   ]);
 

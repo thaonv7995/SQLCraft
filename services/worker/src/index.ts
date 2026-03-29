@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { Worker, Queue, type Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { Pool } from 'pg';
 import pino from 'pino';
 import {
   buildPostgresSandboxConnectionString,
@@ -29,8 +28,9 @@ import {
   fetchQueryExecutionForCancel,
   tryMarkQueryExecutionCancelled,
   updateQueryExecutionBackendPid,
+  updateDatasetGoldenBakeFailed,
+  fetchDatasetTemplateIdsPendingGoldenBake,
 } from './db';
-import { loadDatasetIntoSandbox } from './dataset-loader';
 import { normalizeSchemaSqlEngine, type SchemaSqlEngine } from '@sqlcraft/types';
 import {
   executeSqlOnTarget,
@@ -50,11 +50,13 @@ import {
   sandboxContainerName,
   waitForSandboxEngine,
   initSqlServerDatabase,
-  runSqlcmdInSandboxContainer,
   statS3ObjectSizeViaMinioContainer,
 } from './docker';
-import { buildCreateTableDdlSqlServer } from './sqlserver-schema-ddl';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
+import { sandboxDbNameFromInstanceId } from './sandbox-naming';
+import { applySchemaAndDatasetToContainer } from './sandbox-apply-dataset';
+import { waitForSandboxDbReady } from './sandbox-wait-ready';
+import { runDatasetGoldenBake } from './dataset-golden-bake';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -104,6 +106,11 @@ const mssqlSaPassword = (() => {
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 // Expiry scanner interval: 5 minutes
 const EXPIRY_SCAN_INTERVAL_MS = 5 * 60 * 1000;
+// Re-enqueue pending golden-bake jobs (idempotent jobIds); default 5 minutes
+const GOLDEN_BAKE_SCAN_INTERVAL_MS = Math.max(
+  30_000,
+  Number(process.env.GOLDEN_BAKE_SCAN_INTERVAL_MS) || 5 * 60 * 1000,
+);
 // Total timeout for dataset restore (schema + data load); 0 = no limit.
 // Default raised from 10 min → 30 min to handle multi-GB dumps without premature timeout.
 const DATASET_RESTORE_TIMEOUT_MS = Math.max(
@@ -154,6 +161,7 @@ const QUEUES = {
   SANDBOX_CLEANUP: 'sandbox-cleanup',
   SANDBOX_RESET: 'sandbox-reset',
   QUERY_EXECUTION: 'query-execution',
+  DATASET_SANDBOX_GOLDEN_BAKE: 'dataset-sandbox-golden-bake',
 } as const;
 
 // Queue client used by the expiry scanner to enqueue cleanup jobs
@@ -162,13 +170,11 @@ const conn = connection as unknown as BullConnection;
 const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : { connection: conn };
 const cleanupQueue = new Queue(QUEUES.SANDBOX_CLEANUP, queueOptions);
 const queryExecutionQueueClient = new Queue(QUEUES.QUERY_EXECUTION, queueOptions);
+const goldenBakeQueue = new Queue(QUEUES.DATASET_SANDBOX_GOLDEN_BAKE, queueOptions);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Generate a safe PostgreSQL database name from the sandbox UUID */
-function sandboxDbName(sandboxId: string): string {
-  return `s_${sandboxId.replace(/-/g, '').slice(0, 16)}`;
-}
+const sandboxDbName = sandboxDbNameFromInstanceId;
 
 /** Build a connection string pointing to a specific sandbox database (PostgreSQL only). */
 function sandboxConnStr(host: string, dbName: string, port = 5432): string {
@@ -177,89 +183,11 @@ function sandboxConnStr(host: string, dbName: string, port = 5432): string {
   return `postgresql://${u}:${p}@${host}:${port}/${dbName}`;
 }
 
-function sandboxTargetForProbe(params: {
-  engine: SchemaSqlEngine;
-  containerRef: string;
-  dbName: string;
-  internalPort: number;
-}): SandboxDbTarget {
-  const { engine, containerRef, dbName, internalPort } = params;
-  return {
-    engine,
-    host: containerRef,
-    port: internalPort,
-    user: engine === 'sqlserver' ? 'sa' : sandboxUser,
-    password: engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
-    database: dbName,
-  };
-}
-
-async function waitForSandboxDbReady(params: {
-  engine: SchemaSqlEngine;
-  containerRef: string;
-  dbName: string;
-  internalPort: number;
-  timeoutMs?: number;
-}): Promise<void> {
-  const target = sandboxTargetForProbe(params);
-  const startedAt = Date.now();
-  const timeoutMs = params.timeoutMs ?? 45_000;
-  let lastError: unknown;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      await probeSandboxConnection(target, Math.min(5_000, timeoutMs - (Date.now() - startedAt)));
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-  }
-
-  const reason =
-    lastError && typeof lastError === 'object' && 'message' in lastError
-      ? String((lastError as { message?: unknown }).message ?? '')
-      : 'timeout';
-  throw new Error(`Sandbox ${params.containerRef} DB readiness check timed out: ${reason}`);
-}
-
-function stripInlinePrimaryKey(type: string): string {
-  return type.replace(/\bPRIMARY\s+KEY\b/gi, '').replace(/\s{2,}/g, ' ').trim();
-}
-
 async function resolveEngineSpecForSandbox(schemaTemplateId: string | null) {
   const meta = schemaTemplateId ? await fetchSchemaTemplateSandboxMeta(schemaTemplateId) : null;
   return resolveSandboxEngineSpec({
     dialectRaw: meta?.dialect ?? 'postgresql',
     engineVersion: meta?.engineVersion ?? null,
-  });
-}
-
-/** Generate CREATE TABLE DDL from a parsed schema definition */
-function buildCreateTableDdl(
-  tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>,
-): string[] {
-  return tables.map((table) => {
-    const primaryKeyColumns = table.columns
-      .filter((column) => /\bPRIMARY\s+KEY\b/i.test(column.type))
-      .map((column) => column.name);
-
-    const columnDefinitions = table.columns.map((column) => {
-      const normalizedType =
-        primaryKeyColumns.length > 0 ? stripInlinePrimaryKey(column.type) : column.type;
-      return `  "${column.name}" ${normalizedType}`;
-    });
-
-    const tableConstraints =
-      primaryKeyColumns.length > 0
-        ? [`  PRIMARY KEY (${primaryKeyColumns.map((column) => `"${column}"`).join(', ')})`]
-        : [];
-
-    return (
-      `CREATE TABLE IF NOT EXISTS "${table.name}" (\n` +
-      [...columnDefinitions, ...tableConstraints].join(',\n') +
-      '\n);'
-    );
   });
 }
 
@@ -275,128 +203,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
       (err) => { clearTimeout(timer); reject(err); },
     );
   });
-}
-
-async function applySchemaAndDatasetInner(params: {
-  sandboxInstanceId: string;
-  containerRef: string;
-  dbName: string;
-  schemaTemplateId: string | null;
-  datasetTemplateId: string | null;
-  engine: SchemaSqlEngine;
-}): Promise<void> {
-  const { sandboxInstanceId, containerRef, dbName, schemaTemplateId, datasetTemplateId, engine } = params;
-  const [schemaDef, datasetTemplate] = await Promise.all([
-    schemaTemplateId ? fetchSchemaTemplate(schemaTemplateId) : Promise.resolve(null),
-    datasetTemplateId ? fetchDatasetTemplate(datasetTemplateId) : Promise.resolve(null),
-  ]);
-
-  let schemaApplied = false;
-
-  const ensureSchemaApplied = async (): Promise<void> => {
-    if (schemaApplied || !schemaDef?.tables?.length) {
-      return;
-    }
-
-    const schemaStartedAt = Date.now();
-
-    if (engine === 'postgresql') {
-      const ddlStatements = buildCreateTableDdl(schemaDef.tables);
-      const sandboxPool = new Pool({
-        connectionString: sandboxConnStr(containerRef, dbName),
-        max: 1,
-      });
-
-      try {
-        for (const ddl of ddlStatements) {
-          await sandboxPool.query(ddl);
-        }
-        schemaApplied = true;
-        logger.info(
-          {
-            sandboxInstanceId,
-            dbName,
-            tableCount: ddlStatements.length,
-            durationMs: Date.now() - schemaStartedAt,
-          },
-          'Schema DDL applied',
-        );
-      } finally {
-        await sandboxPool.end();
-      }
-      return;
-    }
-
-    if (engine === 'sqlserver') {
-      const sql = buildCreateTableDdlSqlServer(schemaDef.tables);
-      await runSqlcmdInSandboxContainer({
-        containerRef,
-        saPassword: mssqlSaPassword,
-        dbName,
-        sql,
-      });
-      schemaApplied = true;
-      logger.info(
-        {
-          sandboxInstanceId,
-          dbName,
-          tableCount: schemaDef.tables.length,
-          durationMs: Date.now() - schemaStartedAt,
-        },
-        'SQL Server schema DDL applied from template',
-      );
-    }
-  };
-
-  const artifactIncludesSchema =
-    Boolean(datasetTemplate?.artifactUrl) && schemaDef?.metadata?.source === 'sql_dump';
-
-  if (schemaDef?.tables?.length && engine !== 'postgresql' && !artifactIncludesSchema) {
-    throw new Error(
-      `Template schema DDL is only auto-applied for PostgreSQL; use a self-contained SQL dump artifact or a PostgreSQL template (engine=${engine})`,
-    );
-  }
-
-  if (artifactIncludesSchema) {
-    logger.info(
-      { sandboxInstanceId, datasetTemplateId, schemaTemplateId },
-      'Skipping upfront schema DDL because artifact is self-contained',
-    );
-  } else {
-    await ensureSchemaApplied();
-  }
-
-  if (!datasetTemplateId) {
-    logger.info({ sandboxInstanceId }, 'No dataset template linked, skipping dataset load');
-    return;
-  }
-
-  const datasetLoadStartedAt = Date.now();
-  if (!datasetTemplate) {
-    throw new Error(`Dataset template not found: ${datasetTemplateId}`);
-  }
-
-  await loadDatasetIntoSandbox({
-    logger,
-    containerRef,
-    dbUser: sandboxUser,
-    dbPassword: sandboxPassword,
-    dbName,
-    engine,
-    mssqlSaPassword,
-    datasetTemplate,
-    schema: schemaDef,
-    ensureSchemaApplied,
-  });
-
-  logger.info(
-    {
-      sandboxInstanceId,
-      datasetTemplateId,
-      durationMs: Date.now() - datasetLoadStartedAt,
-    },
-    'Dataset load applied',
-  );
 }
 
 /** Estimated restore throughput per engine (bytes/sec). Mirrors sandbox-provision-estimate.ts. */
@@ -456,22 +262,33 @@ async function applySchemaAndDataset(params: {
   datasetTemplateId: string | null;
   engine: SchemaSqlEngine;
 }): Promise<void> {
-  const inner = applySchemaAndDatasetInner(params);
+  const inner = applySchemaAndDatasetToContainer({
+    logger,
+    sandboxInstanceId: params.sandboxInstanceId,
+    containerRef: params.containerRef,
+    dbName: params.dbName,
+    schemaTemplateId: params.schemaTemplateId,
+    datasetTemplateId: params.datasetTemplateId,
+    engine: params.engine,
+    sandboxUser,
+    sandboxPassword,
+    mssqlSaPassword,
+  });
   if (DATASET_RESTORE_TIMEOUT_MS === 0) return inner;
 
-  // Attempt dynamic timeout based on artifact size (quick metadata lookup, does not buffer the artifact)
   let timeoutMs = DATASET_RESTORE_TIMEOUT_MS;
   if (params.datasetTemplateId) {
     try {
       const dt = await fetchDatasetTemplate(params.datasetTemplateId);
-      if (dt?.artifactUrl) {
-        const byteSize = await tryResolveArtifactByteSize(dt.artifactUrl);
-        const isGz = /\.gz\b/i.test(dt.artifactUrl);
+      const restoreUrl = dt?.sandboxGoldenSnapshotUrl?.trim() || dt?.artifactUrl;
+      if (restoreUrl) {
+        const byteSize = await tryResolveArtifactByteSize(restoreUrl);
+        const isGz = /\.gz\b/i.test(restoreUrl);
         const computed = computeRestoreTimeoutMs(byteSize, params.engine, isGz);
         if (byteSize && computed > DATASET_RESTORE_TIMEOUT_MS) {
           logger.info(
             { artifactByteSize: byteSize, timeoutMs: computed, engine: params.engine },
-            'Using dynamic restore timeout based on artifact size',
+            'Using dynamic restore timeout based on golden snapshot or artifact size',
           );
         }
         timeoutMs = computed;
@@ -548,6 +365,9 @@ const sandboxProvisioningWorker = sandboxQueuesEnabled
         containerRef,
         dbName,
         internalPort: spec.internalPort,
+        sandboxUser,
+        sandboxPassword,
+        mssqlSaPassword,
       });
       logger.info({ containerRef, dbName, engine: spec.engine }, 'Sandbox container ready');
 
@@ -708,6 +528,9 @@ const sandboxResetWorker = sandboxQueuesEnabled
         containerRef,
         dbName,
         internalPort: spec.internalPort,
+        sandboxUser,
+        sandboxPassword,
+        mssqlSaPassword,
       });
 
       await applySchemaAndDataset({
@@ -742,6 +565,25 @@ const sandboxResetWorker = sandboxQueuesEnabled
   },
   longJobOpts,
 )
+  : null;
+
+// ─── Worker: dataset_golden_bake ────────────────────────────────────────────────
+
+const datasetGoldenBakeWorker = sandboxQueuesEnabled
+  ? new Worker(
+      QUEUES.DATASET_SANDBOX_GOLDEN_BAKE,
+      async (job: Job) => {
+        const { datasetTemplateId } = job.data as { datasetTemplateId: string };
+        try {
+          await runDatasetGoldenBake(datasetTemplateId, logger);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          await updateDatasetGoldenBakeFailed(datasetTemplateId, message);
+          throw err;
+        }
+      },
+      longJobOpts,
+    )
   : null;
 
 // ─── Worker: execute_query / cancel_query ─────────────────────────────────────
@@ -1012,6 +854,43 @@ if (sandboxQueuesEnabled) {
   runExpiryScanner().catch((err) => logger.error({ err }, 'Initial expiry scan failed'));
 }
 
+// ─── Golden-bake enqueue scan (pending published datasets) ───────────────────
+
+async function runGoldenBakeEnqueueScan(): Promise<void> {
+  if (!datasetGoldenBakeWorker) return;
+  try {
+    const ids = await fetchDatasetTemplateIdsPendingGoldenBake();
+    if (ids.length === 0) return;
+
+    logger.info({ count: ids.length }, 'Enqueueing pending golden-bake jobs');
+
+    for (const datasetTemplateId of ids) {
+      await goldenBakeQueue.add(
+        'dataset_golden_bake',
+        { datasetTemplateId },
+        {
+          jobId: `golden-bake-${datasetTemplateId}`,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: true,
+        },
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, 'Golden-bake enqueue scan error');
+  }
+}
+
+const goldenBakeEnqueueScanner =
+  sandboxQueuesEnabled && datasetGoldenBakeWorker
+    ? setInterval(runGoldenBakeEnqueueScan, GOLDEN_BAKE_SCAN_INTERVAL_MS)
+    : null;
+if (sandboxQueuesEnabled && datasetGoldenBakeWorker) {
+  runGoldenBakeEnqueueScan().catch((err) =>
+    logger.error({ err }, 'Initial golden-bake enqueue scan failed'),
+  );
+}
+
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
 const workers: Array<{ name: string; worker: Worker }> = [];
@@ -1023,6 +902,9 @@ if (sandboxCleanupWorker) {
 }
 if (sandboxResetWorker) {
   workers.push({ name: QUEUES.SANDBOX_RESET, worker: sandboxResetWorker });
+}
+if (datasetGoldenBakeWorker) {
+  workers.push({ name: QUEUES.DATASET_SANDBOX_GOLDEN_BAKE, worker: datasetGoldenBakeWorker });
 }
 if (queryExecutionWorker) {
   workers.push({ name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker });
@@ -1056,9 +938,11 @@ async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Received shutdown signal, closing workers...');
 
   if (expiryScanner) clearInterval(expiryScanner);
+  if (goldenBakeEnqueueScanner) clearInterval(goldenBakeEnqueueScanner);
   await Promise.all(workers.map(({ worker }) => worker.close()));
   await cleanupQueue.close();
   await queryExecutionQueueClient.close();
+  await goldenBakeQueue.close();
   await connection.quit();
   await mainDb.end();
 

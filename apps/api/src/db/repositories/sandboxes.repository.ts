@@ -79,6 +79,7 @@ export class SandboxesRepository {
         and(
           eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
           eq(schema.datasetTemplates.status, 'published'),
+          eq(schema.datasetTemplates.sandboxGoldenStatus, 'ready'),
         ),
       );
   }

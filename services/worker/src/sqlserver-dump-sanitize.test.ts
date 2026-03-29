@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test, { describe, it } from 'node:test';
+import { test, describe, it } from 'vitest';
 import { sanitizeSqlServerDumpScript, createSqlServerSanitizeTransform } from './sqlserver-dump-sanitize';
 
 test('brackets unquoted Order in CREATE TABLE', () => {
@@ -79,6 +79,13 @@ test('quotes unquoted ISO date on a line after VALUES (multi-line INSERT)', () =
   );
   assert.match(out, /'2024-06-01'/);
   assert.ok(!/\(\s*1\s*,\s*2024-06-01\s*\)/.test(out));
+});
+
+test('quotes ISO date on its own line inside VALUES (streaming-safe)', () => {
+  const input = 'INSERT INTO t (d)\nVALUES (\n2024-06-01\n);\n';
+  const out = sanitizeSqlServerDumpScript(input);
+  assert.match(out, /'2024-06-01'/);
+  assert.ok(!/\(\s*2024-06-01\s*\)/.test(out));
 });
 
 test('does not double-quote already quoted dates in INSERT', () => {
@@ -202,6 +209,14 @@ describe('createSqlServerSanitizeTransform (streaming equivalence)', () => {
     const bufferOut = sanitizeSqlServerDumpScript(input);
     const streamOut = await collectStreamOutput(input);
     assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer when date is alone on a line inside VALUES', async () => {
+    const input = 'INSERT INTO t (d)\nVALUES (\n2024-06-01\n);\n';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+    assert.match(bufferOut, /'2024-06-01'/);
   });
 
   it('matches buffer for already-quoted dates', async () => {

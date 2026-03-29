@@ -67,6 +67,26 @@ function appendCapped(existing: string, chunk: string, cap: number): string {
   return existing + (chunk.length <= remaining ? chunk : chunk.slice(0, remaining));
 }
 
+/** When false, omit sqlcmd `-b` so a single batch error does not abort the whole restore (sandbox/teaching). */
+function sandboxSqlcmdBatchAbortOnError(): boolean {
+  return process.env.SANDBOX_SQLCMD_BATCH_ABORT_ON_ERROR?.trim() !== '0';
+}
+
+function formatSqlcmdStreamFailure(
+  stderr: string,
+  stdout: string,
+  exitCode: number | null,
+  baseMessage: string,
+): string {
+  const detail = stderr.trim().slice(0, 2000);
+  const out = stdout.trim().slice(0, 2000);
+  const parts: string[] = [baseMessage];
+  if (exitCode != null) parts.push(`exit ${exitCode}`);
+  if (detail) parts.push(`stderr: ${detail}`);
+  if (out) parts.push(`stdout: ${out}`);
+  return parts.join(' | ');
+}
+
 async function runDockerWithInput(args: string[], input: string | Buffer): Promise<string> {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input, 'utf8');
   const child = spawn('docker', args, {
@@ -407,8 +427,13 @@ function sandboxMysqlFamilyAdminBin(engine: 'mysql' | 'mariadb'): string {
   return engine === 'mariadb' ? 'mariadb-admin' : 'mysqladmin';
 }
 
-function sandboxMysqlFamilyClientBin(engine: 'mysql' | 'mariadb'): string {
+export function sandboxMysqlFamilyClientBin(engine: 'mysql' | 'mariadb'): string {
   return engine === 'mariadb' ? 'mariadb' : 'mysql';
+}
+
+/** Logical dump binary inside MySQL/MariaDB sandbox images. */
+export function sandboxMysqlFamilyDumpBin(engine: 'mysql' | 'mariadb'): string {
+  return engine === 'mariadb' ? 'mariadb-dump' : 'mysqldump';
 }
 
 export async function waitForSandboxMysql(params: {
@@ -673,6 +698,7 @@ export async function runSqlcmdInSandboxContainerStreaming(params: {
   gzip?: boolean;
 }): Promise<void> {
   const { containerRef, saPassword, dbName, source, gzip } = params;
+  const batchAbort = sandboxSqlcmdBatchAbortOnError();
   const toolsPath = await detectSqlcmdBinary(containerRef);
   const bin =
     toolsPath === 'tools18'
@@ -690,7 +716,7 @@ export async function runSqlcmdInSandboxContainerStreaming(params: {
     '-S', 'localhost',
     '-U', 'sa',
     '-d', dbName,
-    '-b',
+    ...(batchAbort ? (['-b'] as const) : []),
     '-I',
   ];
   const child = spawn('docker', args, {
@@ -698,12 +724,23 @@ export async function runSqlcmdInSandboxContainerStreaming(params: {
   });
 
   let stderr = '';
+  let stdout = '';
   child.stderr.setEncoding('utf8');
+  child.stdout.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
     stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
   });
+  child.stdout.on('data', (chunk: string) => {
+    stdout = appendCapped(stdout, chunk, DOCKER_OUTPUT_CAP_BYTES);
+  });
 
   const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'EPIPE') {
+      child.kill('SIGKILL');
+    }
+  });
 
   const pipelinePromise = gzip
     ? pipeline(source, createGunzip(), child.stdin)
@@ -712,21 +749,29 @@ export async function runSqlcmdInSandboxContainerStreaming(params: {
   try {
     await pipelinePromise;
   } catch (err) {
-    const detail = stderr.trim().slice(0, 2000);
+    const e = err as NodeJS.ErrnoException;
+    if (e?.code === 'EPIPE') {
+      const code = await closePromise;
+      const base =
+        'write EPIPE (sqlcmd closed stdin — usually a T-SQL error or batch abort; see stderr below). If stderr shows Msg and you need a best-effort restore, set SANDBOX_SQLCMD_BATCH_ABORT_ON_ERROR=0 to omit sqlcmd -b';
+      throw new Error(formatSqlcmdStreamFailure(stderr, stdout, code, base));
+    }
     child.kill('SIGKILL');
     await closePromise.catch(() => {});
     const base = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      detail
-        ? `sqlcmd restore stream failed (${base}). sqlcmd stderr: ${detail}`
-        : `sqlcmd restore stream failed (${base})`,
-    );
+    throw new Error(formatSqlcmdStreamFailure(stderr, stdout, null, base));
   }
 
   const code = await closePromise;
   if (code !== 0) {
-    const detail = stderr.trim().slice(0, 2000);
-    throw new Error(`sqlcmd restore failed with code ${code}: ${detail || '(no stderr)'}`);
+    throw new Error(
+      formatSqlcmdStreamFailure(
+        stderr,
+        stdout,
+        code,
+        `sqlcmd restore failed (streaming finished but process exited ${code})`,
+      ),
+    );
   }
 }
 
@@ -807,6 +852,26 @@ function buildMcCatShellScript(artifactRef: string): string {
 export async function readS3ObjectViaMinioContainer(artifactRef: string): Promise<Buffer> {
   const script = buildMcCatShellScript(artifactRef);
   return runDockerBinary(['exec', storageDockerContainer, 'sh', '-lc', script]);
+}
+
+/** Default matches API `STORAGE_BUCKET` (see apps/api config). */
+export function resolveStorageBucket(): string {
+  return process.env.STORAGE_BUCKET?.trim() || 'sqlcraft';
+}
+
+/**
+ * Upload bytes to MinIO/S3 via `mc pipe` in the storage sidecar (same pattern as reads).
+ */
+export async function uploadBufferToS3ViaMinio(params: {
+  bucket: string;
+  objectKey: string;
+  body: Buffer;
+}): Promise<void> {
+  const script = [
+    `mc alias set local http://localhost:9000 ${shQuote(storageAccessKey)} ${shQuote(storageSecretKey)} >/dev/null`,
+    `mc pipe ${shQuote(`local/${params.bucket}/${params.objectKey}`)}`,
+  ].join(' && ');
+  await runDockerWithInput(['exec', '-i', storageDockerContainer, 'sh', '-lc', script], params.body);
 }
 
 /**

@@ -15,6 +15,8 @@ export const QUEUE_NAMES = {
   SANDBOX_CLEANUP: 'sandbox-cleanup',
   SANDBOX_RESET: 'sandbox-reset',
   QUERY_EXECUTION: 'query-execution',
+  /** Bake golden snapshot metadata (fingerprint, engine image); full datadir tar upload later */
+  DATASET_SANDBOX_GOLDEN_BAKE: 'dataset-sandbox-golden-bake',
 } as const;
 
 type BullConnection = import('bullmq').ConnectionOptions;
@@ -24,6 +26,7 @@ const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : {
 const sandboxProvisioningQueue = new Queue(QUEUE_NAMES.SANDBOX_PROVISIONING, queueOptions);
 const sandboxCleanupQueue = new Queue(QUEUE_NAMES.SANDBOX_CLEANUP, queueOptions);
 const sandboxResetQueue = new Queue(QUEUE_NAMES.SANDBOX_RESET, queueOptions);
+const datasetGoldenBakeQueue = new Queue(QUEUE_NAMES.DATASET_SANDBOX_GOLDEN_BAKE, queueOptions);
 export const queryExecutionQueue = new Queue(QUEUE_NAMES.QUERY_EXECUTION, queueOptions);
 
 export interface ProvisionSandboxJobData {
@@ -52,6 +55,10 @@ export interface CancelQueryJobData {
   queryExecutionId: string;
 }
 
+export interface DatasetGoldenBakeJobData {
+  datasetTemplateId: string;
+}
+
 export async function enqueueProvisionSandbox(data: ProvisionSandboxJobData): Promise<void> {
   await sandboxProvisioningQueue.add('provision_sandbox', data, {
     attempts: 3,
@@ -75,6 +82,16 @@ export async function enqueueResetSandbox(data: ResetSandboxJobData): Promise<vo
   await sandboxResetQueue.add('reset_sandbox', data, {
     attempts: 3,
     backoff: { type: 'exponential', delay: 2000 },
+  });
+}
+
+/** Idempotent job id avoids duplicate bakes for the same dataset row. */
+export async function enqueueDatasetGoldenBake(data: DatasetGoldenBakeJobData): Promise<void> {
+  await datasetGoldenBakeQueue.add('dataset_golden_bake', data, {
+    jobId: `golden-bake-${data.datasetTemplateId}`,
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: true,
   });
 }
 

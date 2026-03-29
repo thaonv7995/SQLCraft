@@ -977,6 +977,8 @@ export type DatabaseCatalogKind =
   | 'private_invited'
   | 'public_pending_owner';
 
+export type SandboxGoldenStatus = 'none' | 'pending' | 'ready' | 'failed';
+
 export interface Database {
   id: string;
   name: string;
@@ -1005,6 +1007,8 @@ export interface Database {
   region?: string;
   uptime?: number;
   isAvailable?: boolean;
+  /** Source-scale dataset golden pipeline; admin UI shows a chip. */
+  sandboxGoldenStatus?: SandboxGoldenStatus;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }
@@ -1280,6 +1284,7 @@ function normalizeDatabase(database: Database): Database {
 
   return {
     ...database,
+    sandboxGoldenStatus: database.sandboxGoldenStatus ?? 'none',
     catalogKind: database.catalogKind ?? 'public',
     sourceScale: scaleContext.sourceScale,
     selectedScale: scaleContext.selectedScale,

@@ -257,18 +257,39 @@ export const schemaTemplateInvites = pgTable(
   }),
 );
 
-export const datasetTemplates = pgTable('dataset_templates', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  schemaTemplateId: uuid('schema_template_id')
-    .notNull()
-    .references(() => schemaTemplates.id),
-  name: varchar('name', { length: 100 }).notNull(),
-  size: datasetSizeEnum('size').notNull(),
-  rowCounts: jsonb('row_counts').notNull(),
-  artifactUrl: text('artifact_url'),
-  status: contentStatusEnum('status').notNull().default('draft'),
-  createdAt: timestamp('created_at').notNull().default(sql`now()`),
-});
+/** none | pending | ready | failed — public catalog uses ready (with published) per golden snapshot plan */
+export const sandboxGoldenStatusValues = ['none', 'pending', 'ready', 'failed'] as const;
+
+export const datasetTemplates = pgTable(
+  'dataset_templates',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    schemaTemplateId: uuid('schema_template_id')
+      .notNull()
+      .references(() => schemaTemplates.id),
+    name: varchar('name', { length: 100 }).notNull(),
+    size: datasetSizeEnum('size').notNull(),
+    rowCounts: jsonb('row_counts').notNull(),
+    artifactUrl: text('artifact_url'),
+    status: contentStatusEnum('status').notNull().default('draft'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    /** Object storage URI for tar/zstd of engine datadir after bake */
+    sandboxGoldenSnapshotUrl: text('sandbox_golden_snapshot_url'),
+    sandboxGoldenStatus: varchar('sandbox_golden_status', { length: 32 })
+      .notNull()
+      .default('none'),
+    sandboxGoldenError: text('sandbox_golden_error'),
+    sandboxGoldenBytes: bigint('sandbox_golden_bytes', { mode: 'number' }),
+    sandboxGoldenChecksum: text('sandbox_golden_checksum'),
+    /** Docker image ref used at bake time; must match provision */
+    sandboxGoldenEngineImage: text('sandbox_golden_engine_image'),
+    /** Invalidates golden when artifact changes */
+    sandboxGoldenArtifactFingerprint: text('sandbox_golden_artifact_fingerprint'),
+  },
+  (table) => ({
+    sandboxGoldenStatusIdx: index('dataset_templates_sandbox_golden_status_idx').on(table.sandboxGoldenStatus),
+  }),
+);
 
 // Runtime
 export const learningSessions = pgTable(

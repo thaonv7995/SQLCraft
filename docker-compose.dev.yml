@@ -68,6 +68,7 @@ services:
       QUEUE_PREFIX: sqlcraft:docker-dev
       STORAGE_ENDPOINT: http://minio:9000
       STORAGE_PUBLIC_URL: http://localhost:9000
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-sqlcraft}
       SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
@@ -127,6 +128,13 @@ services:
       REDIS_URL: redis://redis:6379
       QUEUE_PREFIX: sqlcraft:docker-dev
       WORKER_ROLE: sandbox
+      # Same object storage as API (golden snapshot upload uses mc inside this container).
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_PUBLIC_URL: http://localhost:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-sqlcraft}
+      STORAGE_DOCKER_CONTAINER: sqlcraft-minio
       SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
@@ -144,6 +152,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_started
     command: sh -c "cd /app && (test -d node_modules/@sqlcraft/sandbox-schema-diff || pnpm install --frozen-lockfile) && cd services/worker && pnpm dev"
     restart: unless-stopped
     networks:
@@ -161,6 +171,12 @@ services:
       REDIS_URL: redis://redis:6379
       QUEUE_PREFIX: sqlcraft:docker-dev
       WORKER_ROLE: query
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_PUBLIC_URL: http://localhost:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-sqlcraft}
+      STORAGE_DOCKER_CONTAINER: sqlcraft-minio
       SANDBOX_DB_HOST: sandbox-unconfigured
       SANDBOX_DB_PORT: 5432
       SANDBOX_DB_USER: sandbox
@@ -176,6 +192,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_started
     command: sh -c "cd /app && (test -d node_modules/@sqlcraft/sandbox-schema-diff || pnpm install --frozen-lockfile) && cd services/worker && pnpm dev"
     restart: unless-stopped
     networks:

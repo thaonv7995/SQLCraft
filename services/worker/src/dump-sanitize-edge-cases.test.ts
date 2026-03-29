@@ -1,9 +1,8 @@
 /**
  * Edge-case matrix for dump sanitizers: documents current behavior + guards regressions.
- * Run: node --import tsx --test src/dump-sanitize-edge-cases.test.ts
  */
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import type { SchemaDefinition } from './db';
 import { rewriteMysqlRestoreSqlForTargetDatabase } from './dataset-loader';
 import { sanitizePostgresDumpForPsql } from './postgres-dump-sanitize';

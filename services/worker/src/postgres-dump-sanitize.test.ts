@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { Readable } from 'node:stream';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import type { SchemaDefinition } from './db';
 import { sanitizePostgresDumpForPsql, createPostgresSanitizeTransform } from './postgres-dump-sanitize';
 

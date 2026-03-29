@@ -33,6 +33,8 @@ export interface DatasetTemplateDefinition {
   size: string;
   rowCounts: Record<string, unknown>;
   artifactUrl: string | null;
+  /** When set, sandbox provisioning restores this snapshot (S3) instead of re-streaming `artifact_url`. */
+  sandboxGoldenSnapshotUrl: string | null;
 }
 
 export async function fetchSchemaTemplate(
@@ -74,13 +76,15 @@ export async function fetchDatasetTemplate(
     size: string;
     rowCounts: unknown;
     artifactUrl: string | null;
+    sandboxGoldenSnapshotUrl: string | null;
   }>(
     `SELECT id,
             schema_template_id AS "schemaTemplateId",
             name,
             size,
             row_counts AS "rowCounts",
-            artifact_url AS "artifactUrl"
+            artifact_url AS "artifactUrl",
+            sandbox_golden_snapshot_url AS "sandboxGoldenSnapshotUrl"
        FROM dataset_templates
       WHERE id = $1`,
     [datasetTemplateId],
@@ -99,7 +103,66 @@ export async function fetchDatasetTemplate(
         ? (row.rowCounts as Record<string, unknown>)
         : {},
     artifactUrl: row.artifactUrl,
+    sandboxGoldenSnapshotUrl: row.sandboxGoldenSnapshotUrl,
   };
+}
+
+/** Golden bake succeeded: fingerprint + engine image + optional snapshot object in object storage. */
+export async function updateDatasetGoldenBakeSuccess(
+  datasetTemplateId: string,
+  params: {
+    artifactFingerprint: string;
+    engineImage: string | null;
+    snapshotUrl: string | null;
+    snapshotBytes: number | null;
+    snapshotChecksumSha256: string | null;
+  },
+): Promise<void> {
+  await mainDb.query(
+    `UPDATE dataset_templates
+     SET sandbox_golden_status = 'ready',
+         sandbox_golden_error = NULL,
+         sandbox_golden_artifact_fingerprint = $2,
+         sandbox_golden_engine_image = $3,
+         sandbox_golden_snapshot_url = $4,
+         sandbox_golden_bytes = $5,
+         sandbox_golden_checksum = $6
+     WHERE id = $1`,
+    [
+      datasetTemplateId,
+      params.artifactFingerprint,
+      params.engineImage,
+      params.snapshotUrl,
+      params.snapshotBytes,
+      params.snapshotChecksumSha256,
+    ],
+  );
+}
+
+export async function updateDatasetGoldenBakeFailed(
+  datasetTemplateId: string,
+  errorMessage: string,
+): Promise<void> {
+  await mainDb.query(
+    `UPDATE dataset_templates
+     SET sandbox_golden_status = 'failed',
+         sandbox_golden_error = $2
+     WHERE id = $1`,
+    [datasetTemplateId, errorMessage],
+  );
+}
+
+/** Published datasets with pending golden and a non-empty artifact — eligible for enqueue (worker scan). */
+export async function fetchDatasetTemplateIdsPendingGoldenBake(): Promise<string[]> {
+  const result = await mainDb.query<{ id: string }>(
+    `SELECT id
+       FROM dataset_templates
+      WHERE status = 'published'
+        AND sandbox_golden_status = 'pending'
+        AND artifact_url IS NOT NULL
+        AND TRIM(artifact_url) <> ''`,
+  );
+  return result.rows.map((r) => r.id);
 }
 
 // ─── Sandbox instance ─────────────────────────────────────────────────────────

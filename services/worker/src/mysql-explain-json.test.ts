@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { mysqlExplainJsonToPgShaped } from '@sqlcraft/mysql-explain';
 
 const SIMPLE_MYSQL_JSON = {

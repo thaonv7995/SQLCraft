@@ -51,16 +51,16 @@ export function quoteUnquotedIsoDatesOutsideStringsAndComments(sql: string): str
     const rest = sql.slice(pos);
 
     const iso = rest.match(
-      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (iso) return { len: iso[1].length, text: `'${iso[1]}'` };
 
     const slash = rest.match(
-      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
 
-    const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*[,);])/i);
+    const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*(?:[,);]|$))/i);
     if (bool) {
       const bit = bool[1].toUpperCase() === 'TRUE' ? '1' : '0';
       return { len: bool[0].length, text: bit };
@@ -350,17 +350,18 @@ function quoteDatesAndBoolsInLine(
 
     const rest = line.slice(pos);
 
+    // `$`: this line is the only context in streaming mode; `)` may be on the next line.
     const iso = rest.match(
-      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (iso) return { len: iso[1].length, text: `'${iso[1]}'` };
 
     const slash = rest.match(
-      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
 
-    const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*[,);])/i);
+    const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*(?:[,);]|$))/i);
     if (bool) {
       const bit = bool[1].toUpperCase() === 'TRUE' ? '1' : '0';
       return { len: bool[0].length, text: bit };

@@ -15,6 +15,9 @@ export type DatabaseCatalogKind =
   /** Your public upload awaiting admin approval (draft + pending review). */
   | 'public_pending_owner';
 
+/** Source dataset golden snapshot pipeline (catalog end-user visibility uses `ready` + published). */
+export type SandboxGoldenStatus = 'none' | 'pending' | 'ready' | 'failed';
+
 export interface DatabaseColumn {
   name: string;
   type: string;
@@ -61,6 +64,8 @@ export interface DatabaseItem {
   catalogKind: DatabaseCatalogKind;
   availableScales: DatabaseScale[];
   availableScaleMetadata: Array<{ scale: DatabaseScale; rowCount: number }>;
+  /** From source-scale dataset template; drives admin golden-bake chips. */
+  sandboxGoldenStatus: SandboxGoldenStatus;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }

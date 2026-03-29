@@ -26,6 +26,7 @@ function sampleDb(overrides: Partial<DatabaseItem> = {}): DatabaseItem {
     catalogKind: 'public',
     availableScales: ['small', 'tiny'],
     availableScaleMetadata: [],
+    sandboxGoldenStatus: 'ready',
     ...overrides,
   };
 }

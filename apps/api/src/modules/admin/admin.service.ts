@@ -902,6 +902,7 @@ async function persistCanonicalDatabaseImport(
         rowCounts: normalizedRowCounts,
         artifactUrl: body.canonicalDataset.artifactUrl ?? null,
         status: body.status,
+        sandboxGoldenStatus: body.status === 'published' ? 'pending' : 'none',
       })
       .returning();
 
@@ -921,6 +922,7 @@ async function persistCanonicalDatabaseImport(
           rowCounts: materializedDataset?.rowCounts ?? dataset.rowCounts,
           artifactUrl: materializedDataset?.artifactUrl ?? null,
           status: body.status,
+          sandboxGoldenStatus: body.status === 'published' ? 'pending' : 'none',
         })
         .returning();
       if (row) {
@@ -989,6 +991,14 @@ async function persistCanonicalDatabaseImport(
       datasetGenerationJob,
     };
   });
+
+  if (body.status === 'published') {
+    const { enqueueDatasetGoldenBake } = await import('../../lib/queue');
+    await enqueueDatasetGoldenBake({ datasetTemplateId: txResult.sourceDatasetTemplate.id });
+    for (const d of txResult.derivedDatasetTemplates) {
+      await enqueueDatasetGoldenBake({ datasetTemplateId: d.id });
+    }
+  }
 
   return {
     schemaTemplate: txResult.schemaTemplate,
@@ -1221,8 +1231,18 @@ export async function approveSchemaTemplateReview(
 
   await db
     .update(schema.datasetTemplates)
-    .set({ status: 'published' })
+    .set({ status: 'published', sandboxGoldenStatus: 'pending' })
     .where(eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId));
+
+  const datasetRows = await db
+    .select({ id: schema.datasetTemplates.id })
+    .from(schema.datasetTemplates)
+    .where(eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId));
+
+  const { enqueueDatasetGoldenBake } = await import('../../lib/queue');
+  for (const row of datasetRows) {
+    await enqueueDatasetGoldenBake({ datasetTemplateId: row.id });
+  }
 }
 
 export async function rejectSchemaTemplateReview(schemaTemplateId: string): Promise<void> {

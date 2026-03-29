@@ -1,4 +1,4 @@
-import type { DatabaseDomain, DatabaseScale } from './api';
+import type { DatabaseDomain, DatabaseScale, SandboxGoldenStatus } from './api';
 
 export const DATABASE_DOMAIN_LABELS: Record<DatabaseDomain, string> = {
   ecommerce: 'E-Commerce',
@@ -88,5 +88,28 @@ export const DATABASE_DIFFICULTY_STYLES: Record<
     badge: 'bg-error/10 text-error',
     label: 'Advanced',
     accent: 'border-error/35',
+  },
+};
+
+/** Admin catalog cards: golden bake pipeline for the source dataset. */
+export const SANDBOX_GOLDEN_STATUS_STYLES: Record<
+  SandboxGoldenStatus,
+  { badge: string; label: string }
+> = {
+  none: {
+    badge: 'bg-outline-variant/15 text-on-surface-variant',
+    label: 'Golden —',
+  },
+  pending: {
+    badge: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+    label: 'Golden pending',
+  },
+  ready: {
+    badge: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
+    label: 'Golden ready',
+  },
+  failed: {
+    badge: 'bg-error/15 text-error',
+    label: 'Golden failed',
   },
 };

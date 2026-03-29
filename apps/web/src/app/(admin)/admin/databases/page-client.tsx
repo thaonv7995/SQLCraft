@@ -17,6 +17,7 @@ import {
   DATABASE_DOMAIN_LABELS,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
+  SANDBOX_GOLDEN_STATUS_STYLES,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 
@@ -62,6 +63,9 @@ function CatalogMetric({ label, value, hint }: { label: string; value: string; h
 function DatabaseCatalogCard({ database }: { database: Database }) {
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
+  const golden =
+    SANDBOX_GOLDEN_STATUS_STYLES[database.sandboxGoldenStatus ?? 'none'] ??
+    SANDBOX_GOLDEN_STATUS_STYLES.none;
 
   return (
     <Link
@@ -88,14 +92,25 @@ function DatabaseCatalogCard({ database }: { database: Database }) {
             <p className="mt-0.5 truncate text-[10px] font-mono text-outline">{database.engine}</p>
           </div>
         </div>
-        <span
-          className={cn(
-            'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider font-bold',
-            difficulty.badge,
-          )}
-        >
-          {difficulty.label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider font-bold',
+              difficulty.badge,
+            )}
+          >
+            {difficulty.label}
+          </span>
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
+              golden.badge,
+            )}
+            title="Sandbox golden snapshot bake status (source dataset)"
+          >
+            {golden.label}
+          </span>
+        </div>
       </div>
 
       <p className="mt-4 line-clamp-2 text-sm leading-relaxed text-on-surface-variant">

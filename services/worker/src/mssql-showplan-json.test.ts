@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'vitest';
 import { parseMssqlShowPlanXml, summarizeMssqlShowPlan, wrapMssqlShowPlanJson } from './mssql-showplan-json';
 
 const SAMPLE = `<?xml version="1.0" encoding="utf-16"?>

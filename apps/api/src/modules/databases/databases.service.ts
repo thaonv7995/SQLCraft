@@ -22,6 +22,7 @@ import type {
   DatabaseScale,
   DatabaseTable,
   PaginatedDatabasesResult,
+  SandboxGoldenStatus,
 } from './databases.types';
 
 interface SchemaColumnDefinition {
@@ -252,6 +253,8 @@ function buildDatabaseItem(
   const sourceScale = chooseSourceScale(availableScales);
   const sourceDataset = datasetTemplates.find((dataset) => dataset.size === sourceScale);
   const sourceRowCount = sourceDataset ? sumRowCounts(sourceDataset.rowCounts) : 0;
+  const sandboxGoldenStatus: SandboxGoldenStatus =
+    (sourceDataset?.sandboxGoldenStatus as SandboxGoldenStatus | undefined) ?? 'none';
   const description = schemaTemplate.description ?? `${schemaTemplate.name} training database`;
   const domain = inferDatabaseDomain(schemaTemplate.name, description);
 
@@ -285,6 +288,7 @@ function buildDatabaseItem(
         rowCount: dataset ? sumRowCounts(dataset.rowCounts) : 0,
       };
     }),
+    sandboxGoldenStatus,
     schema: tables.map((table) => ({
       name: table.name,
       role: inferTableRole(table),
@@ -395,7 +399,12 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
     db
       .select()
       .from(dbSchema.datasetTemplates)
-      .where(eq(dbSchema.datasetTemplates.status, 'published'))
+      .where(
+        and(
+          eq(dbSchema.datasetTemplates.status, 'published'),
+          eq(dbSchema.datasetTemplates.sandboxGoldenStatus, 'ready'),
+        ),
+      )
       .orderBy(desc(dbSchema.datasetTemplates.createdAt)),
   ]);
 
@@ -456,6 +465,7 @@ async function loadViewerAccessibleCatalog(viewerUserId: string): Promise<Databa
             and(
               inArray(dbSchema.datasetTemplates.schemaTemplateId, privateIds),
               eq(dbSchema.datasetTemplates.status, 'published'),
+              eq(dbSchema.datasetTemplates.sandboxGoldenStatus, 'ready'),
             ),
           )
           .orderBy(desc(dbSchema.datasetTemplates.createdAt))
@@ -544,6 +554,7 @@ async function findDatasetForSchema(
         eq(dbSchema.datasetTemplates.schemaTemplateId, schemaTemplateId),
         eq(dbSchema.datasetTemplates.size, requestedScale),
         eq(dbSchema.datasetTemplates.status, 'published'),
+        eq(dbSchema.datasetTemplates.sandboxGoldenStatus, 'ready'),
       ),
     )
     .orderBy(desc(dbSchema.datasetTemplates.createdAt))

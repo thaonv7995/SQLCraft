@@ -1199,6 +1199,15 @@ async function restoreFromArtifact(params: {
   }
 }
 
+/** True when `loadDatasetIntoSandbox` should try `sandboxGoldenSnapshotUrl` before the source artifact. */
+export function shouldAttemptGoldenSnapshotRestore(params: {
+  preferArtifactOverGoldenSnapshot?: boolean;
+  sandboxGoldenSnapshotUrl?: string | null;
+}): boolean {
+  if (params.preferArtifactOverGoldenSnapshot === true) return false;
+  return Boolean(params.sandboxGoldenSnapshotUrl?.trim());
+}
+
 export async function loadDatasetIntoSandbox(params: {
   logger: pino.Logger;
   containerRef: string;
@@ -1210,6 +1219,8 @@ export async function loadDatasetIntoSandbox(params: {
   datasetTemplate: DatasetTemplateDefinition;
   schema: SchemaDefinition | null;
   ensureSchemaApplied?: () => Promise<void>;
+  /** Golden-bake must restore from the raw artifact, not an existing snapshot. */
+  preferArtifactOverGoldenSnapshot?: boolean;
 }): Promise<void> {
   const {
     logger,
@@ -1222,7 +1233,60 @@ export async function loadDatasetIntoSandbox(params: {
     datasetTemplate,
     schema,
     ensureSchemaApplied,
+    preferArtifactOverGoldenSnapshot,
   } = params;
+
+  if (
+    shouldAttemptGoldenSnapshotRestore({
+      preferArtifactOverGoldenSnapshot,
+      sandboxGoldenSnapshotUrl: datasetTemplate.sandboxGoldenSnapshotUrl,
+    })
+  ) {
+    const snapUrl = datasetTemplate.sandboxGoldenSnapshotUrl!.trim();
+    try {
+      const restored = await restoreFromArtifact({
+        logger,
+        containerRef,
+        dbUser,
+        dbPassword,
+        dbName,
+        artifactUrl: snapUrl,
+        engine,
+        mssqlSaPassword,
+        schema,
+      });
+      if (restored) {
+        logger.info(
+          { datasetTemplateId: datasetTemplate.id, snapshotUrl: snapUrl },
+          'Dataset restored from golden snapshot',
+        );
+        if (engine === 'sqlserver' && schema?.tables?.length) {
+          try {
+            await ensureSchemaApplied?.();
+          } catch (gapErr) {
+            logger.warn(
+              {
+                err: gapErr,
+                datasetTemplateId: datasetTemplate.id,
+                containerRef,
+              },
+              'SQL Server template DDL after golden snapshot failed (continuing)',
+            );
+          }
+        }
+        return;
+      }
+      logger.warn(
+        { datasetTemplateId: datasetTemplate.id, snapshotUrl: snapUrl },
+        'Golden snapshot format not supported; falling back to source artifact',
+      );
+    } catch (snapErr) {
+      logger.warn(
+        { err: snapErr, datasetTemplateId: datasetTemplate.id, snapshotUrl: snapUrl },
+        'Golden snapshot restore failed; falling back to source artifact',
+      );
+    }
+  }
 
   if (datasetTemplate.artifactUrl) {
     let restored: boolean;
