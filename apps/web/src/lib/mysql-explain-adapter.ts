@@ -124,6 +124,43 @@ function nestedLoopArrayToNode(items: Record<string, unknown>[]): PgShapedPlanNo
   };
 }
 
+/** Merge query_block-level cost/rows onto root (see packages/mysql-explain). */
+function mergeQueryBlockSummary(qb: Record<string, unknown>, plan: PgShapedPlanNode): PgShapedPlanNode {
+  const queryCost = isRecord(qb.cost_info) ? toNum(qb.cost_info.query_cost) : undefined;
+  const out: PgShapedPlanNode = { ...plan };
+
+  if (out['Total Cost'] == null && queryCost != null) {
+    out['Total Cost'] = queryCost;
+  }
+
+  const plans = out.Plans;
+  if (plans && plans.length > 0) {
+    if (out['Plan Rows'] == null) {
+      const last = plans[plans.length - 1];
+      const lastRows = toNum(last['Plan Rows']);
+      if (lastRows != null) {
+        out['Plan Rows'] = lastRows;
+      } else {
+        const sumRows = plans.reduce((s, p) => s + (toNum(p['Plan Rows']) ?? 0), 0);
+        if (sumRows > 0) {
+          out['Plan Rows'] = sumRows;
+        }
+      }
+    }
+
+    if (out['Actual Total Time'] == null) {
+      const parts = plans
+        .map((p) => toNum(p['Actual Total Time']))
+        .filter((t): t is number => t != null);
+      if (parts.length > 0) {
+        out['Actual Total Time'] = parts.reduce((a, b) => a + b, 0);
+      }
+    }
+  }
+
+  return out;
+}
+
 function convertStep(step: Record<string, unknown>): PgShapedPlanNode | null {
   if (isRecord(step.table)) {
     return tableToNode(step.table);
@@ -267,7 +304,7 @@ function convertQueryBlock(qb: Record<string, unknown>): PgShapedPlanNode | null
     return tableToNode(qb.table);
   }
   if (qb.nested_loop != null) {
-    return nestedLoopArrayToNode(asNestedLoopItems(qb.nested_loop));
+    return mergeQueryBlockSummary(qb, nestedLoopArrayToNode(asNestedLoopItems(qb.nested_loop)));
   }
   if (isRecord(qb.ordering_operation)) {
     return convertOrderingOperation(qb.ordering_operation);

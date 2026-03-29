@@ -50,9 +50,15 @@ const variantClasses: Record<ButtonVariant, string> = {
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'h-7 px-3 text-xs gap-1.5',
-  md: 'h-9 px-4 text-sm gap-2',
-  lg: 'h-11 px-6 text-base gap-2.5',
+  sm: 'h-7 px-3 text-xs',
+  md: 'h-9 px-4 text-sm',
+  lg: 'h-11 px-6 text-base',
+};
+
+const sizeGapClasses: Record<ButtonSize, string> = {
+  sm: 'gap-1.5',
+  md: 'gap-2',
+  lg: 'gap-2.5',
 };
 
 function Spinner({ className }: { className?: string }) {
@@ -102,6 +108,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const spinnerSize =
       size === 'sm' ? 'w-3 h-3' : size === 'lg' ? 'w-5 h-5' : 'w-4 h-4';
 
+    const gapClass = sizeGapClasses[size];
+
     return (
       <button
         ref={ref}
@@ -129,10 +137,28 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {loading ? (
           <Spinner className={spinnerSize} />
         ) : (
-          leftIcon && <span className="shrink-0">{leftIcon}</span>
+          <span
+            className={cn(
+              'inline-flex min-h-0 items-center',
+              gapClass,
+              fullWidth && 'w-full justify-center'
+            )}
+          >
+            {leftIcon && (
+              <span className="inline-flex shrink-0 items-center justify-center [&_.material-symbols-outlined]:block [&_.material-symbols-outlined]:leading-none">
+                {leftIcon}
+              </span>
+            )}
+            {children != null && children !== false && (
+              <span className="inline-flex shrink-0 items-center">{children}</span>
+            )}
+            {rightIcon && (
+              <span className="inline-flex shrink-0 items-center justify-center [&_.material-symbols-outlined]:block [&_.material-symbols-outlined]:leading-none">
+                {rightIcon}
+              </span>
+            )}
+          </span>
         )}
-        {children && <span>{children}</span>}
-        {!loading && rightIcon && <span className="shrink-0">{rightIcon}</span>}
       </button>
     );
   }

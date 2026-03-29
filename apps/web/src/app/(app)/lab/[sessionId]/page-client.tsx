@@ -2712,11 +2712,20 @@ export default function LabPage({ params }: ClientPageProps) {
             <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-outline-variant/10 bg-surface-container/70 p-1">
               {isExecuting ? (
                 <Button
-                  variant="secondary"
+                  variant="destructive"
                   size="sm"
+                  className="border border-error/25"
                   onClick={() => cancelExecution()}
                   title="Stop the running query"
-                  leftIcon={<span className="material-symbols-outlined text-[18px]">close</span>}
+                  leftIcon={
+                    <span
+                      className="material-symbols-outlined shrink-0 text-[18px] leading-none"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                      aria-hidden
+                    >
+                      stop
+                    </span>
+                  }
                 >
                   Cancel
                 </Button>
@@ -2732,7 +2741,7 @@ export default function LabPage({ params }: ClientPageProps) {
                   }
                   onClick={() => executeQuery({ sessionId, sql: currentQuery })}
                   leftIcon={
-                    <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                    <span className="material-symbols-outlined shrink-0 text-[18px] leading-none" style={{ fontVariationSettings: "'FILL' 1" }}>
                       play_arrow
                     </span>
                   }
@@ -2742,11 +2751,20 @@ export default function LabPage({ params }: ClientPageProps) {
               )}
               {isExplaining ? (
                 <Button
-                  variant="secondary"
+                  variant="destructive"
                   size="sm"
+                  className="border border-error/25"
                   onClick={() => cancelExplain()}
                   title="Stop generating the execution plan"
-                  leftIcon={<span className="material-symbols-outlined text-[18px]">close</span>}
+                  leftIcon={
+                    <span
+                      className="material-symbols-outlined shrink-0 text-[18px] leading-none"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                      aria-hidden
+                    >
+                      stop
+                    </span>
+                  }
                 >
                   Cancel
                 </Button>
@@ -2768,7 +2786,9 @@ export default function LabPage({ params }: ClientPageProps) {
                       ? 'Execution plan is available for SELECT/INSERT/UPDATE/DELETE statements'
                       : 'Generate an execution plan for the current query'
                   }
-                  leftIcon={<span className="material-symbols-outlined text-[18px]">account_tree</span>}
+                  leftIcon={
+                    <span className="material-symbols-outlined shrink-0 text-[18px] leading-none">account_tree</span>
+                  }
                 >
                   Explain
                 </Button>
