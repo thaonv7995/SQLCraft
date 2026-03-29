@@ -171,6 +171,7 @@ function DatabaseCatalogSkeleton() {
 }
 
 const CATALOG_PAGE_SIZE = 12;
+const PENDING_SCANS_PAGE_SIZE = 5;
 
 export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   const router = useRouter();
@@ -225,7 +226,8 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
 
   const { data: pendingData, isLoading: pendingLoading } = useQuery({
     queryKey: ['admin-pending-scans', pendingPage],
-    queryFn: () => databasesApi.listPendingScans({ page: pendingPage, limit: 10 }),
+    queryFn: () =>
+      databasesApi.listPendingScans({ page: pendingPage, limit: PENDING_SCANS_PAGE_SIZE }),
     staleTime: 30_000,
   });
 
@@ -302,6 +304,84 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
           }}
         />
       ) : null}
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="page-section-title">Published Database Catalog</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            Select a database to inspect its templates and operational history.
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-3 lg:w-auto lg:max-w-3xl">
+          <Input
+            label="Search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Name, description, engine, tags…"
+            className="w-full"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
+            <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
+            <FilterSelect
+              value={difficulty}
+              onChange={setDifficulty}
+              options={DATABASE_DIFFICULTY_FILTER_OPTIONS}
+            />
+            <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
+          </div>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <DatabaseCatalogSkeleton key={index} />
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="rounded-xl border border-error/20 bg-error/5 px-5 py-4 text-sm text-error">
+          Failed to load the database catalog.
+        </div>
+      ) : databases.length === 0 ? (
+        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-5 py-8 text-center">
+          <p className="text-sm font-medium text-on-surface">No published databases found</p>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            Import a SQL dump or adjust filters — no database matches the current criteria.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {databases.map((database) => (
+              <DatabaseCatalogCard key={database.id} database={database} />
+            ))}
+          </div>
+          {data && data.totalPages > 1 ? (
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={catalogPage <= 1}
+                onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <span className="text-xs text-on-surface-variant">
+                Page {data.page} / {data.totalPages} · {data.total} total
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={catalogPage >= data.totalPages}
+                onClick={() => setCatalogPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
 
       <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -411,84 +491,6 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
           </>
         )}
       </div>
-
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="page-section-title">Published Database Catalog</h2>
-          <p className="mt-1 text-sm text-on-surface-variant">
-            Select a database to inspect its templates and operational history.
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-3 lg:w-auto lg:max-w-3xl">
-          <Input
-            label="Search"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Name, description, engine, tags…"
-            className="w-full"
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
-            <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
-            <FilterSelect
-              value={difficulty}
-              onChange={setDifficulty}
-              options={DATABASE_DIFFICULTY_FILTER_OPTIONS}
-            />
-            <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
-          </div>
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <DatabaseCatalogSkeleton key={index} />
-          ))}
-        </div>
-      ) : isError ? (
-        <div className="rounded-xl border border-error/20 bg-error/5 px-5 py-4 text-sm text-error">
-          Failed to load the database catalog.
-        </div>
-      ) : databases.length === 0 ? (
-        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low px-5 py-8 text-center">
-          <p className="text-sm font-medium text-on-surface">No published databases found</p>
-          <p className="mt-1 text-sm text-on-surface-variant">
-            Import a SQL dump or adjust filters — no database matches the current criteria.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {databases.map((database) => (
-              <DatabaseCatalogCard key={database.id} database={database} />
-            ))}
-          </div>
-          {data && data.totalPages > 1 ? (
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={catalogPage <= 1}
-                onClick={() => setCatalogPage((p) => Math.max(1, p - 1))}
-              >
-                Previous
-              </Button>
-              <span className="text-xs text-on-surface-variant">
-                Page {data.page} / {data.totalPages} · {data.total} total
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={catalogPage >= data.totalPages}
-                onClick={() => setCatalogPage((p) => p + 1)}
-              >
-                Next
-              </Button>
-            </div>
-          ) : null}
-        </>
-      )}
     </div>
   );
 }
