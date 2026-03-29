@@ -80,6 +80,10 @@ const DIALECT_OPTIONS: Array<{ value: SchemaSqlDialect; label: string }> = [
   { value: 'sqlite', label: 'SQLite' },
 ];
 
+/** File picker `accept` — include `.gz` and gzip MIME types: `name.sql.gz` is often matched as `.gz` only, not `.sql.gz`. */
+const SQL_DUMP_FILE_ACCEPT =
+  '.sql,.SQL,.txt,.TXT,.sql.gz,.SQL.GZ,.gz,.GZ,.zip,.ZIP,application/gzip,application/x-gzip';
+
 function formatNumber(value: number) {
   return value.toLocaleString('en-US');
 }
@@ -399,7 +403,7 @@ export function DatabaseImportPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".sql,.SQL,.txt,.TXT,.sql.gz,.SQL.GZ,.zip,.ZIP"
+              accept={SQL_DUMP_FILE_ACCEPT}
               aria-label="Choose SQL dump file"
               onChange={handleFileSelection}
               className="sr-only"

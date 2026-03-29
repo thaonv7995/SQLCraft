@@ -65,6 +65,12 @@ export function sumDatasetRowCounts(rowCounts: unknown): number {
   }, 0);
 }
 
+/**
+ * Map observed row count to a catalog scale label.
+ *
+ * `DATASET_SCALE_TARGET_TOTAL_ROWS.tiny` is 100 — that is the intended **upper bound** for “tiny”
+ * dumps, not “everything below 10K”. Without a middle step, 5.1K rows was mislabeled as `tiny`.
+ */
 export function classifyDatasetScaleFromTotalRows(totalRows: number): DatasetSize {
   if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.large) {
     return 'large';
@@ -75,6 +81,10 @@ export function classifyDatasetScaleFromTotalRows(totalRows: number): DatasetSiz
   }
 
   if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.small) {
+    return 'small';
+  }
+
+  if (totalRows > DATASET_SCALE_TARGET_TOTAL_ROWS.tiny) {
     return 'small';
   }
 
