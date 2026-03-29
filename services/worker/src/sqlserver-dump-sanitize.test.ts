@@ -60,3 +60,39 @@ test('quoted sp_addtype type name is stripped', () => {
   assert.ok(!/\bsp_addtype\b/i.test(out));
   assert.match(out, /TYPE_ID\(N'tid'\)/i);
 });
+
+test('converts MySQL backticks to bracketed identifiers', () => {
+  const out = sanitizeSqlServerDumpScript('INSERT INTO `doctors` (id) VALUES (1);');
+  assert.match(out, /INSERT INTO \[doctors\]/);
+});
+
+test('quotes unquoted ISO dates in INSERT VALUES (avoids subtraction parse)', () => {
+  const out = sanitizeSqlServerDumpScript(
+    "INSERT INTO t (a, d) VALUES (1, 2024-06-01);",
+  );
+  assert.match(out, /VALUES\s*\(\s*1\s*,\s*'2024-06-01'\s*\)/i);
+});
+
+test('quotes unquoted ISO date on a line after VALUES (multi-line INSERT)', () => {
+  const out = sanitizeSqlServerDumpScript(
+    'INSERT INTO t (a, d)\nVALUES\n(1, 2024-06-01);',
+  );
+  assert.match(out, /'2024-06-01'/);
+  assert.ok(!/\(\s*1\s*,\s*2024-06-01\s*\)/.test(out));
+});
+
+test('does not double-quote already quoted dates in INSERT', () => {
+  const out = sanitizeSqlServerDumpScript("INSERT INTO t VALUES ('2024-06-01');");
+  const matches = out.match(/'2024-06-01'/g);
+  assert.equal(matches?.length, 1);
+});
+
+test('strips MySQL LOCK TABLES / SET NAMES lines', () => {
+  const out = sanitizeSqlServerDumpScript(
+    "LOCK TABLES `x` WRITE;\nINSERT INTO [x] VALUES (1);\nUNLOCK TABLES;\nSET NAMES utf8mb4;\n",
+  );
+  assert.ok(!/LOCK\s+TABLES/i.test(out));
+  assert.ok(!/UNLOCK\s+TABLES/i.test(out));
+  assert.ok(!/SET\s+NAMES/i.test(out));
+  assert.match(out, /INSERT INTO \[x\]/);
+});

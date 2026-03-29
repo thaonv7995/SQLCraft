@@ -8,6 +8,128 @@ function stripBom(sql: string): string {
   return sql.replace(/^\uFEFF/, '');
 }
 
+/** MySQL / mysqldump identifiers use backticks; T-SQL expects [] (or quoted). */
+export function mysqlBackticksToBrackets(sql: string): string {
+  return sql.replace(/`([^`]+)`/g, '[$1]');
+}
+
+/**
+ * MySQL session lines that are invalid or noisy in SQL Server sqlcmd restores.
+ */
+export function stripMySqlSessionNoiseLines(sql: string): string {
+  return sql
+    .replace(/^\s*LOCK\s+TABLES\s+[^;]+;\s*$/gim, '')
+    .replace(/^\s*UNLOCK\s+TABLES\s*;\s*$/gim, '')
+    .replace(/^\s*SET\s+NAMES\s+[^;\r\n]+;?\s*$/gim, '')
+    .replace(/^\s*SET\s+FOREIGN_KEY_CHECKS\s*=\s*\d+\s*;?\s*$/gim, '')
+    .replace(/^\s*SET\s+UNIQUE_CHECKS\s*=\s*\d+\s*;?\s*$/gim, '')
+    .replace(/^\s*SET\s+SQL_MODE\s*=\s*[^;\r\n]+;?\s*$/gim, '');
+}
+
+/**
+ * Unquoted ISO dates/datetimes in INSERT ... VALUES are parsed as integer subtraction in T-SQL
+ * (e.g. 2024-06-01 → 2024 - 06 - 01), yielding Msg 102 "Incorrect syntax near '4'" on the year digit.
+ *
+ * Dumps often split INSERT / VALUES / row across lines; the date may appear on line 9 with no
+ * "INSERT" on that line, so a line-only rewriter misses it. This pass walks the full script,
+ * skips single-quoted strings and SQL comments, and quotes bare YYYY-MM-DD / datetime only in
+ * plain text (typically VALUES tuples).
+ */
+export function quoteUnquotedIsoDatesOutsideStringsAndComments(sql: string): string {
+  const iso =
+    /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i;
+  let out = '';
+  let i = 0;
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  while (i < sql.length) {
+    const c = sql[i];
+    const c2 = sql[i + 1];
+
+    if (inLineComment) {
+      out += c;
+      if (c === '\n') {
+        inLineComment = false;
+      } else if (c === '\r') {
+        if (c2 === '\n') {
+          out += c2;
+          i += 2;
+          inLineComment = false;
+          continue;
+        }
+        inLineComment = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (inBlockComment) {
+      out += c;
+      if (c === '*' && c2 === '/') {
+        out += c2;
+        i += 2;
+        inBlockComment = false;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      out += c;
+      if (c === "'") {
+        if (c2 === "'") {
+          out += c2;
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (c === "'") {
+      inString = true;
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === '-' && c2 === '-') {
+      inLineComment = true;
+      out += '--';
+      i += 2;
+      continue;
+    }
+    if (c === '/' && c2 === '*') {
+      inBlockComment = true;
+      out += '/*';
+      i += 2;
+      continue;
+    }
+
+    const rest = sql.slice(i);
+    const m = rest.match(iso);
+    if (m && m.index === 0) {
+      const before = i > 0 ? sql[i - 1] : '';
+      const prevOk = i === 0 || /[\s(,]/.test(before);
+      const notIdPart = !/[\w]/.test(before);
+      if (prevOk && notIdPart) {
+        out += `'${m[1]}'`;
+        i += m[1].length;
+        continue;
+      }
+    }
+
+    out += c;
+    i++;
+  }
+
+  return out;
+}
+
 /**
  * Remove `USE otherdb` lines so `sqlcmd -d <sandboxDb>` keeps all batches in the sandbox database.
  * SSMS exports often start with `USE [MyCatalog];` which would create objects outside `s_*`.
@@ -70,6 +192,8 @@ export function stripSqlServerSpAddtypeStatements(sql: string): string {
  */
 export function sanitizeSqlServerDumpScript(sql: string): string {
   let s = stripSqlServerUseStatements(stripBom(sql));
+  s = mysqlBackticksToBrackets(s);
+  s = stripMySqlSessionNoiseLines(s);
   if (needsInstPubsStyleAliasTypes(s)) {
     s = INST_PUBS_DBO_TYPES_BOOTSTRAP + s;
   }
@@ -108,6 +232,8 @@ export function sanitizeSqlServerDumpScript(sql: string): string {
   s = s.replace(new RegExp(`\\bDELETE\\s+FROM\\s+(${R})\\b`, 'gi'), (_m, name) => `DELETE FROM [${name}]`);
 
   s = s.replace(new RegExp(`\\bTRUNCATE\\s+TABLE\\s+(${R})\\b`, 'gi'), (_m, name) => `TRUNCATE TABLE [${name}]`);
+
+  s = quoteUnquotedIsoDatesOutsideStringsAndComments(s);
 
   return s;
 }
