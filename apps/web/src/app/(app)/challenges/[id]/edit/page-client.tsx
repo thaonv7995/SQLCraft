@@ -64,7 +64,7 @@ export default function UserEditChallengePage({ params }: ClientPageProps) {
     const items = databasesQuery.data?.items ?? [];
     return items.map((d) => ({
       value: d.schemaTemplateId ?? d.id,
-      label: d.name,
+      label: d.catalogKind === 'private_owner' ? `${d.name} (my upload)` : d.name,
     }));
   }, [databasesQuery.data?.items]);
 

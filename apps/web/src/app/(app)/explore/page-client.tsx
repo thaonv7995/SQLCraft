@@ -8,8 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { databasesApi } from '@/lib/api';
 import type { Database } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth';
 import {
   DATABASE_DIFFICULTY_STYLES,
+  DATABASE_ACCESS_FILTER_OPTIONS,
   DATABASE_DIALECT_OPTIONS,
   DATABASE_DOMAIN_OPTIONS,
   DATABASE_SCALE_OPTIONS,
@@ -36,6 +38,8 @@ function wantsImportFromSearchParams(
 function DatabaseCard({ db, onClick }: { db: Database; onClick: () => void }) {
   const diff =
     DATABASE_DIFFICULTY_STYLES[db.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
+  const mine = db.catalogKind === 'private_owner';
+  const reviewing = db.catalogKind === 'public_pending_owner';
 
   return (
     <div
@@ -63,9 +67,21 @@ function DatabaseCard({ db, onClick }: { db: Database; onClick: () => void }) {
       </div>
 
       {/* Title + description */}
-      <h3 className="font-headline text-base font-bold text-on-surface group-hover:text-primary transition-colors mb-1.5">
-        {db.name}
-      </h3>
+      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+        <h3 className="font-headline text-base font-bold text-on-surface group-hover:text-primary transition-colors">
+          {db.name}
+        </h3>
+        {reviewing ? (
+          <span className="rounded-md border border-amber-500/35 bg-amber-500/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200">
+            Reviewing
+          </span>
+        ) : null}
+        {mine ? (
+          <span className="rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary">
+            My upload
+          </span>
+        ) : null}
+      </div>
       <p className="text-xs text-outline leading-relaxed line-clamp-2 mb-2">
         {db.description}
       </p>
@@ -161,6 +177,7 @@ const EXPLORE_PAGE_SIZE = 12;
 
 export default function ExplorePage(props: ClientPageProps) {
   const router = useRouter();
+  const authUser = useAuthStore((s) => s.user);
   const importFromQuery = wantsImportFromSearchParams(props.searchParams);
   const [importModalOpen, setImportModalOpen] = useState(importFromQuery);
   const [domain, setDomain] = useState('all');
@@ -169,6 +186,9 @@ export default function ExplorePage(props: ClientPageProps) {
   const [searchInput, setSearchInput] = useState('');
   const [debouncedQ, setDebouncedQ] = useState('');
   const [catalogPage, setCatalogPage] = useState(1);
+  const [accessFilter, setAccessFilter] = useState<(typeof DATABASE_ACCESS_FILTER_OPTIONS)[number]['value']>(
+    'all',
+  );
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(searchInput.trim()), 300);
@@ -177,7 +197,13 @@ export default function ExplorePage(props: ClientPageProps) {
 
   useEffect(() => {
     setCatalogPage(1);
-  }, [domain, scale, dialect, debouncedQ]);
+  }, [domain, scale, dialect, debouncedQ, accessFilter]);
+
+  useEffect(() => {
+    if (!authUser) {
+      setAccessFilter('all');
+    }
+  }, [authUser]);
 
   useEffect(() => {
     if (importFromQuery) {
@@ -201,7 +227,7 @@ export default function ExplorePage(props: ClientPageProps) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['databases', domain, scale, dialect, debouncedQ, catalogPage],
+    queryKey: ['databases', domain, scale, dialect, debouncedQ, catalogPage, accessFilter, authUser?.id],
     queryFn: () =>
       databasesApi.list({
         domain: domain === 'all' ? undefined : domain,
@@ -210,6 +236,7 @@ export default function ExplorePage(props: ClientPageProps) {
         q: debouncedQ || undefined,
         page: catalogPage,
         limit: EXPLORE_PAGE_SIZE,
+        ...(authUser && accessFilter !== 'all' ? { accessFilter } : {}),
       }),
     staleTime: 60_000,
   });
@@ -279,6 +306,13 @@ export default function ExplorePage(props: ClientPageProps) {
           <FilterSelect value={domain} onChange={setDomain} options={DATABASE_DOMAIN_OPTIONS} />
           <FilterSelect value={scale} onChange={setScale} options={DATABASE_SCALE_OPTIONS} />
           <FilterSelect value={dialect} onChange={setDialect} options={DATABASE_DIALECT_OPTIONS} />
+          {authUser ? (
+            <FilterSelect
+              value={accessFilter}
+              onChange={(v) => setAccessFilter(v as (typeof DATABASE_ACCESS_FILTER_OPTIONS)[number]['value'])}
+              options={[...DATABASE_ACCESS_FILTER_OPTIONS]}
+            />
+          ) : null}
         </div>
       </div>
 

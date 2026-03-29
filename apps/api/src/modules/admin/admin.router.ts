@@ -41,6 +41,7 @@ import {
   listPendingScansHandler,
   getSqlDumpScanHandler,
   listPendingSchemaTemplatesForReviewHandler,
+  getPendingSchemaTemplateReviewDetailHandler,
   approveSchemaTemplateReviewHandler,
   rejectSchemaTemplateReviewHandler,
   updateAdminConfigHandler,
@@ -382,6 +383,24 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     listPendingSchemaTemplatesForReviewHandler,
+  );
+
+  fastify.get<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/schema-templates/:id/review-detail',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Full schema/dataset preview for a public upload pending catalog review',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    getPendingSchemaTemplateReviewDetailHandler,
   );
 
   fastify.post<{ Params: AdminIdParams }>(

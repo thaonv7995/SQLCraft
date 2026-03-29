@@ -27,6 +27,16 @@ interface DatabaseImportPanelProps {
   variant?: 'admin' | 'user';
   onClose?: () => void;
   onImported?: (databaseId: string) => void;
+  /**
+   * User variant: called after a successful import so the host can toast / close a dialog
+   * without leaving long in-panel copy (e.g. public → catalog review).
+   */
+  onAfterUserImport?: (ctx: {
+    visibility: 'public' | 'private';
+    databaseId: string;
+    schemaTemplateId: string;
+    datasetTemplateId?: string | null;
+  }) => void;
   /** When set, load this scan from storage (same payload as after a fresh upload scan). */
   resumeScanId?: string | null;
   onResumeConsumed?: () => void;
@@ -78,6 +88,7 @@ export function DatabaseImportPanel({
   variant = 'admin',
   onClose,
   onImported,
+  onAfterUserImport,
   resumeScanId,
   onResumeConsumed,
   replaceSchemaTemplateId,
@@ -210,7 +221,16 @@ export function DatabaseImportPanel({
     onSuccess(result, variables) {
       if (isUser) {
         const vis = (variables as UserSqlDumpImportPayload).visibility ?? 'public';
-        if (vis === 'public') {
+        const databaseId = result.databaseId ?? result.schemaTemplateId;
+        if (onAfterUserImport) {
+          onAfterUserImport({
+            visibility: vis,
+            databaseId,
+            schemaTemplateId: result.schemaTemplateId,
+            datasetTemplateId: result.datasetTemplateId ?? null,
+          });
+          setImportSuccess(null);
+        } else if (vis === 'public') {
           setImportSuccess(
             'Submitted for catalog review. An admin must approve before it appears in the public list.',
           );

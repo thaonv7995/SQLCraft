@@ -29,6 +29,12 @@ export const ListDatabasesQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   /** When true (authenticated), include published private databases you own or are invited to (challenge authoring). */
   forChallengeAuthoring: z.coerce.boolean().optional().default(false),
+  /**
+   * When authenticated (merged catalog), narrow rows:
+   * - `catalog` — public catalog + databases shared with you (invited); same “catalog” bucket in UI.
+   * - `mine` — only your private uploads.
+   */
+  accessFilter: z.enum(['all', 'catalog', 'mine']).optional().default('all'),
 });
 
 export const DatabaseParamsSchema = z.object({

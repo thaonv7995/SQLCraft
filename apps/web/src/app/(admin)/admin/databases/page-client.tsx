@@ -273,6 +273,11 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
     [databases],
   );
 
+  const pendingReviews = pendingReviewQuery.data ?? [];
+  const showPendingReviewSection =
+    pendingReviewQuery.isError ||
+    (pendingReviewQuery.isFetched && pendingReviews.length > 0);
+
   return (
     <div className="page-shell-wide page-stack">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -338,84 +343,104 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         />
       ) : null}
 
-      <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
-        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-on-surface">User uploads — pending catalog review</h2>
-            <p className="mt-0.5 text-xs text-on-surface-variant">
-              Public SQL imports awaiting approval before they appear in the published catalog.
-            </p>
+      {showPendingReviewSection ? (
+        <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-5">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-on-surface">Pending catalog review</h2>
+              <p className="mt-0.5 text-xs text-on-surface-variant">
+                Open the name or Details to inspect the schema, then approve or reject.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() => void pendingReviewQuery.refetch()}
+            >
+              Refresh
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={() => void pendingReviewQuery.refetch()}
-          >
-            Refresh
-          </Button>
-        </div>
-        {pendingReviewQuery.isLoading ? (
-          <p className="mt-4 text-xs text-on-surface-variant">Loading…</p>
-        ) : pendingReviewQuery.isError ? (
-          <p className="mt-4 text-xs text-error">Could not load pending reviews.</p>
-        ) : !pendingReviewQuery.data?.length ? (
-          <p className="mt-4 text-xs text-on-surface-variant">No templates pending review.</p>
-        ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[560px] text-left text-xs">
-              <thead>
-                <tr className="border-b border-outline-variant/15 text-on-surface-variant">
-                  <th className="py-2 pr-3 font-medium">Name</th>
-                  <th className="py-2 pr-3 font-medium">Dialect</th>
-                  <th className="py-2 pr-3 font-medium">Submitted</th>
-                  <th className="py-2 pr-3 font-medium">Template ID</th>
-                  <th className="py-2 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingReviewQuery.data.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b border-outline-variant/10 text-on-surface last:border-0"
-                  >
-                    <td className="py-2 pr-3 font-medium">{row.name}</td>
-                    <td className="py-2 pr-3 font-mono text-[11px]">{row.dialect}</td>
-                    <td className="py-2 pr-3 text-on-surface-variant">
-                      {new Date(row.createdAt).toLocaleString()}
-                    </td>
-                    <td className="max-w-[160px] truncate py-2 pr-3 font-mono text-[10px] text-outline">
-                      {row.id}
-                    </td>
-                    <td className="py-2 text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          loading={approveReviewMutation.isPending}
-                          disabled={rejectReviewMutation.isPending}
-                          onClick={() => approveReviewMutation.mutate(row.id)}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          loading={rejectReviewMutation.isPending}
-                          disabled={approveReviewMutation.isPending}
-                          onClick={() => rejectReviewMutation.mutate(row.id)}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    </td>
+          {pendingReviewQuery.isError ? (
+            <p className="mt-4 text-xs text-error">Could not load pending reviews.</p>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-outline-variant/15 text-on-surface-variant">
+                    <th className="py-2 pr-3 font-medium">Name</th>
+                    <th className="py-2 pr-3 font-medium">Description</th>
+                    <th className="py-2 pr-3 font-medium">Dialect</th>
+                    <th className="py-2 pr-3 font-medium">Submitted</th>
+                    <th className="py-2 pr-3 font-medium">Template ID</th>
+                    <th className="py-2 text-right font-medium">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {pendingReviews.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-outline-variant/10 text-on-surface last:border-0"
+                    >
+                      <td className="py-2 pr-3 font-medium">
+                        <Link
+                          href={`/admin/databases/${row.id}?pendingReview=1`}
+                          className="text-primary hover:underline"
+                        >
+                          {row.name}
+                        </Link>
+                      </td>
+                      <td className="max-w-[200px] py-2 pr-3 text-on-surface-variant line-clamp-2">
+                        {row.description?.trim() || '—'}
+                      </td>
+                      <td className="py-2 pr-3 font-mono text-[11px]">{row.dialect}</td>
+                      <td className="py-2 pr-3 text-on-surface-variant">
+                        {new Date(row.createdAt).toLocaleString()}
+                      </td>
+                      <td className="max-w-[min(200px,28vw)] py-2 pr-3">
+                        <span
+                          className="block font-mono text-[10px] text-outline break-all"
+                          title={row.id}
+                        >
+                          {row.id}
+                        </span>
+                      </td>
+                      <td className="py-2 text-right">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          <Link
+                            href={`/admin/databases/${row.id}?pendingReview=1`}
+                            className="inline-flex h-7 items-center justify-center rounded-lg px-3 text-xs font-medium text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+                          >
+                            Details
+                          </Link>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            loading={approveReviewMutation.isPending}
+                            disabled={rejectReviewMutation.isPending}
+                            onClick={() => approveReviewMutation.mutate(row.id)}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            loading={rejectReviewMutation.isPending}
+                            disabled={approveReviewMutation.isPending}
+                            onClick={() => rejectReviewMutation.mutate(row.id)}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>

@@ -33,7 +33,8 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
       onRequest: [fastify.optionalAuthenticate],
       schema: {
         tags: ['Databases'],
-        summary: 'List available database templates for the explorer',
+        summary:
+          'List database templates for the explorer; when authenticated, includes your private uploads and invited private DBs',
         querystring: {
           type: 'object',
           properties: {
@@ -73,7 +74,14 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
               type: 'boolean',
               default: false,
               description:
-                'When true, requires auth; includes your private and invited databases for challenge authoring.',
+                'When true, requires auth (e.g. challenge authoring forms). Catalog merge when logged in does not depend on this flag.',
+            },
+            accessFilter: {
+              type: 'string',
+              enum: ['all', 'catalog', 'mine'],
+              default: 'all',
+              description:
+                'When authenticated: all | catalog (public + shared with you) | mine (your private uploads only).',
             },
           },
         },

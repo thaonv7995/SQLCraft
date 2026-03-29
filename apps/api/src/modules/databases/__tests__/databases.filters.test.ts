@@ -23,6 +23,7 @@ function sampleDb(overrides: Partial<DatabaseItem> = {}): DatabaseItem {
     tableCount: 3,
     estimatedSizeGb: 0.1,
     schemaTemplateId: 't1',
+    catalogKind: 'public',
     availableScales: ['small', 'tiny'],
     availableScaleMetadata: [],
     ...overrides,
@@ -54,6 +55,43 @@ describe('databaseMatchesListQuery', () => {
     const db = sampleDb();
     const q = ListDatabasesQuerySchema.parse({ q: '   ', page: 1, limit: 20 });
     expect(databaseMatchesListQuery(db, q)).toBe(true);
+  });
+
+  it('filters by accessFilter catalog (public + invited) and mine', () => {
+    const pub = sampleDb({ catalogKind: 'public' });
+    const mine = sampleDb({ id: 'mine', catalogKind: 'private_owner' });
+    const shared = sampleDb({ id: 'shared', catalogKind: 'private_invited' });
+
+    const all = ListDatabasesQuerySchema.parse({ page: 1, limit: 20, accessFilter: 'all' });
+    const reviewing = sampleDb({ id: 'rev', catalogKind: 'public_pending_owner' });
+    expect(databaseMatchesListQuery(pub, all)).toBe(true);
+    expect(databaseMatchesListQuery(mine, all)).toBe(true);
+    expect(databaseMatchesListQuery(shared, all)).toBe(true);
+    expect(databaseMatchesListQuery(reviewing, all)).toBe(true);
+
+    const catalog = ListDatabasesQuerySchema.parse({ page: 1, limit: 20, accessFilter: 'catalog' });
+    expect(databaseMatchesListQuery(pub, catalog)).toBe(true);
+    expect(databaseMatchesListQuery(shared, catalog)).toBe(true);
+    expect(databaseMatchesListQuery(mine, catalog)).toBe(false);
+    expect(databaseMatchesListQuery(reviewing, catalog)).toBe(false);
+
+    const mineOnly = ListDatabasesQuerySchema.parse({ page: 1, limit: 20, accessFilter: 'mine' });
+    expect(databaseMatchesListQuery(mine, mineOnly)).toBe(true);
+    expect(databaseMatchesListQuery(reviewing, mineOnly)).toBe(true);
+    expect(databaseMatchesListQuery(pub, mineOnly)).toBe(false);
+    expect(databaseMatchesListQuery(shared, mineOnly)).toBe(false);
+  });
+
+  it('excludes public pending from challenge authoring list', () => {
+    const reviewing = sampleDb({ id: 'rev', catalogKind: 'public_pending_owner' });
+    const q = ListDatabasesQuerySchema.parse({
+      page: 1,
+      limit: 20,
+      forChallengeAuthoring: true,
+    });
+    expect(databaseMatchesListQuery(reviewing, q)).toBe(false);
+    const qOff = ListDatabasesQuerySchema.parse({ page: 1, limit: 20, forChallengeAuthoring: false });
+    expect(databaseMatchesListQuery(reviewing, qOff)).toBe(true);
   });
 
   it('combines domain scale difficulty', () => {

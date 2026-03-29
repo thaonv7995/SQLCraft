@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { DatabaseImportPanel } from '@/components/admin/database-import-panel';
 import { Button } from '@/components/ui/button';
@@ -52,6 +53,20 @@ export function ExploreDatabaseImportModal({
 
   const closeModal = useCallback(() => onOpenChange(false), [onOpenChange]);
 
+  const handleAfterUserImport = useCallback(
+    (ctx: { visibility: 'public' | 'private' }) => {
+      if (ctx.visibility === 'public') {
+        toast.success(
+          'Submitted successfully. It appears in Explorer as Reviewing until an admin approves it.',
+        );
+      } else {
+        toast.success('Database imported. You can use it when authoring challenges.');
+      }
+      closeModal();
+    },
+    [closeModal],
+  );
+
   if (!open) {
     return null;
   }
@@ -99,7 +114,11 @@ export function ExploreDatabaseImportModal({
               </Link>
             </div>
           ) : (
-            <DatabaseImportPanel variant="user" onImported={handleImported} />
+            <DatabaseImportPanel
+              variant="user"
+              onImported={handleImported}
+              onAfterUserImport={handleAfterUserImport}
+            />
           )}
         </div>
       </div>

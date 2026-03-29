@@ -7,6 +7,14 @@ export type { SchemaSqlDialect } from '@sqlcraft/types';
 export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
+/** How a row appears when public + your private / invited DBs are merged (e.g. Explorer, challenge pickers). */
+export type DatabaseCatalogKind =
+  | 'public'
+  | 'private_owner'
+  | 'private_invited'
+  /** Your public upload awaiting admin approval (draft + pending review). */
+  | 'public_pending_owner';
+
 export interface DatabaseColumn {
   name: string;
   type: string;
@@ -49,6 +57,8 @@ export interface DatabaseItem {
   tableCount: number;
   estimatedSizeGb: number;
   schemaTemplateId: string;
+  /** Set for authenticated list/detail when your private or invited templates are included. */
+  catalogKind: DatabaseCatalogKind;
   availableScales: DatabaseScale[];
   availableScaleMetadata: Array<{ scale: DatabaseScale; rowCount: number }>;
   schema?: DatabaseTable[];

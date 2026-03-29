@@ -934,6 +934,12 @@ export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'socia
 export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
+export type DatabaseCatalogKind =
+  | 'public'
+  | 'private_owner'
+  | 'private_invited'
+  | 'public_pending_owner';
+
 export interface Database {
   id: string;
   name: string;
@@ -942,6 +948,8 @@ export interface Database {
   domain: DatabaseDomain;
   scale: DatabaseScale;
   difficulty: DatabaseDifficulty;
+  /** From list/detail when logged in: public catalog vs your private upload vs invited private. */
+  catalogKind?: DatabaseCatalogKind;
   dialect?: SchemaSqlDialect;
   /** From schema template; used when locking metadata on “upload new version”. */
   engineVersion?: string | null;
@@ -1235,6 +1243,7 @@ function normalizeDatabase(database: Database): Database {
 
   return {
     ...database,
+    catalogKind: database.catalogKind ?? 'public',
     sourceScale: scaleContext.sourceScale,
     selectedScale: scaleContext.selectedScale,
     availableScales: scaleContext.availableScales,
@@ -2084,6 +2093,12 @@ export const adminApi = {
       .get<PendingSchemaTemplateReviewItem[]>('/admin/databases/schema-templates/pending-review')
       .then((r) => r.data),
 
+  /** Full Database payload (schema, scales, row counts) for moderation before approve/reject. */
+  getPendingSchemaTemplateReviewDetail: (schemaTemplateId: string) =>
+    api
+      .get<Database>(`/admin/databases/schema-templates/${schemaTemplateId}/review-detail`)
+      .then((r) => normalizeDatabase(r.data)),
+
   approveSchemaTemplateReview: (schemaTemplateId: string) =>
     api
       .post<{ ok: boolean }>(
@@ -2223,6 +2238,8 @@ export const databasesApi = {
     limit?: number;
     /** Requires auth: include your private DBs and those you are invited to (challenge authoring). */
     forChallengeAuthoring?: boolean;
+    /** Logged-in only: all | catalog (public + shared) | mine (your uploads). */
+    accessFilter?: 'all' | 'catalog' | 'mine';
   }) =>
     api
       .get<PaginatedResponse<Database>>('/databases', { params })

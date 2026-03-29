@@ -5,6 +5,27 @@ export interface ProvisioningEstimate {
   estimatedReadyAt: string;
 }
 
+/**
+ * Re-anchor `estimatedReadyAt` to when the learning session was created. Without this,
+ * each GET recomputes `now + estimatedSeconds`, so polling pushes the deadline forward
+ * and UIs that count down to `estimatedReadyAt` appear to jump backward.
+ */
+export function anchorProvisioningEstimateToCreatedAt(
+  estimate: ProvisioningEstimate,
+  sessionCreatedAt: Date | string,
+): ProvisioningEstimate {
+  const anchor =
+    sessionCreatedAt instanceof Date ? sessionCreatedAt : new Date(sessionCreatedAt);
+  if (Number.isNaN(anchor.getTime())) {
+    return estimate;
+  }
+  const ready = new Date(anchor.getTime() + estimate.estimatedSeconds * 1000);
+  return {
+    estimatedSeconds: estimate.estimatedSeconds,
+    estimatedReadyAt: ready.toISOString(),
+  };
+}
+
 const BASE_SECONDS = 50;
 const MAX_SCHEMA_OVERHEAD = 90;
 const SECONDS_PER_TABLE = 1.5;

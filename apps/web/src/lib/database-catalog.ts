@@ -54,6 +54,13 @@ export const DATABASE_SCALE_OPTIONS = [
   { value: 'large', label: 'Large' },
 ];
 
+/** Shown when logged in on Explorer to separate catalog+shared vs your uploads. */
+export const DATABASE_ACCESS_FILTER_OPTIONS = [
+  { value: 'all', label: 'All accessible' },
+  { value: 'catalog', label: 'Catalog & shared' },
+  { value: 'mine', label: 'My uploads' },
+] as const;
+
 export const DATABASE_DIALECT_OPTIONS = [
   { value: 'all', label: 'All SQL engines' },
   { value: 'postgresql', label: 'PostgreSQL' },

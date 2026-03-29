@@ -53,7 +53,13 @@ function DetailStat({ label, value, hint }: { label: string; value: string; hint
   );
 }
 
-function SchemaTemplateTab({ database }: { database: Database }) {
+function SchemaTemplateTab({
+  database,
+  reviewDraft = false,
+}: {
+  database: Database;
+  reviewDraft?: boolean;
+}) {
   const tables = useMemo(() => database.schema ?? [], [database.schema]);
   const schemaTemplateId = database.schemaTemplateId ?? database.id;
   const [query, setQuery] = useState('');
@@ -97,7 +103,11 @@ function SchemaTemplateTab({ database }: { database: Database }) {
         <DetailStat
           label="Schema Template ID"
           value={schemaTemplateId.slice(0, 8)}
-          hint="The published blueprint backing this database catalog entry."
+          hint={
+            reviewDraft
+              ? 'Draft schema from the user upload; publishing happens after you approve.'
+              : 'The published blueprint backing this database catalog entry.'
+          }
         />
         <DetailStat
           label="Tables"
@@ -229,7 +239,13 @@ function SchemaTemplateTab({ database }: { database: Database }) {
   );
 }
 
-function DatasetTemplatesTab({ database }: { database: Database }) {
+function DatasetTemplatesTab({
+  database,
+  reviewDraft = false,
+}: {
+  database: Database;
+  reviewDraft?: boolean;
+}) {
   const schemaTemplateId = database.schemaTemplateId ?? database.id;
   const variants =
     database.availableScaleMetadata?.length
@@ -248,17 +264,29 @@ function DatasetTemplatesTab({ database }: { database: Database }) {
         <DetailStat
           label="Available Variants"
           value={String(variants.length)}
-          hint="Published dataset sizes tied to this schema template."
+          hint={
+            reviewDraft
+              ? 'Draft dataset sizes from the import; they publish with the schema when approved.'
+              : 'Published dataset sizes tied to this schema template.'
+          }
         />
         <DetailStat
           label="Source Scale"
           value={(database.sourceScale ?? database.scale).toUpperCase()}
-          hint="Largest published scale used as the canonical source."
+          hint={
+            reviewDraft
+              ? 'Canonical scale from the submitted dump (draft until approval).'
+              : 'Largest published scale used as the canonical source.'
+          }
         />
         <DetailStat
           label="Source Rows"
           value={formatRows(database.sourceRowCount ?? database.rowCount)}
-          hint="Row footprint of the canonical published dataset."
+          hint={
+            reviewDraft
+              ? 'Row counts from the draft dataset template(s).'
+              : 'Row footprint of the canonical published dataset.'
+          }
         />
       </div>
 
@@ -415,6 +443,7 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
   const router = useRouter();
   const queryClient = useQueryClient();
   const requestedTab = searchParamFirst(searchParams, 'tab');
+  const pendingReview = searchParamFirst(searchParams, 'pendingReview') === '1';
   const databaseId = params.dbId ?? '';
   const [activeTab, setActiveTab] = useState<DatabaseDetailTab>(
     isDetailTab(requestedTab) ? requestedTab : 'schema-template',
@@ -423,10 +452,40 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
   const [showUploadVersionPanel, setShowUploadVersionPanel] = useState(false);
 
   const { data: database, isLoading, isError } = useQuery({
-    queryKey: ['admin-database-detail', databaseId],
-    queryFn: () => databasesApi.get(databaseId),
+    queryKey: ['admin-database-detail', databaseId, pendingReview],
+    queryFn: () =>
+      pendingReview
+        ? adminApi.getPendingSchemaTemplateReviewDetail(databaseId)
+        : databasesApi.get(databaseId),
     enabled: Boolean(databaseId),
     staleTime: 60_000,
+  });
+
+  const approveReviewMutation = useMutation({
+    mutationFn: (schemaTemplateId: string) => adminApi.approveSchemaTemplateReview(schemaTemplateId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-pending-schema-template-reviews'] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-database-catalog'] }),
+      ]);
+      toast.success('Approved and published to the catalog.');
+      router.push('/admin/databases');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Approve failed');
+    },
+  });
+
+  const rejectReviewMutation = useMutation({
+    mutationFn: (schemaTemplateId: string) => adminApi.rejectSchemaTemplateReview(schemaTemplateId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin-pending-schema-template-reviews'] });
+      toast.success('Submission rejected.');
+      router.push('/admin/databases');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Reject failed');
+    },
   });
 
   const { data: generationJobs = [], isLoading: jobsLoading } = useQuery({
@@ -500,6 +559,8 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
 
+  const reviewTemplateId = database.schemaTemplateId ?? databaseId;
+
   return (
     <div className="page-shell-wide page-stack">
       <div className="flex flex-wrap items-center gap-2 text-sm text-on-surface-variant">
@@ -509,6 +570,44 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         <span>/</span>
         <span className="text-on-surface">{database.name}</span>
       </div>
+
+      {pendingReview ? (
+        <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-4 sm:px-5">
+          <p className="text-sm font-medium text-on-surface">Pending catalog review</p>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            Inspect schema and dataset variants below, then approve to publish to the public catalog or reject
+            to discard this submission.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              loading={approveReviewMutation.isPending}
+              disabled={rejectReviewMutation.isPending}
+              onClick={() => approveReviewMutation.mutate(reviewTemplateId)}
+            >
+              Approve & publish
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={rejectReviewMutation.isPending}
+              disabled={approveReviewMutation.isPending}
+              onClick={() => rejectReviewMutation.mutate(reviewTemplateId)}
+            >
+              Reject
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => router.push('/admin/databases')}
+            >
+              Back to list
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-low p-6 lg:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -524,6 +623,11 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
               >
                 {difficulty.label}
               </span>
+              {pendingReview ? (
+                <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
+                  Awaiting approval
+                </span>
+              ) : null}
             </div>
             <h1 className="mt-4 font-headline text-4xl font-bold tracking-tight text-on-surface">
               {database.name}
@@ -534,16 +638,20 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setShowUploadVersionPanel((open) => !open)}
-              disabled={!database.schemaTemplateId}
-            >
-              {showUploadVersionPanel ? 'Hide SQL upload' : 'Upload new version'}
-            </Button>
-            <Link href={`/explore/${database.id}`}>
-              <Button variant="ghost">Open in Explorer</Button>
-            </Link>
+            {!pendingReview ? (
+              <Button
+                variant="secondary"
+                onClick={() => setShowUploadVersionPanel((open) => !open)}
+                disabled={!database.schemaTemplateId}
+              >
+                {showUploadVersionPanel ? 'Hide SQL upload' : 'Upload new version'}
+              </Button>
+            ) : null}
+            {!pendingReview ? (
+              <Link href={`/explore/${database.id}`}>
+                <Button variant="ghost">Open in Explorer</Button>
+              </Link>
+            ) : null}
             <Button
               variant="destructive"
               onClick={() => setDeleteConfirmOpen(true)}
@@ -555,7 +663,7 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         </div>
       </div>
 
-      {showUploadVersionPanel && database.schemaTemplateId ? (
+      {showUploadVersionPanel && database.schemaTemplateId && !pendingReview ? (
         <DatabaseImportPanel
           replaceSchemaTemplateId={database.schemaTemplateId}
           lockedSchemaName={database.name}
@@ -571,7 +679,11 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         <DetailStat
           label="Rows"
           value={formatRows(database.sourceRowCount ?? database.rowCount)}
-          hint="Source dataset footprint published for this database."
+          hint={
+            pendingReview
+              ? 'Row counts from the draft import (visible to submitter as “Reviewing” until you approve).'
+              : 'Source dataset footprint published for this database.'
+          }
         />
         <DetailStat
           label="Source Scale"
@@ -581,12 +693,16 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         <DetailStat
           label="Scale Variants"
           value={String(database.availableScaleMetadata?.length ?? database.availableScales?.length ?? 0)}
-          hint="Published dataset templates available for provisioning."
+          hint={
+            pendingReview
+              ? 'Draft dataset template sizes; they go live when the schema is approved.'
+              : 'Published dataset templates available for provisioning.'
+          }
         />
         <DetailStat
           label="Tables"
           value={String(database.tableCount)}
-          hint="Tables parsed from the backing schema template."
+          hint="Tables parsed from the schema definition in the template."
         />
       </div>
 
@@ -608,8 +724,12 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         ))}
       </div>
 
-      {activeTab === 'schema-template' ? <SchemaTemplateTab database={database} /> : null}
-      {activeTab === 'dataset-templates' ? <DatasetTemplatesTab database={database} /> : null}
+      {activeTab === 'schema-template' ? (
+        <SchemaTemplateTab database={database} reviewDraft={pendingReview} />
+      ) : null}
+      {activeTab === 'dataset-templates' ? (
+        <DatasetTemplatesTab database={database} reviewDraft={pendingReview} />
+      ) : null}
       {activeTab === 'generation-jobs' ? (
         <GenerationJobsTab
           database={database}
@@ -622,7 +742,11 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         open={deleteConfirmOpen}
         eyebrow="Databases"
         title={`Delete “${database.name}”?`}
-        description="This removes its schema template and published dataset variants. If any lesson versions or sandboxes still reference it, the delete will be blocked."
+        description={
+          pendingReview
+            ? 'This removes the draft upload and its draft dataset templates from the system.'
+            : 'This removes its schema template and published dataset variants. If any lesson versions or sandboxes still reference it, the delete will be blocked.'
+        }
         confirmLabel="Delete database"
         cancelLabel="Cancel"
         icon="delete_forever"

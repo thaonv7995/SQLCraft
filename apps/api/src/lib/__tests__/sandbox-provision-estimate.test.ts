@@ -8,7 +8,10 @@ vi.mock('../storage', () => ({
   statS3ArtifactUrl: storageMocks.statS3ArtifactUrl,
 }));
 
-import { computeSandboxProvisioningEstimate } from '../sandbox-provision-estimate';
+import {
+  anchorProvisioningEstimateToCreatedAt,
+  computeSandboxProvisioningEstimate,
+} from '../sandbox-provision-estimate';
 
 describe('computeSandboxProvisioningEstimate', () => {
   beforeEach(() => {
@@ -60,5 +63,36 @@ describe('computeSandboxProvisioningEstimate', () => {
       now: new Date('2026-03-28T12:00:00.000Z'),
     });
     expect(est.estimatedSeconds).toBeGreaterThanOrEqual(25);
+  });
+});
+
+describe('anchorProvisioningEstimateToCreatedAt', () => {
+  it('sets ready time from session createdAt + estimatedSeconds', () => {
+    const createdAt = new Date('2026-03-28T12:00:00.000Z');
+    const anchored = anchorProvisioningEstimateToCreatedAt(
+      {
+        estimatedSeconds: 64,
+        estimatedReadyAt: '2099-01-01T00:00:00.000Z',
+      },
+      createdAt,
+    );
+    expect(anchored.estimatedSeconds).toBe(64);
+    expect(anchored.estimatedReadyAt).toBe('2026-03-28T12:01:04.000Z');
+  });
+
+  it('accepts ISO string createdAt', () => {
+    const anchored = anchorProvisioningEstimateToCreatedAt(
+      { estimatedSeconds: 30, estimatedReadyAt: 'x' },
+      '2026-01-01T00:00:00.000Z',
+    );
+    expect(anchored.estimatedReadyAt).toBe('2026-01-01T00:00:30.000Z');
+  });
+
+  it('returns the input estimate when createdAt is invalid', () => {
+    const original = {
+      estimatedSeconds: 10,
+      estimatedReadyAt: '2026-06-01T00:00:00.000Z',
+    };
+    expect(anchorProvisioningEstimateToCreatedAt(original, 'not-a-date')).toEqual(original);
   });
 });

@@ -29,6 +29,7 @@ import {
 import type { DatasetSize } from '@sqlcraft/types';
 import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue';
 import {
+  anchorProvisioningEstimateToCreatedAt,
   computeSandboxProvisioningEstimate,
   type ProvisioningEstimate,
 } from '../../lib/sandbox-provision-estimate';
@@ -521,11 +522,15 @@ export async function createSession(
   const schemaTemplate =
     await sessionsRepository.findSchemaTemplateById(provisionSchemaTemplateId);
 
-  const provisioningEstimate = await computeSandboxProvisioningEstimate({
+  const rawProvisioningEstimate = await computeSandboxProvisioningEstimate({
     artifactUrl: selectedTemplate?.artifactUrl ?? null,
     dialect: schemaTemplate?.dialect ?? 'postgresql',
     tableCount: parseRawSchema(schemaTemplate?.definition ?? null).length,
   });
+  const provisioningEstimate = anchorProvisioningEstimateToCreatedAt(
+    rawProvisioningEstimate,
+    session.createdAt,
+  );
 
   return {
     session: {
@@ -621,13 +626,17 @@ export async function getSession(
       ? await sessionsRepository.findDatasetTemplateById(detailedSandbox.datasetTemplateId)
       : null;
 
-  const provisioningEstimate =
+  const rawProvisioningEstimate =
     normalizedSession.status === 'provisioning' && schemaTemplate
       ? await computeSandboxProvisioningEstimate({
           artifactUrl: datasetTemplateForEstimate?.artifactUrl ?? null,
           dialect: schemaTemplate.dialect,
           tableCount: parseRawSchema(schemaTemplate.definition).length,
         })
+      : null;
+  const provisioningEstimate =
+    rawProvisioningEstimate != null
+      ? anchorProvisioningEstimateToCreatedAt(rawProvisioningEstimate, normalizedSession.createdAt)
       : null;
 
   return {

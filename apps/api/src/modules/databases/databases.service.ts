@@ -16,6 +16,7 @@ import type {
   DatabaseColumn,
   DatabaseDifficulty,
   DatabaseDomain,
+  DatabaseCatalogKind,
   DatabaseItem,
   DatabaseRelationship,
   DatabaseScale,
@@ -234,6 +235,7 @@ function buildTags(domain: DatabaseDomain, tables: SchemaTableDefinition[]): str
 function buildDatabaseItem(
   schemaTemplate: SchemaTemplateRow,
   datasetTemplates: DatasetTemplateRow[],
+  catalogKind: DatabaseCatalogKind = 'public',
 ): DatabaseItem {
   const definition = parseSchemaDefinition(schemaTemplate.definition);
   const tables = definition.tables ?? [];
@@ -267,6 +269,7 @@ function buildDatabaseItem(
     tableCount: tables.length,
     estimatedSizeGb: estimateSizeGb(sourceRowCount, tables.length),
     schemaTemplateId: schemaTemplate.id,
+    catalogKind,
     availableScales,
     availableScaleMetadata: availableScales.map((scale) => {
       const dataset = datasetTemplates.find((row) => row.size === scale);
@@ -402,11 +405,12 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
   );
 
   return schemaTemplates.map((template) =>
-    buildDatabaseItem(template, Object.values(datasetsBySchema[template.id] ?? {})),
+    buildDatabaseItem(template, Object.values(datasetsBySchema[template.id] ?? {}), 'public'),
   );
 }
 
-async function loadChallengeAuthoringCatalog(viewerUserId: string): Promise<DatabaseItem[]> {
+/** Published public catalog plus private templates you own or are invited to (same IDs as Explorer when logged in). */
+async function loadViewerAccessibleCatalog(viewerUserId: string): Promise<DatabaseItem[]> {
   const publicItems = await loadDatabaseCatalog();
   const db = getDb();
   const inviteRows = await db
@@ -435,39 +439,89 @@ async function loadChallengeAuthoringCatalog(viewerUserId: string): Promise<Data
       ),
     );
 
-  if (privateTemplates.length === 0) {
-    return publicItems;
-  }
-
   const privateIds = privateTemplates.map((t) => t.id);
-  const privateDatasets = await db
-    .select()
-    .from(dbSchema.datasetTemplates)
-    .where(
-      and(
-        inArray(dbSchema.datasetTemplates.schemaTemplateId, privateIds),
-        eq(dbSchema.datasetTemplates.status, 'published'),
-      ),
-    )
-    .orderBy(desc(dbSchema.datasetTemplates.createdAt));
+  const privateDatasets =
+    privateIds.length > 0
+      ? await db
+          .select()
+          .from(dbSchema.datasetTemplates)
+          .where(
+            and(
+              inArray(dbSchema.datasetTemplates.schemaTemplateId, privateIds),
+              eq(dbSchema.datasetTemplates.status, 'published'),
+            ),
+          )
+          .orderBy(desc(dbSchema.datasetTemplates.createdAt))
+      : [];
 
-  const datasetsBySchema = privateDatasets.reduce<Record<string, Record<string, DatasetTemplateRow>>>(
-    (acc, dataset) => {
-      const bucket = acc[dataset.schemaTemplateId] ?? {};
-      if (!bucket[dataset.size]) {
-        bucket[dataset.size] = dataset;
-      }
-      acc[dataset.schemaTemplateId] = bucket;
-      return acc;
-    },
-    {},
-  );
+  const privateDatasetsBySchema = privateDatasets.reduce<
+    Record<string, Record<string, DatasetTemplateRow>>
+  >((acc, dataset) => {
+    const bucket = acc[dataset.schemaTemplateId] ?? {};
+    if (!bucket[dataset.size]) {
+      bucket[dataset.size] = dataset;
+    }
+    acc[dataset.schemaTemplateId] = bucket;
+    return acc;
+  }, {});
 
   const privateItems = privateTemplates.map((template) =>
-    buildDatabaseItem(template, Object.values(datasetsBySchema[template.id] ?? {})),
+    buildDatabaseItem(
+      template,
+      Object.values(privateDatasetsBySchema[template.id] ?? {}),
+      template.createdBy === viewerUserId ? 'private_owner' : 'private_invited',
+    ),
   );
 
-  return [...publicItems, ...privateItems];
+  const pendingPublicTemplates = await db
+    .select()
+    .from(dbSchema.schemaTemplates)
+    .where(
+      and(
+        eq(dbSchema.schemaTemplates.createdBy, viewerUserId),
+        eq(dbSchema.schemaTemplates.visibility, 'public'),
+        eq(dbSchema.schemaTemplates.status, 'draft'),
+        isNull(dbSchema.schemaTemplates.replacedById),
+        inArray(dbSchema.schemaTemplates.reviewStatus, ['pending', 'changes_requested']),
+      ),
+    )
+    .orderBy(desc(dbSchema.schemaTemplates.createdAt));
+
+  const pendingIds = pendingPublicTemplates.map((t) => t.id);
+  const pendingDatasets =
+    pendingIds.length > 0
+      ? await db
+          .select()
+          .from(dbSchema.datasetTemplates)
+          .where(
+            and(
+              inArray(dbSchema.datasetTemplates.schemaTemplateId, pendingIds),
+              eq(dbSchema.datasetTemplates.status, 'draft'),
+            ),
+          )
+          .orderBy(desc(dbSchema.datasetTemplates.createdAt))
+      : [];
+
+  const pendingDatasetsBySchema = pendingDatasets.reduce<
+    Record<string, Record<string, DatasetTemplateRow>>
+  >((acc, dataset) => {
+    const bucket = acc[dataset.schemaTemplateId] ?? {};
+    if (!bucket[dataset.size]) {
+      bucket[dataset.size] = dataset;
+    }
+    acc[dataset.schemaTemplateId] = bucket;
+    return acc;
+  }, {});
+
+  const pendingPublicItems = pendingPublicTemplates.map((template) =>
+    buildDatabaseItem(
+      template,
+      Object.values(pendingDatasetsBySchema[template.id] ?? {}),
+      'public_pending_owner',
+    ),
+  );
+
+  return [...publicItems, ...pendingPublicItems, ...privateItems];
 }
 
 async function findDatasetForSchema(
@@ -495,8 +549,8 @@ export async function listDatabases(
   viewerUserId?: string | null,
 ): Promise<PaginatedDatabasesResult> {
   const catalog =
-    query.forChallengeAuthoring && viewerUserId
-      ? await loadChallengeAuthoringCatalog(viewerUserId)
+    viewerUserId != null && viewerUserId !== ''
+      ? await loadViewerAccessibleCatalog(viewerUserId)
       : await loadDatabaseCatalog();
   const filtered = catalog.filter((database) => databaseMatchesListQuery(database, query));
 
@@ -517,13 +571,19 @@ export async function getDatabase(
   opts?: { forChallengeAuthoring?: boolean; viewerUserId?: string | null },
 ): Promise<DatabaseItem> {
   const catalog =
-    opts?.forChallengeAuthoring && opts.viewerUserId
-      ? await loadChallengeAuthoringCatalog(opts.viewerUserId)
+    opts?.viewerUserId != null && opts.viewerUserId !== ''
+      ? await loadViewerAccessibleCatalog(opts.viewerUserId)
       : await loadDatabaseCatalog();
   const database = catalog.find((item) => item.id === databaseId || item.slug === databaseId);
 
   if (!database) {
     throw new NotFoundError('Database not found');
+  }
+
+  if (opts?.forChallengeAuthoring && database.catalogKind === 'public_pending_owner') {
+    throw new ValidationError(
+      'This database is still awaiting catalog review and cannot be used for challenges yet.',
+    );
   }
 
   return database;
@@ -533,12 +593,19 @@ export async function createDatabaseSession(
   userId: string,
   body: CreateDatabaseSessionBody,
 ): Promise<CreateDatabaseSessionResult> {
-  const catalog = await loadChallengeAuthoringCatalog(userId);
+  const catalog = await loadViewerAccessibleCatalog(userId);
   const database = catalog.find((item) => item.id === body.databaseId || item.slug === body.databaseId);
 
   if (!database) {
     throw new NotFoundError('Database not found');
   }
+
+  if (database.catalogKind === 'public_pending_owner') {
+    throw new ValidationError(
+      'This database is awaiting catalog review. Launch sandbox is available after an admin approves it.',
+    );
+  }
+
   const sourceScale = database.sourceScale ?? database.scale;
   const requestedScale = body.scale ?? sourceScale;
 
@@ -616,4 +683,48 @@ export async function createDatabaseSession(
       status: sandbox.status,
     },
   };
+}
+
+/** Full explorer-shaped payload for a public draft awaiting moderation (admin review UI). */
+export async function getDatabaseItemForAdminPendingReview(
+  schemaTemplateId: string,
+): Promise<DatabaseItem> {
+  const db = getDb();
+  const [template] = await db
+    .select()
+    .from(dbSchema.schemaTemplates)
+    .where(
+      and(
+        eq(dbSchema.schemaTemplates.id, schemaTemplateId),
+        eq(dbSchema.schemaTemplates.visibility, 'public'),
+        eq(dbSchema.schemaTemplates.status, 'draft'),
+        eq(dbSchema.schemaTemplates.reviewStatus, 'pending'),
+        isNull(dbSchema.schemaTemplates.replacedById),
+      ),
+    )
+    .limit(1);
+
+  if (!template) {
+    throw new NotFoundError('Pending public database not found');
+  }
+
+  const datasetRows = await db
+    .select()
+    .from(dbSchema.datasetTemplates)
+    .where(
+      and(
+        eq(dbSchema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+        eq(dbSchema.datasetTemplates.status, 'draft'),
+      ),
+    )
+    .orderBy(desc(dbSchema.datasetTemplates.createdAt));
+
+  const bySize: Record<string, DatasetTemplateRow> = {};
+  for (const row of datasetRows) {
+    if (!bySize[row.size]) {
+      bySize[row.size] = row;
+    }
+  }
+
+  return buildDatabaseItem(template, Object.values(bySize), 'public_pending_owner');
 }

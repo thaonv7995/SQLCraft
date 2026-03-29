@@ -36,6 +36,7 @@ import {
   type LearningSession,
   type QueryExecution,
   type QueryResultColumn,
+  type SessionProvisioningEstimate,
   type SessionSchemaTable,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
@@ -76,11 +77,61 @@ function getEffectiveSessionStatus(
   return session.status;
 }
 
-function formatProvisioningEta(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 1) return '';
-  if (seconds < 90) return `~${Math.round(seconds)}s`;
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  return `~${minutes} min`;
+/** Live remaining time from `estimatedReadyAt`, ticking once per second (see `tick` state). */
+function useProvisioningRemainingSeconds(
+  isProvisioning: boolean,
+  estimate: SessionProvisioningEstimate | null | undefined,
+): number | null {
+  const fallbackAnchorRef = useRef<number | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!isProvisioning || !estimate) {
+      fallbackAnchorRef.current = null;
+      return;
+    }
+    const readyMs = Date.parse(estimate.estimatedReadyAt);
+    if (!Number.isFinite(readyMs) && fallbackAnchorRef.current == null) {
+      fallbackAnchorRef.current = Date.now();
+    }
+  }, [isProvisioning, estimate?.estimatedReadyAt, estimate?.estimatedSeconds]);
+
+  useEffect(() => {
+    if (!isProvisioning || !estimate) {
+      return;
+    }
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [isProvisioning, estimate?.estimatedReadyAt, estimate?.estimatedSeconds]);
+
+  const readyAt = estimate?.estimatedReadyAt;
+  const totalSec = estimate?.estimatedSeconds;
+
+  return useMemo(() => {
+    if (!isProvisioning || !estimate) return null;
+    const readyMs = Date.parse(estimate.estimatedReadyAt);
+    if (Number.isFinite(readyMs)) {
+      return Math.max(0, (readyMs - Date.now()) / 1000);
+    }
+    const anchor = fallbackAnchorRef.current;
+    const total = estimate.estimatedSeconds;
+    if (!Number.isFinite(total) || total < 1) return 0;
+    if (anchor == null) return total;
+    const elapsed = (Date.now() - anchor) / 1000;
+    return Math.max(0, total - elapsed);
+  }, [isProvisioning, estimate, readyAt, totalSec, tick]);
+}
+
+/** Shown when ETA elapsed but session is still provisioning (DB often up; dataset restore may continue). */
+const PROVISIONING_PAST_ETA_LABEL = 'Loading data…';
+
+function formatProvisioningRemaining(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return PROVISIONING_PAST_ETA_LABEL;
+  if (seconds < 90) return `${Math.ceil(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.ceil(seconds % 60);
+  if (s >= 60) return `${m + 1}m 00s`;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
 // ─── Dataset Scale Selector ───────────────────────────────────────────────────
@@ -2178,10 +2229,48 @@ export default function LabPage({ params }: ClientPageProps) {
     (Boolean(latestAttemptEvaluation.feedbackText?.trim()) || latestAttemptPassChecks.length > 0);
   const explainPlanMode = getExplainPlanMode(currentQuery);
   const effectiveSessionStatus = getEffectiveSessionStatus(session);
-  const provisioningEtaLabel =
-    session?.status === 'provisioning' && session.provisioningEstimate
-      ? formatProvisioningEta(session.provisioningEstimate.estimatedSeconds)
+  const isProvisioningWithEstimate =
+    session?.status === 'provisioning' && Boolean(session.provisioningEstimate);
+  const provisioningRemainingSec = useProvisioningRemainingSeconds(
+    isProvisioningWithEstimate,
+    session?.provisioningEstimate,
+  );
+  const provisioningEstimateTotalSec = session?.provisioningEstimate?.estimatedSeconds ?? 0;
+  const provisioningProgressRatio =
+    isProvisioningWithEstimate &&
+    provisioningRemainingSec != null &&
+    Number.isFinite(provisioningEstimateTotalSec) &&
+    provisioningEstimateTotalSec > 0
+      ? Math.min(1, Math.max(0, 1 - provisioningRemainingSec / provisioningEstimateTotalSec))
+      : 0;
+  const provisioningCountdownLabel =
+    isProvisioningWithEstimate && provisioningRemainingSec != null
+      ? formatProvisioningRemaining(provisioningRemainingSec)
       : '';
+  const provisioningPastEstimate =
+    session?.status === 'provisioning' &&
+    provisioningRemainingSec != null &&
+    provisioningRemainingSec <= 0;
+  const provisioningSandboxTitle =
+    effectiveSessionStatus === 'provisioning'
+      ? provisioningPastEstimate
+        ? 'Sandbox: Still provisioning — time estimate passed. The database engine is often already running; the worker may still be restoring or loading the dataset (large imports can take several minutes).'
+        : provisioningCountdownLabel
+          ? `Sandbox: Provisioning (${provisioningCountdownLabel} left)`
+          : 'Sandbox: Provisioning'
+      : effectiveSessionStatus === 'active'
+        ? 'Sandbox: Ready'
+        : `Sandbox: ${effectiveSessionStatus ?? 'Unknown'}`;
+  const provisioningSandboxAria =
+    effectiveSessionStatus === 'provisioning'
+      ? provisioningPastEstimate
+        ? 'Sandbox still provisioning. Estimated time has passed; dataset restore or load may still be in progress.'
+        : provisioningCountdownLabel
+          ? `Sandbox provisioning, ${provisioningCountdownLabel}`
+          : 'Sandbox provisioning'
+      : effectiveSessionStatus === 'active'
+        ? 'Sandbox ready'
+        : `Sandbox ${effectiveSessionStatus ?? 'unknown'}`;
   const isSessionReady = effectiveSessionStatus === 'active';
   const isInteractiveSession =
     !session || ['active', 'provisioning', 'paused'].includes(effectiveSessionStatus ?? session.status);
@@ -2713,53 +2802,64 @@ export default function LabPage({ params }: ClientPageProps) {
               </span>
             )}
             <div
-              className="flex items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2 py-1 sm:px-2.5"
-              title={
-                effectiveSessionStatus === 'provisioning'
-                  ? 'Sandbox: Provisioning'
-                  : effectiveSessionStatus === 'active'
-                    ? 'Sandbox: Ready'
-                    : `Sandbox: ${effectiveSessionStatus ?? 'Unknown'}`
-              }
-              aria-label={
-                effectiveSessionStatus === 'provisioning'
-                  ? provisioningEtaLabel
-                    ? `Sandbox provisioning, estimated ${provisioningEtaLabel}`
-                    : 'Sandbox provisioning'
-                  : effectiveSessionStatus === 'active'
-                    ? 'Sandbox ready'
-                    : `Sandbox ${effectiveSessionStatus ?? 'unknown'}`
-              }
+              className="flex min-w-0 items-center gap-2 rounded-full border border-outline-variant/15 bg-surface-container-high/60 px-2 py-1 sm:gap-2.5 sm:px-3 sm:py-1.5"
+              title={provisioningSandboxTitle}
+              aria-label={provisioningSandboxAria}
             >
-              <span className="hidden text-[10px] font-medium uppercase tracking-wider text-outline sm:inline">
+              <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-outline sm:inline">
                 Sandbox
               </span>
               <span
-                className={cn(
-                  'h-2 w-2 shrink-0 rounded-full',
-                  effectiveSessionStatus === 'active'
-                    ? 'bg-green-400 shadow-[0_0_8px_rgba(34,197,94,0.45)]'
-                    : effectiveSessionStatus === 'provisioning'
-                      ? 'animate-pulse bg-tertiary'
-                      : 'bg-outline',
-                )}
+                className="hidden h-3 w-px shrink-0 bg-outline/25 sm:block"
+                aria-hidden
               />
-              <span className="hidden flex-col text-[11px] font-medium text-on-surface-variant sm:flex sm:leading-tight">
-                {effectiveSessionStatus === 'provisioning' ? (
-                  <>
-                    <span>Provisioning</span>
-                    {provisioningEtaLabel ? (
-                      <span className="text-[10px] font-normal text-on-surface-variant/75">
-                        {provisioningEtaLabel}
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span
+                  className={cn(
+                    'h-2 w-2 shrink-0 rounded-full',
+                    effectiveSessionStatus === 'active'
+                      ? 'bg-green-400 shadow-[0_0_8px_rgba(34,197,94,0.45)]'
+                      : effectiveSessionStatus === 'provisioning'
+                        ? 'animate-pulse bg-tertiary'
+                        : 'bg-outline',
+                  )}
+                />
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="flex min-w-0 items-baseline gap-2 text-[11px] leading-none">
+                    {effectiveSessionStatus === 'provisioning' ? (
+                      <>
+                        <span className="shrink-0 font-medium text-on-surface">Provisioning</span>
+                        {provisioningCountdownLabel ? (
+                          <span
+                            className="min-w-[2.75rem] font-medium tabular-nums tracking-tight text-on-surface-variant"
+                            aria-live="polite"
+                            aria-atomic="true"
+                          >
+                            {provisioningCountdownLabel}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : effectiveSessionStatus === 'active' ? (
+                      <span className="font-medium text-on-surface-variant">Ready</span>
+                    ) : (
+                      <span className="font-medium text-on-surface-variant">
+                        {effectiveSessionStatus ?? '—'}
                       </span>
-                    ) : null}
-                  </>
-                ) : effectiveSessionStatus === 'active' ? (
-                  'Ready'
-                ) : (
-                  (effectiveSessionStatus ?? '—')
-                )}
-              </span>
+                    )}
+                  </div>
+                  {effectiveSessionStatus === 'provisioning' && provisioningCountdownLabel ? (
+                    <div
+                      className="h-0.5 w-full max-w-[7rem] overflow-hidden rounded-full bg-outline/20"
+                      aria-hidden
+                    >
+                      <div
+                        className="h-full rounded-full bg-tertiary/80 transition-[width] duration-1000 ease-linear"
+                        style={{ width: `${Math.round(provisioningProgressRatio * 100)}%` }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
             <Button
               variant="destructive"

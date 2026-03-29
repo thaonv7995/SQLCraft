@@ -71,8 +71,7 @@ describe('databases router HTTP contracts', () => {
         page: 2,
         limit: 5,
         forChallengeAuthoring: false,
-        dialect: undefined,
-        q: undefined,
+        accessFilter: 'all',
       }),
       undefined,
     );
@@ -90,6 +89,26 @@ describe('databases router HTTP contracts', () => {
     });
   });
 
+  it('forwards authenticated subject to listDatabases when Authorization is present', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/databases?page=1&limit=10&accessFilter=catalog',
+      headers: {
+        authorization: `Bearer ${signToken()}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(databaseServiceMocks.listDatabases).toHaveBeenCalledWith(
+      expect.objectContaining({
+        page: 1,
+        limit: 10,
+        accessFilter: 'catalog',
+      }),
+      'user-123',
+    );
+  });
+
   it('forwards dialect and search query to listDatabases', async () => {
     const response = await app.inject({
       method: 'GET',
@@ -103,6 +122,7 @@ describe('databases router HTTP contracts', () => {
         q: 'orders',
         difficulty: 'beginner',
         forChallengeAuthoring: false,
+        accessFilter: 'all',
       }),
       undefined,
     );
@@ -128,6 +148,22 @@ describe('databases router HTTP contracts', () => {
         slug: 'db-ecommerce',
         title: 'Ecommerce Demo',
       },
+    });
+  });
+
+  it('forwards authenticated viewer to getDatabase when Authorization is present', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/databases/db-ecommerce?forChallengeAuthoring=true',
+      headers: {
+        authorization: `Bearer ${signToken()}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(databaseServiceMocks.getDatabase).toHaveBeenCalledWith('db-ecommerce', {
+      forChallengeAuthoring: true,
+      viewerUserId: 'user-123',
     });
   });
 

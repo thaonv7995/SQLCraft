@@ -3,6 +3,21 @@ import type { ListDatabasesQuery } from './databases.schema';
 import type { DatabaseItem } from './databases.types';
 
 export function databaseMatchesListQuery(db: DatabaseItem, query: ListDatabasesQuery): boolean {
+  if (query.forChallengeAuthoring && db.catalogKind === 'public_pending_owner') {
+    return false;
+  }
+
+  if (query.accessFilter === 'catalog') {
+    if (db.catalogKind !== 'public' && db.catalogKind !== 'private_invited') {
+      return false;
+    }
+  }
+  if (query.accessFilter === 'mine') {
+    if (db.catalogKind !== 'private_owner' && db.catalogKind !== 'public_pending_owner') {
+      return false;
+    }
+  }
+
   if (query.domain && db.domain !== query.domain) {
     return false;
   }

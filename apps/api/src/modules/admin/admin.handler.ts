@@ -76,6 +76,7 @@ import {
   createSqlDumpUploadSession,
   presignSqlDumpUploadPart,
 } from './sql-dump-upload-session.service';
+import { getDatabaseItemForAdminPendingReview } from '../databases/databases.service';
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
@@ -389,6 +390,14 @@ export async function listPendingSchemaTemplatesForReviewHandler(
 ): Promise<void> {
   const result = await listPendingSchemaTemplatesForReview();
   reply.send(success(result, 'Pending public database uploads retrieved'));
+}
+
+export async function getPendingSchemaTemplateReviewDetailHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await getDatabaseItemForAdminPendingReview(request.params.id);
+  reply.send(success(result, 'Pending review database detail retrieved'));
 }
 
 export async function approveSchemaTemplateReviewHandler(

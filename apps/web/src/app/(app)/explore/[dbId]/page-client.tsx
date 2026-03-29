@@ -579,6 +579,8 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
 
+  const awaitingCatalogReview = database.catalogKind === 'public_pending_owner';
+
   const scalePicker = (
     <div
       className="flex flex-wrap gap-1.5"
@@ -603,7 +605,21 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
     </div>
   );
 
-  const launchButton = (
+  const launchButton = awaitingCatalogReview ? (
+    <div className="space-y-2">
+      <Button
+        fullWidth
+        size="lg"
+        disabled
+        leftIcon={<span className="material-symbols-outlined text-xl">hourglass_empty</span>}
+      >
+        Awaiting catalog review
+      </Button>
+      <p className="text-center text-[11px] text-on-surface-variant">
+        Launch sandbox is available after an admin approves this public submission.
+      </p>
+    </div>
+  ) : (
     <Button
       fullWidth
       size="lg"
@@ -664,6 +680,11 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
                 </span>
                 <Badge className={difficulty.badge}>{difficulty.label}</Badge>
                 <Badge className="bg-surface-container-high text-on-surface-variant">{database.engine}</Badge>
+                {awaitingCatalogReview ? (
+                  <Badge className="border border-amber-500/40 bg-amber-500/10 text-amber-100">
+                    Reviewing
+                  </Badge>
+                ) : null}
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
