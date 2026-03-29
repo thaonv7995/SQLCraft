@@ -1,4 +1,5 @@
 import type { QueryExecutionPlan } from '@/lib/api';
+import { isSqlServerWrappedPlan, tryMssqlPlanToPgShapedRoot } from '@/lib/mssql-plan-adapter';
 import { cn, formatDuration, formatRows } from '@/lib/utils';
 
 type PgPlanNode = {
@@ -38,6 +39,10 @@ function getPlanRoot(plan: unknown): PgPlanNode | null {
   }
 
   const raw = plan as Record<string, unknown>;
+
+  if (isSqlServerWrappedPlan(raw)) {
+    return tryMssqlPlanToPgShapedRoot(raw) as PgPlanNode | null;
+  }
 
   if (raw.Plan && typeof raw.Plan === 'object') {
     return raw.Plan as PgPlanNode;
@@ -114,10 +119,18 @@ function getAccessPathType(node: PgPlanNode): AccessPathType {
     return 'sequential';
   }
 
+  if (nodeType.includes('table scan') && !nodeType.includes('index')) {
+    return 'sequential';
+  }
+
   return null;
 }
 
-function getNodeHighlight(node: PgPlanNode, rootActualTime?: number): {
+function getNodeHighlight(
+  node: PgPlanNode,
+  rootActualTime?: number,
+  timeShareSource = 'EXPLAIN ANALYZE',
+): {
   label: string;
   reason: string;
   tone: PlanBadgeTone;
@@ -136,7 +149,7 @@ function getNodeHighlight(node: PgPlanNode, rootActualTime?: number): {
   if (timeShare >= 0.35) {
     return {
       label: 'Bottleneck',
-      reason: `Accounts for ${(timeShare * 100).toFixed(0)}% of EXPLAIN ANALYZE time`,
+      reason: `Accounts for ${(timeShare * 100).toFixed(0)}% of ${timeShareSource} time`,
       tone: 'danger',
     };
   }
@@ -227,12 +240,14 @@ function PlanNodeCard({
   rootActualTime,
   rootTotalCost,
   compact = false,
+  timeShareSource = 'EXPLAIN ANALYZE',
 }: {
   node: PgPlanNode;
   depth: number;
   rootActualTime?: number;
   rootTotalCost?: number;
   compact?: boolean;
+  timeShareSource?: string;
 }) {
   const children = getChildren(node);
   const nodeType = getNodeType(node);
@@ -242,7 +257,7 @@ function PlanNodeCard({
   const totalCost = getTotalCost(node);
   const accessPathType = getAccessPathType(node);
   const bufferStats = getBufferStats(node);
-  const highlight = getNodeHighlight(node, rootActualTime);
+  const highlight = getNodeHighlight(node, rootActualTime, timeShareSource);
   const conditions = [node['Index Cond'], node.Filter, node['Hash Cond'], node['Merge Cond'], node['Recheck Cond']]
     .filter((condition): condition is string => typeof condition === 'string' && condition.length > 0);
   const timeShare = actualTime != null && rootActualTime && rootActualTime > 0
@@ -383,6 +398,7 @@ function PlanNodeCard({
               rootActualTime={rootActualTime}
               rootTotalCost={rootTotalCost}
               compact={compact}
+              timeShareSource={timeShareSource}
             />
           ))}
         </div>
@@ -401,6 +417,9 @@ export function ExecutionPlanTree({
   compact?: boolean;
 }) {
   const rootNode = getPlanRoot(executionPlan.plan);
+  const sqlServerPlan = isSqlServerWrappedPlan(executionPlan.plan);
+  const operatorTimeLabel = sqlServerPlan ? 'SQL Server operator time' : 'Postgres executor time';
+  const timeShareSource = sqlServerPlan ? 'SQL Server operator' : 'EXPLAIN ANALYZE';
 
   if (!rootNode) {
     return (
@@ -419,7 +438,7 @@ export function ExecutionPlanTree({
   const bottlenecks = bottleneckCandidates
     .map((node) => ({
       node,
-      highlight: getNodeHighlight(node, rootActualTime),
+      highlight: getNodeHighlight(node, rootActualTime, timeShareSource),
     }))
     .filter(
       (
@@ -458,7 +477,7 @@ export function ExecutionPlanTree({
         </div>
         <div className={cn('border border-outline-variant/10 bg-surface-container-low', compact ? 'rounded-xl p-2.5' : 'rounded-2xl p-4')}>
           <p className={cn('uppercase tracking-wide text-outline', compact ? 'text-[10px]' : 'text-xs')}>
-            {rootActualTime != null ? 'Postgres executor time' : 'Planned rows'}
+            {rootActualTime != null ? operatorTimeLabel : 'Planned rows'}
           </p>
           <p className={cn('font-semibold text-on-surface font-mono', compact ? 'mt-1 text-xs' : 'mt-2 text-sm')}>
             {rootActualTime != null
@@ -486,18 +505,38 @@ export function ExecutionPlanTree({
 
       {!compact && (
       <div className="rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-4 text-xs text-on-surface-variant">
-        <p>
-          <span className="font-semibold text-on-surface">Postgres executor time</span>
-          {' '}comes from <span className="font-mono">EXPLAIN ANALYZE</span> and measures work inside Postgres.
-        </p>
-        <p className="mt-2">
-          <span className="font-semibold text-on-surface">End-to-end query time</span>
-          {' '}includes the app roundtrip, result transfer, and response shaping.
-        </p>
-        <p className="mt-2">
-          <span className="font-semibold text-on-surface">Access path</span>
-          {' '}counts index scan nodes versus sequential scan nodes. It is not a cache hit/miss metric.
-        </p>
+        {sqlServerPlan ? (
+          <>
+            <p>
+              <span className="font-semibold text-on-surface">SQL Server operator time</span>
+              {' '}comes from <span className="font-mono">STATISTICS XML</span> / runtime counters when available (estimated plan only shows costs/rows from{' '}
+              <span className="font-mono">SHOWPLAN_XML</span>).
+            </p>
+            <p className="mt-2">
+              <span className="font-semibold text-on-surface">End-to-end query time</span>
+              {' '}includes the app roundtrip, result transfer, and response shaping.
+            </p>
+            <p className="mt-2">
+              <span className="font-semibold text-on-surface">Access path</span>
+              {' '}counts operators whose name includes index scan versus table/heap-style scans.
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              <span className="font-semibold text-on-surface">Postgres executor time</span>
+              {' '}comes from <span className="font-mono">EXPLAIN ANALYZE</span> and measures work inside Postgres.
+            </p>
+            <p className="mt-2">
+              <span className="font-semibold text-on-surface">End-to-end query time</span>
+              {' '}includes the app roundtrip, result transfer, and response shaping.
+            </p>
+            <p className="mt-2">
+              <span className="font-semibold text-on-surface">Access path</span>
+              {' '}counts index scan nodes versus sequential scan nodes. It is not a cache hit/miss metric.
+            </p>
+          </>
+        )}
       </div>
       )}
 
@@ -537,6 +576,7 @@ export function ExecutionPlanTree({
         rootActualTime={rootActualTime}
         rootTotalCost={rootTotalCost}
         compact={compact}
+        timeShareSource={timeShareSource}
       />
     </div>
   );

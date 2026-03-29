@@ -60,4 +60,51 @@ describe('ExecutionPlanTree', () => {
     expect(markup).toContain('12.0K');
     expect(markup).toMatch(/Accounts for 76% of EXPLAIN ANALYZE time/);
   });
+
+  it('renders SQL Server SHOWPLAN as a tree (not raw JSON)', () => {
+    const markup = renderToStaticMarkup(
+      <ExecutionPlanTree
+        queryDurationMs={12}
+        executionPlan={{
+          type: 'json',
+          mode: 'explain',
+          totalCost: 0.0032831,
+          plan: {
+            engine: 'sqlserver',
+            format: 'showplan_xml',
+            plan: {
+              ShowPlanXML: {
+                BatchSequence: {
+                  Batch: {
+                    Statements: {
+                      StmtSimple: {
+                        QueryPlan: {
+                          RelOp: {
+                            '@_PhysicalOp': 'Clustered Index Scan',
+                            '@_EstimatedTotalSubtreeCost': '0.0032831',
+                            '@_EstimateRows': '1',
+                            IndexScan: {
+                              Object: {
+                                '@_Table': '[authors]',
+                                '@_Index': '[PK_authors]',
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(markup).toContain('Clustered Index Scan');
+    expect(markup).toContain('authors');
+    expect(markup).toContain('SQL Server operator time');
+    expect(markup).not.toContain('"ShowPlanXML"');
+  });
 });
