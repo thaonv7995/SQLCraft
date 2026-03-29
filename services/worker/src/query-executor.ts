@@ -2,6 +2,11 @@ import { Pool } from 'pg';
 import mysql from 'mysql2/promise';
 import sql from 'mssql';
 import type { QueryResultPreview, SchemaSqlEngine } from '@sqlcraft/types';
+import {
+  parseMssqlShowPlanXml,
+  summarizeMssqlShowPlan,
+  wrapMssqlShowPlanJson,
+} from './mssql-showplan-json';
 
 const MAX_ROWS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -482,6 +487,28 @@ function firstStringCellFromMssqlResult(result: sql.IResult<Record<string, unkno
   return null;
 }
 
+function mssqlXmlExplainToResult(
+  xml: string | null,
+  res: sql.IResult<Record<string, unknown>>,
+): ExplainResult {
+  if (typeof xml === 'string' && xml.trim().startsWith('<')) {
+    try {
+      const parsed = parseMssqlShowPlanXml(xml);
+      const wrapped = wrapMssqlShowPlanJson(parsed);
+      return repairExplainPlanResult({
+        rawPlan: wrapped,
+        planSummary: summarizeMssqlShowPlan(parsed),
+      });
+    } catch {
+      // fall through
+    }
+  }
+  return {
+    rawPlan: xml ?? { recordsets: res.recordsets },
+    planSummary: {},
+  };
+}
+
 async function getExplainPlanMysql(
   target: SandboxDbTarget,
   sqlText: string,
@@ -554,13 +581,13 @@ async function getExplainPlanMssql(
       const res = await new sql.Request(transaction).query(sqlText);
       await new sql.Request(transaction).batch('SET STATISTICS XML OFF');
       const xml = firstStringCellFromMssqlResult(res);
-      return { rawPlan: xml ?? { recordsets: res.recordsets }, planSummary: {} };
+      return mssqlXmlExplainToResult(xml, res);
     }
     await new sql.Request(transaction).batch('SET SHOWPLAN_XML ON');
     const res = await new sql.Request(transaction).query(sqlText);
     await new sql.Request(transaction).batch('SET SHOWPLAN_XML OFF');
     const xml = firstStringCellFromMssqlResult(res);
-    return { rawPlan: xml ?? { recordsets: res.recordsets }, planSummary: {} };
+    return mssqlXmlExplainToResult(xml, res);
   } finally {
     try {
       await transaction.commit();
