@@ -212,3 +212,75 @@ test('rewriteMysqlRestoreSqlForTargetDatabase does not rewrite backtick-qualifie
   assert.match(out, /INSERT INTO `s_x`\.`domains`/);
   assert.match(out, /'note `pdns`\.`domains` copied'/);
 });
+
+/** Normalize for buffer vs streaming compare (line endings, trailing space, blank-run collapse). */
+function normMysql(s: string): string {
+  return s
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .replace(/\s+$/, '');
+}
+
+async function assertStreamingMatchesBuffer(dbName: string, input: string): Promise<void> {
+  const bufferOut = __private__.rewriteMysqlRestoreSqlForTargetDatabase(dbName, input);
+  const streamOut = await __private__.mysqlStreamingRestoreOutputForTest(dbName, input);
+  assert.strictEqual(normMysql(streamOut), normMysql(bufferOut));
+}
+
+test('mysql streaming restore matches buffer (USE strip + qualified rewrite)', async () => {
+  await assertStreamingMatchesBuffer(
+    's_ab7fe6ef05634bf5',
+    "/*!40101 USE `legacy_prod` */;\nUSE `other`;\nCREATE TABLE domains (id INT PRIMARY KEY);\n",
+  );
+});
+
+test('mysql streaming restore matches buffer (CREATE qualified)', async () => {
+  await assertStreamingMatchesBuffer('s_cacfe0b2fe7543b5', 'CREATE TABLE `pdns`.`domains` (`id` int NOT NULL);\n');
+});
+
+test('mysql streaming restore matches buffer (IF NOT EXISTS qualified)', async () => {
+  await assertStreamingMatchesBuffer('s_x', 'CREATE TABLE IF NOT EXISTS `myapp`.`users` (`id` int);\n');
+});
+
+test('mysql streaming restore matches buffer (USE mysql + pdns qualified)', async () => {
+  await assertStreamingMatchesBuffer(
+    's_8bd364cebaef43c2',
+    "/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE */;\n/*!40101 USE `mysql` */;\n" +
+      'CREATE TABLE `pdns`.`domains` (`id` int NOT NULL);\n' +
+      "INSERT INTO `pdns`.`domains` VALUES (1);\n",
+  );
+});
+
+test('mysql streaming restore matches buffer (comment gap before qualified CREATE)', async () => {
+  await assertStreamingMatchesBuffer(
+    's_x',
+    'CREATE TABLE IF NOT EXISTS /*!40101 some comment */ `pdns`.`domains` (`id` int);\n',
+  );
+});
+
+test('mysql streaming restore matches buffer (backtick-db unquoted table)', async () => {
+  await assertStreamingMatchesBuffer('s_x', 'CREATE TABLE `pdns`.domains (`id` int NOT NULL);\n');
+});
+
+test('mysql streaming restore matches buffer (TYPE= to ENGINE=)', async () => {
+  await assertStreamingMatchesBuffer(
+    's_x',
+    "CREATE TABLE `domains` (`id` int(11) NOT NULL auto_increment) TYPE=InnoDB;\n" +
+      'CREATE TABLE `supermasters` (`ip` varchar(25)) TYPE=MyISAM;\n',
+  );
+});
+
+test('mysql streaming restore matches buffer (literals protect qualified names)', async () => {
+  await assertStreamingMatchesBuffer(
+    's_x',
+    "INSERT INTO `pdns`.`domains` VALUES (1, 'again', 'product-751-factor-like-section', 'Skill contain evening recognize sens');\n" +
+      "INSERT INTO `pdns`.`domains` VALUES (2, 'see pdns.slots in text', 'x');\n",
+  );
+});
+
+test('mysql streaming restore matches buffer (backticks inside string)', async () => {
+  await assertStreamingMatchesBuffer(
+    's_x',
+    "INSERT INTO `pdns`.`domains` VALUES (1, 'note `pdns`.`domains` copied');\n",
+  );
+});

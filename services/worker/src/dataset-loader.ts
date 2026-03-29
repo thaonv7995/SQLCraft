@@ -1,8 +1,8 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable, Transform, type TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip, gunzipSync } from 'node:zlib';
 import pino from 'pino';
@@ -14,10 +14,13 @@ import {
   runMysqlInSandboxContainer,
   runPgRestoreInSandboxContainer,
   runPsqlInSandboxContainer,
+  runPsqlInSandboxContainerStreaming,
   runSqlcmdInSandboxContainer,
+  runSqlcmdInSandboxContainerStreaming,
+  runMysqlInSandboxContainerStreaming,
 } from './docker';
-import { sanitizePostgresDumpForPsql } from './postgres-dump-sanitize';
-import { sanitizeSqlServerDumpPayload } from './sqlserver-dump-sanitize';
+import { sanitizePostgresDumpForPsql, createPostgresSanitizeTransform } from './postgres-dump-sanitize';
+import { sanitizeSqlServerDumpPayload, createSqlServerSanitizeTransform } from './sqlserver-dump-sanitize';
 
 function quoteMysqlIdentifier(name: string): string {
   return '`' + name.replace(/`/g, '``') + '`';
@@ -277,6 +280,274 @@ export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8:
 function prepareMysqlRestorePayload(dbName: string, sql: string | Buffer): Buffer {
   const utf8 = typeof sql === 'string' ? sql : sql.toString('utf8');
   return Buffer.from(rewriteMysqlRestoreSqlForTargetDatabase(dbName, utf8), 'utf8');
+}
+
+// ─── MySQL streaming two-pass infrastructure ────────────────────────────────
+
+/**
+ * Scan result from pass 1: collected source DB names and whether rewrite is needed.
+ */
+interface MysqlScanResult {
+  qualifierDbs: Set<string>;
+  useDb: string | null;
+  needsRewrite: boolean;
+}
+
+/**
+ * Collect DB names and detect if rewrite is needed per-line (no full-file buffering).
+ * This is the same logic as `collectMysqlQualifierDatabaseNames` + `extractMysqlSourceDatabase`
+ * + `needsMysqlDatabaseRewrite`, but applied line-by-line.
+ */
+function collectMysqlQualifierDatabaseNamesFromLine(line: string, names: Set<string>): void {
+  const patterns = [
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/\s*)*`([^`]+)`\s*\.\s*`/gi,
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/\s*)*`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\s*\(/gi,
+    /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?`([^`]+)`\s*\.\s*`/gi,
+    /LOCK\s+TABLES\s+`([^`]+)`\s*\.\s*`/gi,
+    /INSERT\s+INTO\s+`([^`]+)`\s*\.\s*`/gi,
+    /INSERT\s+INTO\s+`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\b/gi,
+    /REPLACE\s+INTO\s+`([^`]+)`\s*\.\s*`/gi,
+    /REPLACE\s+INTO\s+`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\b/gi,
+    /ALTER\s+TABLE\s+`([^`]+)`\s*\.\s*`/gi,
+    /ALTER\s+TABLE\s+`([^`]+)`\s*\.\s*([a-zA-Z0-9_$]+)\b/gi,
+    /CREATE\s+VIEW\s+`([^`]+)`\s*\.\s*`/gi,
+    /DROP\s+VIEW\s+(?:IF\s+EXISTS\s+)?`([^`]+)`\s*\.\s*`/gi,
+    /TRUNCATE\s+TABLE\s+`([^`]+)`\s*\.\s*`/gi,
+  ];
+  for (const re of patterns) {
+    const r = new RegExp(re.source, re.flags);
+    let m: RegExpExecArray | null;
+    while ((m = r.exec(line)) !== null) {
+      names.add(m[1]);
+    }
+  }
+  for (const m of line.matchAll(
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_$]+)\.([a-zA-Z0-9_$]+)\s*\(/gi,
+  )) {
+    names.add(m[1]);
+  }
+}
+
+function extractMysqlSourceDatabaseFromLine(line: string): string | null {
+  const mComment = line.match(/\/\*![0-9]*\s*USE\s+`([^`]+)`/i);
+  if (mComment) return mComment[1];
+
+  const mUseBt = line.match(/^\s*USE\s+`([^`]+)`\s*;/i);
+  if (mUseBt) return mUseBt[1];
+
+  const mUsePlain = line.match(/^\s*USE\s+([^;\s]+)\s*;/i);
+  if (mUsePlain) {
+    const raw = mUsePlain[1].replace(/^`|`$/g, '');
+    if (raw.length > 0) return raw;
+  }
+
+  return null;
+}
+
+function needsMysqlDatabaseRewriteForLine(line: string): boolean {
+  return (
+    /\/\*![0-9]*\s*USE\b/i.test(line) ||
+    /^\s*USE\b/i.test(line) ||
+    /^\s*(?:CREATE|DROP)\s+(?:DATABASE|SCHEMA)\b/i.test(line) ||
+    /\/\*![0-9]*\s*(?:CREATE|DROP)\s+(?:DATABASE|SCHEMA)\b/i.test(line) ||
+    /\bTYPE\s*=\s*[A-Za-z0-9_]+\b/i.test(line)
+  );
+}
+
+/**
+ * Pass 1: Stream through the artifact to collect DB names and detect if rewrite is needed.
+ * Returns a Promise that resolves with the scan result when the stream completes.
+ */
+async function scanMysqlDumpStream(source: Readable): Promise<MysqlScanResult> {
+  const qualifierDbs = new Set<string>();
+  let useDb: string | null = null;
+  let needsRewrite = false;
+  let partialLine = '';
+
+  return new Promise<MysqlScanResult>((resolve, reject) => {
+    source.on('data', (chunk: Buffer | string) => {
+      const text = partialLine + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+      const lines = text.split('\n');
+      partialLine = lines.pop() ?? '';
+
+      for (const line of lines) {
+        collectMysqlQualifierDatabaseNamesFromLine(line, qualifierDbs);
+        if (useDb === null) {
+          useDb = extractMysqlSourceDatabaseFromLine(line);
+        }
+        if (!needsRewrite) {
+          needsRewrite = needsMysqlDatabaseRewriteForLine(line);
+        }
+      }
+    });
+
+    source.on('end', () => {
+      // Process final partial line
+      if (partialLine) {
+        collectMysqlQualifierDatabaseNamesFromLine(partialLine, qualifierDbs);
+        if (useDb === null) {
+          useDb = extractMysqlSourceDatabaseFromLine(partialLine);
+        }
+        if (!needsRewrite) {
+          needsRewrite = needsMysqlDatabaseRewriteForLine(partialLine);
+        }
+      }
+      resolve({ qualifierDbs, useDb, needsRewrite });
+    });
+
+    source.on('error', reject);
+  });
+}
+
+/**
+ * Pass 2: Transform stream that rewrites MySQL dump lines using pre-collected DB names.
+ */
+function createMysqlRewriteTransform(dbName: string, qualifierDbs: Set<string>): Transform {
+  const q = quoteMysqlIdentifier(dbName);
+  const sortedDbs = Array.from(qualifierDbs).sort((a, b) => b.length - a.length);
+  let partialLine = '';
+  let bomStripped = false;
+  let headerEmitted = false;
+
+  function rewriteLine(line: string): string {
+    // Strip USE statements (plain and mysqldump comment form)
+    if (/\/\*![0-9]*\s*USE\b[^*]*\*\/\s*;?/i.test(line)) {
+      return line.replace(/\/\*![0-9]*\s*USE\b[^*]*\*\/\s*;?/gi, '');
+    }
+    if (/^\s*USE\b[^;]*;/i.test(line)) return '';
+
+    // Strip CREATE/DROP DATABASE/SCHEMA
+    if (/\/\*![0-9]*\s*(?:DROP|CREATE)\s+(?:DATABASE|SCHEMA)\b[^*]*\*\/\s*;?/i.test(line)) {
+      return line
+        .replace(/\/\*![0-9]*\s*DROP\s+DATABASE\b[^*]*\*\/\s*;?/gi, '')
+        .replace(/\/\*![0-9]*\s*CREATE\s+DATABASE\b[^*]*\*\/\s*;?/gi, '')
+        .replace(/\/\*![0-9]*\s*DROP\s+SCHEMA\b[^*]*\*\/\s*;?/gi, '')
+        .replace(/\/\*![0-9]*\s*CREATE\s+SCHEMA\b[^*]*\*\/\s*;?/gi, '');
+    }
+    if (/^\s*DROP\s+DATABASE\b[^;]*;/i.test(line)) return '';
+    if (/^\s*CREATE\s+DATABASE\b[^;]*;/i.test(line)) return '';
+    if (/^\s*DROP\s+SCHEMA\b[^;]*;/i.test(line)) return '';
+    if (/^\s*CREATE\s+SCHEMA\b[^;]*;/i.test(line)) return '';
+
+    // TYPE= → ENGINE=
+    let s = line.replace(/\bTYPE\s*=\s*([A-Za-z0-9_]+)\b/gi, 'ENGINE=$1');
+
+    // Rewrite qualified db.table identifiers
+    for (const srcDb of sortedDbs) {
+      s = rewriteMysqlQualifiedDbPrefix(s, srcDb, dbName);
+    }
+    s = rewriteUnquotedMysqlCreateDbTable(s, qualifierDbs, dbName);
+
+    return s;
+  }
+
+  /** Match buffer path: drop lines that are fully removed (e.g. USE), keep intentional blank lines. */
+  function emitMysqlRewriteLine(rawLine: string, rewritten: string): boolean {
+    if (rewritten !== '') return true;
+    return rawLine.trim() === '';
+  }
+
+  return new Transform({
+    decodeStrings: true,
+
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+      let text = chunk.toString('utf8');
+
+      if (!bomStripped) {
+        text = text.replace(/^\uFEFF/, '');
+        bomStripped = true;
+      }
+
+      text = partialLine + text;
+      partialLine = '';
+
+      const lines = text.split('\n');
+      partialLine = lines.pop() ?? '';
+
+      const output: string[] = [];
+
+      // Emit header before first content
+      if (!headerEmitted) {
+        output.push(`SET FOREIGN_KEY_CHECKS=0;`);
+        output.push(`USE ${q};`);
+        headerEmitted = true;
+      }
+
+      for (const rawLine of lines) {
+        const rewritten = rewriteLine(rawLine);
+        if (emitMysqlRewriteLine(rawLine, rewritten)) output.push(rewritten);
+      }
+
+      if (output.length > 0) {
+        this.push(output.join('\n') + '\n');
+      }
+
+      callback();
+    },
+
+    flush(callback: TransformCallback) {
+      const remaining: string[] = [];
+
+      if (!headerEmitted) {
+        remaining.push(`SET FOREIGN_KEY_CHECKS=0;`);
+        remaining.push(`USE ${q};`);
+        headerEmitted = true;
+      }
+
+      if (partialLine) {
+        const rw = rewriteLine(partialLine);
+        if (emitMysqlRewriteLine(partialLine, rw)) remaining.push(rw);
+        partialLine = '';
+      }
+
+      remaining.push('SET FOREIGN_KEY_CHECKS=1;');
+
+      if (remaining.length > 0) {
+        this.push(remaining.join('\n') + '\n');
+      }
+
+      callback();
+    },
+  });
+}
+
+/**
+ * Create a simple Transform that prepends FK checks and USE statement for dumps
+ * that don't need rewriting (short-circuit path).
+ */
+function createMysqlPassthroughTransform(dbName: string): Transform {
+  const q = quoteMysqlIdentifier(dbName);
+  let headerEmitted = false;
+  let bomStripped = false;
+
+  return new Transform({
+    decodeStrings: true,
+
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+      let data = chunk.toString('utf8');
+
+      if (!bomStripped) {
+        data = data.replace(/^\uFEFF/, '');
+        bomStripped = true;
+      }
+
+      if (!headerEmitted) {
+        this.push(`SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n`);
+        headerEmitted = true;
+      }
+
+      this.push(data);
+      callback();
+    },
+
+    flush(callback: TransformCallback) {
+      if (!headerEmitted) {
+        this.push(`SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n`);
+      }
+      this.push('\nSET FOREIGN_KEY_CHECKS=1;\n');
+      callback();
+    },
+  });
 }
 
 interface ColumnMeta {
@@ -598,91 +869,134 @@ async function readArtifactBytes(artifactRef: string): Promise<Buffer> {
   return readFile(artifactRef);
 }
 
-async function finalizeRemoteMysqlArtifactToSql(
-  tmpRoot: string,
-  rawPath: string,
-  extension: '.sql' | '.sql.gz',
-  cleanup: () => Promise<void>,
-): Promise<{ sql: string; cleanup: () => Promise<void> }> {
-  let sqlPath = rawPath;
-  if (extension === '.sql.gz') {
-    sqlPath = join(tmpRoot, 'artifact.sql');
-    await pipeline(createReadStream(rawPath), createGunzip(), createWriteStream(sqlPath));
-    await unlink(rawPath);
+/**
+ * Return a `Readable` stream for any artifact source (S3, HTTP, or local file).
+ * Unlike `readArtifactBytes`, this does NOT buffer the entire file into memory.
+ */
+async function createArtifactReadStream(artifactRef: string): Promise<Readable> {
+  if (/^s3:\/\//i.test(artifactRef)) {
+    return createMcCatObjectReadStream(artifactRef);
   }
-  const sql = await readFile(sqlPath, 'utf8');
-  return { sql, cleanup };
+
+  if (/^https?:\/\//i.test(artifactRef)) {
+    const response = await fetch(artifactRef);
+    if (!response.ok) {
+      throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
+    }
+    if (!response.body) {
+      throw new Error(`Dataset artifact has no response body: ${artifactRef}`);
+    }
+    return Readable.fromWeb(response.body as import('node:stream/web').ReadableStream);
+  }
+
+  return createReadStream(artifactRef);
 }
 
 const noopMysqlArtifactCleanup = async (): Promise<void> => {};
 
 /**
- * Load MySQL/MariaDB dump text without keeping a full S3 Buffer plus gunzipSync output in heap.
- * Remote artifacts stream to disk; .sql.gz decompresses via streaming gzip.
+ * Resolve MySQL artifact to a factory that yields a fresh decompressed byte stream per call
+ * (pass 1: scan, pass 2: restore). HTTP downloads once to a temp file so both passes read from
+ * disk without fetching twice.
  */
-async function loadMysqlArtifactSqlForRestore(
+async function resolveMysqlArtifactStreamingSource(
   artifactRef: string,
   extension: '.sql' | '.sql.gz',
-): Promise<{ sql: string; cleanup: () => Promise<void> }> {
-  if (/^s3:\/\//i.test(artifactRef)) {
-    const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-art-'));
-    const cleanup = async (): Promise<void> => {
-      await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
-    };
-    try {
-      const rawPath = join(tmpRoot, extension === '.sql.gz' ? 'raw.sql.gz' : 'raw.sql');
-      await pipeline(createMcCatObjectReadStream(artifactRef), createWriteStream(rawPath));
-      return await finalizeRemoteMysqlArtifactToSql(tmpRoot, rawPath, extension, cleanup);
-    } catch (err) {
-      await cleanup();
-      throw err;
-    }
-  }
+): Promise<{
+  createDecompressedStream: () => Promise<Readable>;
+  cleanup: () => Promise<void>;
+}> {
+  const noop = noopMysqlArtifactCleanup;
 
   if (/^https?:\/\//i.test(artifactRef)) {
-    const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-art-'));
+    const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-stream-'));
     const cleanup = async (): Promise<void> => {
       await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
     };
-    try {
-      const response = await fetch(artifactRef);
-      if (!response.ok) {
-        throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
-      }
-      const body = response.body;
-      if (!body) {
-        throw new Error(`Dataset artifact has no response body: ${artifactRef}`);
-      }
-      const rawPath = join(tmpRoot, extension === '.sql.gz' ? 'raw.sql.gz' : 'raw.sql');
-      await pipeline(
-        Readable.fromWeb(body as import('node:stream/web').ReadableStream),
-        createWriteStream(rawPath),
-      );
-      return await finalizeRemoteMysqlArtifactToSql(tmpRoot, rawPath, extension, cleanup);
-    } catch (err) {
-      await cleanup();
-      throw err;
+    const rawPath = join(tmpRoot, extension === '.sql.gz' ? 'raw.sql.gz' : 'raw.sql');
+    const response = await fetch(artifactRef);
+    if (!response.ok) {
+      throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
     }
+    const body = response.body;
+    if (!body) {
+      throw new Error(`Dataset artifact has no response body: ${artifactRef}`);
+    }
+    await pipeline(Readable.fromWeb(body as import('node:stream/web').ReadableStream), createWriteStream(rawPath));
+    return {
+      createDecompressedStream: async () => {
+        const rs = createReadStream(rawPath);
+        return extension === '.sql.gz' ? rs.pipe(createGunzip()) : rs;
+      },
+      cleanup,
+    };
+  }
+
+  if (/^s3:\/\//i.test(artifactRef)) {
+    return {
+      createDecompressedStream: async () => {
+        const s = await createArtifactReadStream(artifactRef);
+        return extension === '.sql.gz' ? s.pipe(createGunzip()) : s;
+      },
+      cleanup: noop,
+    };
   }
 
   if (extension === '.sql') {
-    const sql = await readFile(artifactRef, 'utf8');
-    return { sql, cleanup: noopMysqlArtifactCleanup };
+    return {
+      createDecompressedStream: async () => createReadStream(artifactRef),
+      cleanup: noop,
+    };
   }
 
-  const tmpRoot = await mkdtemp(join(tmpdir(), 'sqlcraft-mysql-art-'));
-  const cleanup = async (): Promise<void> => {
-    await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
+  return {
+    createDecompressedStream: async () => {
+      const rs = createReadStream(artifactRef);
+      return rs.pipe(createGunzip());
+    },
+    cleanup: noop,
   };
-  try {
-    const sqlPath = join(tmpRoot, 'artifact.sql');
-    await pipeline(createReadStream(artifactRef), createGunzip(), createWriteStream(sqlPath));
-    const sql = await readFile(sqlPath, 'utf8');
-    return { sql, cleanup };
-  } catch (err) {
-    await cleanup();
-    throw err;
+}
+
+/**
+ * Run pass 1 + pass 2 transforms in-process (for tests). Feeds scan with chunked input.
+ */
+async function mysqlStreamingRestoreOutputForTest(dbName: string, inputUtf8: string): Promise<string> {
+  const buf = Buffer.from(inputUtf8, 'utf8');
+  const chunkSize = Math.max(1, Math.floor(buf.length / 5));
+
+  const scanFeed = new PassThrough();
+  const scanPromise = scanMysqlDumpStream(scanFeed);
+  for (let i = 0; i < buf.length; i += chunkSize) {
+    scanFeed.write(buf.subarray(i, Math.min(i + chunkSize, buf.length)));
   }
+  scanFeed.end();
+  const scanResult = await scanPromise;
+
+  let { qualifierDbs, useDb, needsRewrite } = scanResult;
+  if (useDb) qualifierDbs.add(useDb);
+  qualifierDbs.delete(dbName);
+  const passthrough = qualifierDbs.size === 0 && !needsRewrite;
+
+  const transform = passthrough
+    ? createMysqlPassthroughTransform(dbName)
+    : createMysqlRewriteTransform(dbName, qualifierDbs);
+
+  const chunks: Buffer[] = [];
+  transform.on('data', (c: Buffer | string) =>
+    chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)),
+  );
+  const done = new Promise<void>((resolve, reject) => {
+    transform.on('end', resolve);
+    transform.on('error', reject);
+  });
+
+  for (let i = 0; i < buf.length; i += chunkSize) {
+    transform.write(buf.subarray(i, Math.min(i + chunkSize, buf.length)));
+  }
+  transform.end();
+  await done;
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function getArtifactExtension(pathLike: string): string {
@@ -798,79 +1112,82 @@ async function restoreFromArtifact(params: {
       (engine === 'mysql' || engine === 'mariadb') &&
       (extension === '.sql' || extension === '.sql.gz')
     ) {
-      const { sql, cleanup } = await loadMysqlArtifactSqlForRestore(
-        artifactRef,
-        extension as '.sql' | '.sql.gz',
-      );
-      mysqlArtifactCleanup = cleanup;
-      await runMysqlInSandboxContainer({
+      const ext = extension as '.sql' | '.sql.gz';
+      const mysqlSource = await resolveMysqlArtifactStreamingSource(artifactRef, ext);
+      mysqlArtifactCleanup = mysqlSource.cleanup;
+
+      const scanStream = await mysqlSource.createDecompressedStream();
+      const scanResult = await scanMysqlDumpStream(scanStream);
+      let { qualifierDbs, useDb, needsRewrite } = scanResult;
+      if (useDb) qualifierDbs.add(useDb);
+      qualifierDbs.delete(dbName);
+
+      const passthrough = qualifierDbs.size === 0 && !needsRewrite;
+
+      const dataStream = await mysqlSource.createDecompressedStream();
+      const tail = passthrough
+        ? createMysqlPassthroughTransform(dbName)
+        : createMysqlRewriteTransform(dbName, qualifierDbs);
+
+      await runMysqlInSandboxContainerStreaming({
         engine: mysqlFamilyEngine,
         containerRef,
         dbUser,
         dbPassword,
         dbName,
-        sql: prepareMysqlRestorePayload(dbName, sql),
+        source: dataStream.pipe(tail),
       });
+
       logger.info(
-        { artifactRef },
-        extension === '.sql.gz' ? 'Dataset restored from .sql.gz artifact' : 'Dataset restored from .sql artifact',
+        { artifactRef, streaming: true, mysqlPassthrough: passthrough },
+        ext === '.sql.gz' ? 'Dataset restored from .sql.gz artifact (streaming)' : 'Dataset restored from .sql artifact (streaming)',
       );
       return true;
     }
 
-    // Load full artifact bytes (S3/HTTP/local). PostgreSQL / SQL Server still buffer here.
-    const bytes = await readArtifactBytes(artifactRef);
+    // ── PostgreSQL streaming restore (.sql / .sql.gz) ──────────────────────
+    // Stream directly from source → optional gunzip → sanitize Transform → psql stdin.
+    // No full-file buffering in worker memory.
+    if (engine === 'postgresql' && (extension === '.sql' || extension === '.sql.gz')) {
+      const isGz = extension === '.sql.gz';
+      const source = await createArtifactReadStream(artifactRef);
+      const sanitize = createPostgresSanitizeTransform(dbName, schema);
 
-    if (extension === '.sql') {
-      if (engine === 'postgresql') {
-        await runPsqlInSandboxContainer({
-          containerRef,
-          dbUser,
-          dbName,
-          sql: sanitizePostgresDumpForPsql(dbName, bytes, schema),
-        });
-      } else if (engine === 'sqlserver') {
-        await runSqlcmdInSandboxContainer({
-          containerRef,
-          saPassword: mssqlSaPassword,
-          dbName,
-          sql: sanitizeSqlServerDumpPayload(bytes),
-        });
-      } else {
-        return false;
-      }
-      logger.info({ artifactRef }, 'Dataset restored from .sql artifact');
+      await runPsqlInSandboxContainerStreaming({
+        containerRef,
+        dbUser,
+        dbName,
+        source: isGz ? source.pipe(createGunzip()).pipe(sanitize) : source.pipe(sanitize),
+      });
+
+      logger.info({ artifactRef, streaming: true }, `Dataset restored from ${extension} artifact (streaming)`);
       return true;
     }
 
-    if (extension === '.sql.gz') {
-      const sqlBuf = gunzipSync(bytes);
-      if (engine === 'postgresql') {
-        await runPsqlInSandboxContainer({
-          containerRef,
-          dbUser,
-          dbName,
-          sql: sanitizePostgresDumpForPsql(dbName, sqlBuf, schema),
-        });
-      } else if (engine === 'sqlserver') {
-        await runSqlcmdInSandboxContainer({
-          containerRef,
-          saPassword: mssqlSaPassword,
-          dbName,
-          sql: sanitizeSqlServerDumpPayload(sqlBuf),
-        });
-      } else {
-        return false;
-      }
-      logger.info({ artifactRef }, 'Dataset restored from .sql.gz artifact');
+    // ── SQL Server streaming restore (.sql / .sql.gz) ──────────────────
+    if (engine === 'sqlserver' && (extension === '.sql' || extension === '.sql.gz')) {
+      const isGz = extension === '.sql.gz';
+      const source = await createArtifactReadStream(artifactRef);
+      const sanitize = createSqlServerSanitizeTransform();
+
+      await runSqlcmdInSandboxContainerStreaming({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+        source: isGz ? source.pipe(createGunzip()).pipe(sanitize) : source.pipe(sanitize),
+      });
+
+      logger.info({ artifactRef, streaming: true }, `Dataset restored from ${extension} artifact (streaming)`);
       return true;
     }
 
+    // ── pg_restore formats — requires random access, cannot stream ────
     if (extension === '.dump' || extension === '.backup' || extension === '.tar') {
       if (engine !== 'postgresql') {
         logger.warn({ artifactRef, engine }, 'pg_restore artifacts require PostgreSQL sandbox');
         return false;
       }
+      const bytes = await readArtifactBytes(artifactRef);
       await runPgRestoreInSandboxContainer({ containerRef, dbUser, dbName, dump: bytes });
       logger.info({ artifactRef }, 'Dataset restored from pg_restore artifact');
       return true;
@@ -990,4 +1307,5 @@ export const __private__ = {
   parseSchemaTables,
   inferColumnExpression,
   rewriteMysqlRestoreSqlForTargetDatabase,
+  mysqlStreamingRestoreOutputForTest,
 };

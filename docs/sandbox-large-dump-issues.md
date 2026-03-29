@@ -28,13 +28,13 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 
 | ID | Mức độ | Trạng thái | Mô tả | Vị trí code |
 |----|--------|------------|--------|-------------|
-| R1 | Cao | ✅ Done | **Trước**: chỉ PG + S3 stream. **Sau**: PostgreSQL stream cho **mọi** nguồn (S3, HTTP, local file). MySQL/MariaDB/SQL Server stream cho S3. | `dataset-loader.ts` — `createArtifactReadStream` mới; streaming path mở rộng. |
-| R2 | Cao | ✅ Done | **Trước**: HTTP `fetch` + `arrayBuffer()` buffer toàn bộ. **Sau**: PostgreSQL dùng `Readable.fromWeb(response.body)` streaming. | `dataset-loader.ts` — `createArtifactReadStream` HTTP path. |
-| R3 | Cao | ✅ Done (S3) | S3 via MinIO: streaming qua `createMcCatObjectReadStream` cho tất cả engines. `readS3ObjectViaMinioContainer` (buffer) chỉ còn dùng cho non-.sql artifacts. | `docker.ts` |
-| R4 | Cao | ✅ Done (PG) | `.sql.gz` non-S3: PostgreSQL giờ stream + gunzip. MySQL/MariaDB/MSSQL non-S3 vẫn buffer (cần rewrite/sanitize). | Streaming PG OK. MySQL/MSSQL non-S3 cần stream-based rewriter (future). |
-| R5 | Cao | ⚠️ Noted | `pg_restore` custom format vẫn buffer vì `pg_restore` cần random access. `.sql`/`.sql.gz` đã streaming cho PG. | Giới hạn của pg_restore format; không thể stream. Dùng `.sql.gz` thay vì `.dump` cho large datasets. |
-| R6 | Cao | ⚠️ Partial | MySQL `prepareMysqlRestorePayload` full-string regex cho non-S3 path. S3 path bypass rewrite (streaming). | Short-circuit (R11) giảm thiểu. Full streaming rewriter = future work. |
-| R7 | Cao | ⚠️ Partial | SQL Server `sanitizeSqlServerDumpPayload` full string cho non-S3 path. S3 path stream trực tiếp. | Tương tự R6: S3 streaming OK; non-S3 needs streaming sanitizer. |
+| R1 | Cao | ✅ Done | PostgreSQL, MySQL/MariaDB và SQL Server: restore `.sql`/`.sql.gz` stream qua `createArtifactReadStream` (S3, HTTP, local). | `dataset-loader.ts` — `resolveMysqlArtifactStreamingSource`, `createArtifactReadStream`. |
+| R2 | Cao | ✅ Done | HTTP: `Readable.fromWeb(response.body)` thay vì `arrayBuffer()` cho pipeline restore streaming. | `dataset-loader.ts` — `createArtifactReadStream` HTTP path. |
+| R3 | Cao | ✅ Done (S3) | S3 via MinIO: streaming qua `createMcCatObjectReadStream`. `readS3ObjectViaMinioContainer` (buffer) chủ yếu cho `pg_restore` / format không stream được. | `docker.ts` |
+| R4 | Cao | ✅ Done | `.sql`/`.sql.gz` cho PG, MySQL/MariaDB, SQL Server đều stream (gunzip on the fly). HTTP MySQL: download một lần ra temp rồi hai pass đọc từ disk. | `dataset-loader.ts` |
+| R5 | Cao | ⚠️ Noted | `pg_restore` custom format vẫn buffer vì `pg_restore` cần random access. `.sql`/`.sql.gz` đã streaming cho PG/MySQL/MSSQL. | Giới hạn của pg_restore format; không thể stream. Dùng `.sql.gz` thay vì `.dump` cho large datasets. |
+| R6 | Cao | ✅ Done | MySQL/MariaDB: hai pass (scan stream → `runMysqlInSandboxContainerStreaming`), short-circuit khi không cần rewrite (R11). Inline SQL vẫn dùng buffer nhỏ. | `dataset-loader.ts` — `scanMysqlDumpStream`, `createMysqlRewriteTransform` / `createMysqlPassthroughTransform`. |
+| R7 | Cao | ✅ Done | SQL Server: `createSqlServerSanitizeTransform` + `runSqlcmdInSandboxContainerStreaming` cho mọi nguồn. Inline SQL vẫn buffer. | `sqlserver-dump-sanitize.ts`, `docker.ts`, `dataset-loader.ts`. |
 | R8 | Trung bình | ✅ Done | **Trước**: non-PG engines skip seed im lặng. **Sau**: warn log rõ ràng khi synthetic seed requested nhưng engine không hỗ trợ, bao gồm `totalRequested` count. | `dataset-loader.ts` — `loadDatasetIntoSandbox` |
 | R9 | Trung bình | ✅ Done | SQL Server `sqlcmd` pipe stdin trực tiếp — bỏ temp file. | `docker.ts` (`runSqlcmdInSandboxContainer`) |
 | R10 | Trung bình | ✅ Done | stdout/stderr cap ở 64 KB. | `docker.ts` — `appendCapped` + `DOCKER_OUTPUT_CAP_BYTES`. |
@@ -72,8 +72,8 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 
 | ID | Mức độ | Trạng thái | Mô tả | Gợi ý |
 |----|--------|------------|--------|--------|
-| J1 | Trung bình | ✅ Done | `applySchemaAndDataset` wrapped với configurable timeout. | Env: `SANDBOX_DATASET_RESTORE_TIMEOUT_MS` (default 10 min, 0 = no limit). |
-| J2 | Thấp | ✅ Done | **Trước**: BullMQ workers dùng default lockDuration. **Sau**: provisioning/cleanup/reset workers dùng `lockDuration: 10min`, `stalledInterval: 5min`. Query execution giữ default. | `index.ts` — `longJobOpts`. |
+| J1 | Trung bình | ✅ Done | `applySchemaAndDataset` có timeout tĩnh + **dynamic** khi biết kích thước artifact (S3 `mc stat`, inline SQL). Env `SANDBOX_DATASET_RESTORE_TIMEOUT_MS` là sàn; 0 = no limit. | `index.ts` — `computeRestoreTimeoutMs`, `tryResolveArtifactByteSize`. |
+| J2 | Thấp | ✅ Done | BullMQ: workers job dài dùng `lockDuration: 30min`, `stalledInterval: 15min` (tránh stall khi restore dump lớn). | `index.ts` — `LONG_JOB_LOCK_DURATION_MS`, `longJobOpts`. |
 
 ---
 
@@ -81,7 +81,7 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 
 - `apps/api/src/modules/admin/sql-dump-upload-format.ts` — whitelist extension, gzip/zip decode, `SQL_DUMP_MAX_UNCOMPRESSED_MB`
 - `services/worker/src/docker.ts` — container, streaming `psql`/`mysql`/`sqlcmd`, MinIO stream, resource limits, output cap
-- `services/worker/src/dataset-loader.ts` — restore (streaming cho PG + S3 MySQL/MSSQL), MySQL rewrite (short-circuit), seed warning
+- `services/worker/src/dataset-loader.ts` — restore streaming (PG / MySQL / MariaDB / SQL Server cho `.sql`/`.sql.gz`), MySQL two-pass + short-circuit, seed warning
 - `services/worker/src/sqlserver-dump-sanitize.ts` — SQL Server dump sanitization
 - `services/worker/src/sandbox-engine-image.ts` — dialect → Docker image mapping
 - `services/worker/src/index.ts` — `applySchemaAndDataset` (timeout), BullMQ lockDuration, provisioning/reset
@@ -100,8 +100,8 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 
 | Trạng thái | Số lượng | IDs |
 |------------|----------|-----|
-| ✅ Done | 17 | S1, S3, R1, R2, R3, R4(PG), R8, R9, R10, R11, P4, D3, D4, D5, J1, J2 |
-| ⚠️ Partial/Noted | 3 | R5 (pg_restore format giới hạn), R6, R7 (non-S3 cần stream rewriter) |
+| ✅ Done | 18 | S1, S3, R1–R4, R6–R11, P4, D3–D5, J1, J2 |
+| ⚠️ Noted | 1 | R5 (`pg_restore` custom/tar — cần buffer) |
 | 🔵 Accepted/By design | 10 | S2, S4, A1, A2, P1, P2, P3, P5, P6, D1, D2 |
 
 ### Env variables mới (từ các fix)
@@ -118,8 +118,7 @@ Tài liệu tổng hợp từ review code (worker `dataset-loader`, `docker`, AP
 
 ### Remaining future work
 
-- **Stream-based MySQL dump rewriter**: xử lý line-by-line thay vì full-string regex (unblocks R6 cho non-S3 large dumps)
-- **Stream-based SQL Server dump sanitizer**: tương tự cho R7
+- **Dynamic timeout**: bổ sung kích thước artifact qua HTTP HEAD / `fs.stat` local (hiện chủ yếu S3 + inline).
 - **Derived datasets cho MySQL/MSSQL**: cần parser cho INSERT syntax khác PG (D1)
 - **Two-pass streaming derived generation**: giảm memory cho large PG dumps (D2)
 - **Background row estimation for artifact-only scans**: ước lượng scale từ file size / sampling (P3)

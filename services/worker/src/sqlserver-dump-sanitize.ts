@@ -262,3 +262,270 @@ export function sanitizeSqlServerDumpPayload(input: string | Buffer): string | B
   const out = sanitizeSqlServerDumpScript(text);
   return typeof input === 'string' ? out : Buffer.from(out, 'utf8');
 }
+
+// ─── Streaming Transform ───────────────────────────────────────────────────────
+
+import { Transform, type TransformCallback } from 'node:stream';
+
+/**
+ * Apply all line-level sanitization passes to a single line.
+ * This covers USE strip, backtick→bracket, MySQL noise strip, sp_addtype strip,
+ * catalog view modernize, and reserved keyword bracketing.
+ *
+ * Returns `''` (empty string) for stripped lines to preserve blank-line positions
+ * matching the buffer-based output.
+ */
+function sanitizeLineLevel(line: string): string {
+  // Strip USE statements
+  if (/^\s*USE\s+(?:\[[^\]]*\]|[^\s;\r\n]+)(?:\s*;)?\s*(?:--[^\r\n]*)?\s*$/i.test(line)) {
+    return '';
+  }
+
+  // Strip MySQL session noise
+  if (/^\s*LOCK\s+TABLES\s+/i.test(line) && /;\s*$/.test(line)) return '';
+  if (/^\s*UNLOCK\s+TABLES\s*;\s*$/i.test(line)) return '';
+  if (/^\s*SET\s+NAMES\s+/i.test(line) && /;?\s*$/.test(line)) return '';
+  if (/^\s*SET\s+FOREIGN_KEY_CHECKS\s*=/i.test(line) && /;?\s*$/.test(line)) return '';
+  if (/^\s*SET\s+UNIQUE_CHECKS\s*=/i.test(line) && /;?\s*$/.test(line)) return '';
+  if (/^\s*SET\s+SQL_MODE\s*=/i.test(line) && /;?\s*$/.test(line)) return '';
+
+  // Strip sp_addtype
+  if (/^\s*(?:execute|exec)\s+sp_addtype\b/i.test(line)) return '';
+
+  let s = line;
+
+  // MySQL backticks → brackets
+  s = mysqlBackticksToBrackets(s);
+
+  // Modernize legacy catalog views
+  s = modernizeLegacySqlServerCatalogViews(s);
+
+  // Bracket reserved identifiers (Order, User)
+  const R = RESERVED_AS_OBJECT_NAME;
+  s = s.replace(
+    new RegExp(`\\bCREATE\\s+TABLE\\s+(?:(\\[dbo\\]\\.)|(dbo\\.))?(${R})\\b(\\s*\\()`, 'gi'),
+    (_m, bracketedDbo, plainDbo, name, paren) => {
+      const schema = bracketedDbo ?? plainDbo ?? '';
+      return `CREATE TABLE ${schema}[${name}]${paren}`;
+    },
+  );
+  s = s.replace(new RegExp(`\\bALTER\\s+TABLE\\s+(${R})\\b`, 'gi'), (_m, name) => `ALTER TABLE [${name}]`);
+  s = s.replace(
+    new RegExp(`\\bDROP\\s+TABLE\\s+(IF\\s+EXISTS\\s+)?(${R})\\b`, 'gi'),
+    (_m, ifExists, name) => (ifExists ? `DROP TABLE IF EXISTS [${name}]` : `DROP TABLE [${name}]`),
+  );
+  s = s.replace(new RegExp(`\\bINSERT\\s+INTO\\s+(${R})\\b`, 'gi'), (_m, name) => `INSERT INTO [${name}]`);
+  s = s.replace(
+    new RegExp(`\\bREFERENCES\\s+(${R})\\b\\s*(\\()`, 'gi'),
+    (_m, name, paren) => `REFERENCES [${name}]${paren}`,
+  );
+  s = s.replace(new RegExp(`\\bJOIN\\s+(${R})\\b(\\s+)`, 'gi'), (_m, name, sp) => `JOIN [${name}]${sp}`);
+  s = s.replace(new RegExp(`\\bFROM\\s+(${R})\\b(\\s+)`, 'gi'), (_m, name, sp) => `FROM [${name}]${sp}`);
+  s = s.replace(new RegExp(`\\bUPDATE\\s+(${R})\\b(\\s+)`, 'gi'), (_m, name, sp) => `UPDATE [${name}]${sp}`);
+  s = s.replace(new RegExp(`\\bDELETE\\s+FROM\\s+(${R})\\b`, 'gi'), (_m, name) => `DELETE FROM [${name}]`);
+  s = s.replace(new RegExp(`\\bTRUNCATE\\s+TABLE\\s+(${R})\\b`, 'gi'), (_m, name) => `TRUNCATE TABLE [${name}]`);
+
+  return s;
+}
+
+/**
+ * Character-by-character date quoting + TRUE/FALSE rewriting for a single line,
+ * with string/comment state carried from previous lines.
+ *
+ * Returns the processed line and the updated state.
+ */
+function quoteDatesAndBoolsInLine(
+  line: string,
+  state: { inString: boolean; inBlockComment: boolean },
+): { output: string; state: { inString: boolean; inBlockComment: boolean } } {
+  let out = '';
+  let { inString, inBlockComment } = state;
+  let i = 0;
+
+  const tryRewritePlainLiteral = (pos: number): { len: number; text: string } | null => {
+    const before = pos > 0 ? line[pos - 1] : '';
+    const prevOk = pos === 0 || /[\s(,]/.test(before);
+    const notIdPart = !/[\w]/.test(before);
+    if (!prevOk || !notIdPart) return null;
+
+    const rest = line.slice(pos);
+
+    const iso = rest.match(
+      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+    );
+    if (iso) return { len: iso[1].length, text: `'${iso[1]}'` };
+
+    const slash = rest.match(
+      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*[,);])/i,
+    );
+    if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
+
+    const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*[,);])/i);
+    if (bool) {
+      const bit = bool[1].toUpperCase() === 'TRUE' ? '1' : '0';
+      return { len: bool[0].length, text: bit };
+    }
+
+    return null;
+  };
+
+  while (i < line.length) {
+    const c = line[i];
+    const c2 = line[i + 1];
+
+    if (inBlockComment) {
+      out += c;
+      if (c === '*' && c2 === '/') {
+        out += c2;
+        i += 2;
+        inBlockComment = false;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    if (inString) {
+      out += c;
+      if (c === "'") {
+        if (c2 === "'") {
+          out += c2;
+          i += 2;
+          continue;
+        }
+        inString = false;
+      }
+      i++;
+      continue;
+    }
+
+    if (c === "'") {
+      inString = true;
+      out += c;
+      i++;
+      continue;
+    }
+    if (c === '-' && c2 === '-') {
+      // Line comment — rest of line is comment, no state carry needed
+      out += line.slice(i);
+      i = line.length;
+      continue;
+    }
+    if (c === '/' && c2 === '*') {
+      inBlockComment = true;
+      out += '/*';
+      i += 2;
+      continue;
+    }
+
+    const rw = tryRewritePlainLiteral(i);
+    if (rw) {
+      out += rw.text;
+      i += rw.len;
+      continue;
+    }
+
+    out += c;
+    i++;
+  }
+
+  return { output: out, state: { inString, inBlockComment } };
+}
+
+/**
+ * Streaming equivalent of `sanitizeSqlServerDumpScript`. Processes line-by-line
+ * with carried state for string literals and block comments across chunk boundaries.
+ */
+export function createSqlServerSanitizeTransform(): Transform {
+  let partialLine = '';
+  let bomStripped = false;
+  let bootstrapEmitted = false;
+  let needsBootstrap = false;
+  // Date quoting state machine carries across lines
+  let dateState: { inString: boolean; inBlockComment: boolean } = {
+    inString: false,
+    inBlockComment: false,
+  };
+
+  function processLine(line: string): string {
+    // Detect if bootstrap is needed (idempotent check per line, before stripping)
+    if (!needsBootstrap && !bootstrapEmitted) {
+      if (/\bsp_addtype\b/i.test(line) || /\btitle_id\s+tid\b/i.test(line) ||
+          /\bau_id\s+id\b/i.test(line) || /\bemp_id\s+empid\b/i.test(line) ||
+          /\([^)]*\w+\s+tid\s*[\n\r,)]/i.test(line)) {
+        needsBootstrap = true;
+      }
+    }
+
+    return sanitizeLineLevel(line);
+  }
+
+  function applyDateQuoting(line: string): string {
+    const result = quoteDatesAndBoolsInLine(line, dateState);
+    dateState = result.state;
+    return result.output;
+  }
+
+  return new Transform({
+    decodeStrings: true,
+
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+      let text = chunk.toString('utf8');
+
+      if (!bomStripped) {
+        text = stripBom(text);
+        bomStripped = true;
+      }
+
+      text = partialLine + text;
+      partialLine = '';
+
+      const lines = text.split('\n');
+      partialLine = lines.pop() ?? '';
+
+      const output: string[] = [];
+
+      for (const rawLine of lines) {
+        const sanitized = processLine(rawLine);
+
+        // Emit bootstrap before first processed line if needed
+        if (needsBootstrap && !bootstrapEmitted) {
+          output.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
+          bootstrapEmitted = true;
+        }
+
+        output.push(applyDateQuoting(sanitized));
+      }
+
+      if (output.length > 0) {
+        this.push(output.join('\n') + '\n');
+      }
+
+      callback();
+    },
+
+    flush(callback: TransformCallback) {
+      const remaining: string[] = [];
+
+      if (partialLine) {
+        const sanitized = processLine(partialLine);
+        if (needsBootstrap && !bootstrapEmitted) {
+          remaining.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
+          bootstrapEmitted = true;
+        }
+        remaining.push(applyDateQuoting(sanitized));
+        partialLine = '';
+      } else if (needsBootstrap && !bootstrapEmitted) {
+        // All lines were stripped but bootstrap was triggered — emit it
+        remaining.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
+        bootstrapEmitted = true;
+      }
+
+      if (remaining.length > 0) {
+        this.push(remaining.join('\n'));
+      }
+
+      callback();
+    },
+  });
+}

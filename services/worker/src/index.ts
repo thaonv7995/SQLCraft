@@ -51,6 +51,7 @@ import {
   waitForSandboxEngine,
   initSqlServerDatabase,
   runSqlcmdInSandboxContainer,
+  statS3ObjectSizeViaMinioContainer,
 } from './docker';
 import { buildCreateTableDdlSqlServer } from './sqlserver-schema-ddl';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
@@ -104,9 +105,10 @@ const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 // Expiry scanner interval: 5 minutes
 const EXPIRY_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 // Total timeout for dataset restore (schema + data load); 0 = no limit.
+// Default raised from 10 min → 30 min to handle multi-GB dumps without premature timeout.
 const DATASET_RESTORE_TIMEOUT_MS = Math.max(
   0,
-  Number(process.env.SANDBOX_DATASET_RESTORE_TIMEOUT_MS) || 10 * 60 * 1000,
+  Number(process.env.SANDBOX_DATASET_RESTORE_TIMEOUT_MS) || 30 * 60 * 1000,
 );
 
 /**
@@ -397,6 +399,55 @@ async function applySchemaAndDatasetInner(params: {
   );
 }
 
+/** Estimated restore throughput per engine (bytes/sec). Mirrors sandbox-provision-estimate.ts. */
+function restoreBytesPerSecond(engine: SchemaSqlEngine): number {
+  if (engine === 'sqlserver') return 1.2 * 1024 * 1024;
+  if (engine === 'mysql' || engine === 'mariadb') return 2 * 1024 * 1024;
+  return 2.5 * 1024 * 1024; // postgresql
+}
+
+/**
+ * Compute a dynamic restore timeout scaled by artifact byte size.
+ * Returns at least `DATASET_RESTORE_TIMEOUT_MS` (the static baseline / env override).
+ * For `.sql.gz` artifacts, applies a 3x heuristic for uncompressed size.
+ */
+function computeRestoreTimeoutMs(artifactByteSize: number | null, engine: SchemaSqlEngine, isGz: boolean): number {
+  if (DATASET_RESTORE_TIMEOUT_MS === 0) return 0; // user disabled timeout
+  if (!artifactByteSize || artifactByteSize <= 0) return DATASET_RESTORE_TIMEOUT_MS;
+  const effectiveBytes = isGz ? artifactByteSize * 3 : artifactByteSize;
+  const bps = restoreBytesPerSecond(engine);
+  const estimatedMs = (effectiveBytes / bps) * 1000 * 2.5; // 2.5x safety margin
+  return Math.max(DATASET_RESTORE_TIMEOUT_MS, estimatedMs);
+}
+
+/** Try to resolve artifact byte size from S3 for dynamic timeout computation. */
+async function tryResolveArtifactByteSize(artifactUrl: string | null): Promise<number | null> {
+  if (!artifactUrl) return null;
+  const trimmed = artifactUrl.trim();
+
+  // Extract actual ref from JSON wrapper if present
+  let ref = trimmed;
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const payload = JSON.parse(trimmed) as Record<string, unknown>;
+      if (typeof payload.value === 'string') ref = payload.value;
+      else if (payload.type === 'inline_sql' && typeof payload.sql === 'string') {
+        return Buffer.byteLength(payload.sql, 'utf8');
+      }
+    } catch { /* fall through */ }
+  }
+
+  if (/^s3:\/\//i.test(ref)) {
+    try {
+      return await statS3ObjectSizeViaMinioContainer(ref);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 async function applySchemaAndDataset(params: {
   sandboxInstanceId: string;
   containerRef: string;
@@ -406,16 +457,38 @@ async function applySchemaAndDataset(params: {
   engine: SchemaSqlEngine;
 }): Promise<void> {
   const inner = applySchemaAndDatasetInner(params);
-  if (DATASET_RESTORE_TIMEOUT_MS > 0) {
-    return withTimeout(inner, DATASET_RESTORE_TIMEOUT_MS, 'applySchemaAndDataset');
+  if (DATASET_RESTORE_TIMEOUT_MS === 0) return inner;
+
+  // Attempt dynamic timeout based on artifact size (quick metadata lookup, does not buffer the artifact)
+  let timeoutMs = DATASET_RESTORE_TIMEOUT_MS;
+  if (params.datasetTemplateId) {
+    try {
+      const dt = await fetchDatasetTemplate(params.datasetTemplateId);
+      if (dt?.artifactUrl) {
+        const byteSize = await tryResolveArtifactByteSize(dt.artifactUrl);
+        const isGz = /\.gz\b/i.test(dt.artifactUrl);
+        const computed = computeRestoreTimeoutMs(byteSize, params.engine, isGz);
+        if (byteSize && computed > DATASET_RESTORE_TIMEOUT_MS) {
+          logger.info(
+            { artifactByteSize: byteSize, timeoutMs: computed, engine: params.engine },
+            'Using dynamic restore timeout based on artifact size',
+          );
+        }
+        timeoutMs = computed;
+      }
+    } catch {
+      // Fall through to static timeout
+    }
   }
-  return inner;
+
+  return withTimeout(inner, timeoutMs, 'applySchemaAndDataset');
 }
 
 // ─── Worker: provision_sandbox ────────────────────────────────────────────────
 
-const LONG_JOB_LOCK_DURATION_MS = 10 * 60 * 1000;
-const LONG_JOB_STALLED_INTERVAL_MS = 5 * 60 * 1000;
+// Raised from 10 min → 30 min to prevent BullMQ from marking large-dump restore jobs as stalled.
+const LONG_JOB_LOCK_DURATION_MS = 30 * 60 * 1000;
+const LONG_JOB_STALLED_INTERVAL_MS = 15 * 60 * 1000;
 const longJobOpts = {
   ...queueOptions,
   lockDuration: LONG_JOB_LOCK_DURATION_MS,
@@ -541,15 +614,20 @@ const sandboxCleanupWorker = sandboxQueuesEnabled
 
     await updateSandboxStatus(sandboxInstanceId, 'expiring');
 
-    if (sandbox.containerRef) {
-      try {
-        await ensureSandboxContainerRemoved(sandbox.containerRef);
-        logger.info({ containerRef: sandbox.containerRef }, 'Sandbox container removed');
-      } catch (err) {
-        logger.error({ err, sandboxInstanceId }, 'Failed to remove sandbox container');
-        await updateSandboxStatus(sandboxInstanceId, 'failed');
-        throw err;
-      }
+    // `container_ref` is only persisted after provisioning completes (`updateSandboxReady`). If the user
+    // ends the session while provisioning is still running, `containerRef` is null but the Docker
+    // container already exists — use the same deterministic name as provisioning.
+    const containerRefToRemove = sandbox.containerRef ?? sandboxContainerName(sandboxInstanceId);
+    try {
+      await ensureSandboxContainerRemoved(containerRefToRemove);
+      logger.info(
+        { containerRef: containerRefToRemove, hadPersistedRef: Boolean(sandbox.containerRef) },
+        'Sandbox container removed',
+      );
+    } catch (err) {
+      logger.error({ err, sandboxInstanceId, containerRef: containerRefToRemove }, 'Failed to remove sandbox container');
+      await updateSandboxStatus(sandboxInstanceId, 'failed');
+      throw err;
     }
 
     await updateSandboxStatus(sandboxInstanceId, 'destroyed');

@@ -652,6 +652,84 @@ export async function runSqlcmdInSandboxContainer(params: {
   }
 }
 
+/**
+ * Pre-detect which sqlcmd binary exists in the container. The streaming path cannot retry
+ * after piping data, so we probe first.
+ */
+async function detectSqlcmdBinary(containerRef: string): Promise<'tools18' | 'tools'> {
+  try {
+    await runDocker(['exec', containerRef, 'test', '-x', '/opt/mssql-tools18/bin/sqlcmd']);
+    return 'tools18';
+  } catch {
+    return 'tools';
+  }
+}
+
+export async function runSqlcmdInSandboxContainerStreaming(params: {
+  containerRef: string;
+  saPassword: string;
+  dbName: string;
+  source: Readable;
+  gzip?: boolean;
+}): Promise<void> {
+  const { containerRef, saPassword, dbName, source, gzip } = params;
+  const toolsPath = await detectSqlcmdBinary(containerRef);
+  const bin =
+    toolsPath === 'tools18'
+      ? '/opt/mssql-tools18/bin/sqlcmd'
+      : '/opt/mssql-tools/bin/sqlcmd';
+  const trustArgs = toolsPath === 'tools18' ? ['-C'] : [];
+  const args = [
+    'exec',
+    '-i',
+    '-e',
+    `SQLCMDPASSWORD=${saPassword}`,
+    containerRef,
+    bin,
+    ...trustArgs,
+    '-S', 'localhost',
+    '-U', 'sa',
+    '-d', dbName,
+    '-b',
+    '-I',
+  ];
+  const child = spawn('docker', args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
+  });
+
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  const pipelinePromise = gzip
+    ? pipeline(source, createGunzip(), child.stdin)
+    : pipeline(source, child.stdin);
+
+  try {
+    await pipelinePromise;
+  } catch (err) {
+    const detail = stderr.trim().slice(0, 2000);
+    child.kill('SIGKILL');
+    await closePromise.catch(() => {});
+    const base = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      detail
+        ? `sqlcmd restore stream failed (${base}). sqlcmd stderr: ${detail}`
+        : `sqlcmd restore stream failed (${base})`,
+    );
+  }
+
+  const code = await closePromise;
+  if (code !== 0) {
+    const detail = stderr.trim().slice(0, 2000);
+    throw new Error(`sqlcmd restore failed with code ${code}: ${detail || '(no stderr)'}`);
+  }
+}
+
 export async function runMysqlInSandboxContainerStreaming(params: {
   engine: 'mysql' | 'mariadb';
   containerRef: string;
@@ -729,6 +807,30 @@ function buildMcCatShellScript(artifactRef: string): string {
 export async function readS3ObjectViaMinioContainer(artifactRef: string): Promise<Buffer> {
   const script = buildMcCatShellScript(artifactRef);
   return runDockerBinary(['exec', storageDockerContainer, 'sh', '-lc', script]);
+}
+
+/**
+ * Get the byte size of an S3 object via `mc stat` in the MinIO sidecar.
+ * Returns null if the object is not found or stat fails.
+ */
+export async function statS3ObjectSizeViaMinioContainer(artifactRef: string): Promise<number | null> {
+  const parsed = new URL(artifactRef);
+  const bucket = parsed.hostname;
+  const objectName = parsed.pathname.replace(/^\/+/, '');
+  if (!bucket || !objectName) return null;
+
+  const script = [
+    `mc alias set local http://localhost:9000 ${shQuote(storageAccessKey)} ${shQuote(storageSecretKey)} >/dev/null`,
+    `mc stat --json ${shQuote(`local/${bucket}/${objectName}`)}`,
+  ].join(' && ');
+
+  try {
+    const out = await runDocker(['exec', storageDockerContainer, 'sh', '-lc', script]);
+    const parsed = JSON.parse(out) as { size?: number };
+    return typeof parsed.size === 'number' ? parsed.size : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

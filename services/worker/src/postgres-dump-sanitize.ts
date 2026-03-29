@@ -8,6 +8,7 @@
  * only for columns typed BOOL/BOOLEAN.
  */
 
+import { Transform, type TransformCallback } from 'node:stream';
 import type { SchemaDefinition } from './db';
 
 function stripBom(sql: string): string {
@@ -264,4 +265,130 @@ export function sanitizePostgresDumpForPsql(
     joined = rewriteInsertsInChunk(joined, schema);
   }
   return Buffer.from(joined, 'utf8');
+}
+
+// ─── Streaming Transform ───────────────────────────────────────────────────────
+
+/**
+ * Streaming equivalent of `sanitizePostgresDumpForPsql`. Processes line-by-line to avoid
+ * buffering the entire dump in memory. INSERT statements are buffered until their closing `;`
+ * for boolean rewriting (bounded: one INSERT at a time).
+ */
+export function createPostgresSanitizeTransform(
+  _sandboxDbName: string,
+  schema?: SchemaDefinition | null,
+): Transform {
+  let partialLine = '';
+  let bomStripped = false;
+
+  // INSERT buffering state for boolean rewriting
+  let insertBuffer: string[] | null = null;
+
+  function processLine(line: string): string | null {
+    if (shouldDropPsqlConnectLine(line)) return null;
+    return line;
+  }
+
+  function flushInsertBuffer(lines: string[]): string {
+    const joined = lines.join('\n');
+    if (schema && /\bVALUES\b/i.test(joined) && joined.includes(';')) {
+      return rewriteInsertIntegerBooleansForPg(joined, schema);
+    }
+    return joined;
+  }
+
+  return new Transform({
+    // Work with string chunks internally (decode incoming bytes)
+    decodeStrings: true,
+
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
+      let text = chunk.toString('utf8');
+
+      // Strip BOM from the very first chunk
+      if (!bomStripped) {
+        text = stripBom(text);
+        bomStripped = true;
+      }
+
+      // Prepend any leftover partial line from the previous chunk
+      text = partialLine + text;
+      partialLine = '';
+
+      const lines = text.split('\n');
+
+      // Last element may be an incomplete line — save for next chunk
+      partialLine = lines.pop() ?? '';
+
+      const output: string[] = [];
+
+      for (const rawLine of lines) {
+        // If we're accumulating an INSERT statement for boolean rewriting
+        if (insertBuffer !== null) {
+          insertBuffer.push(rawLine);
+          // Check if this line ends the INSERT (semicolon at end)
+          if (/;\s*$/.test(rawLine.trim())) {
+            output.push(flushInsertBuffer(insertBuffer));
+            insertBuffer = null;
+          }
+          continue;
+        }
+
+        const kept = processLine(rawLine);
+        if (kept === null) continue;
+
+        // Start buffering INSERT for boolean rewrite if schema is available
+        if (schema?.tables?.length && /^\s*INSERT\s+INTO\b/i.test(kept)) {
+          if (/;\s*$/.test(kept.trim())) {
+            // Single-line INSERT: rewrite immediately
+            if (/\bVALUES\b/i.test(kept)) {
+              output.push(rewriteInsertIntegerBooleansForPg(kept, schema));
+            } else {
+              output.push(kept);
+            }
+          } else {
+            // Multi-line INSERT: start buffering
+            insertBuffer = [kept];
+          }
+          continue;
+        }
+
+        output.push(kept);
+      }
+
+      if (output.length > 0) {
+        this.push(output.join('\n') + '\n');
+      }
+
+      callback();
+    },
+
+    flush(callback: TransformCallback) {
+      // Process any remaining partial line
+      const remaining: string[] = [];
+
+      if (insertBuffer !== null) {
+        // Flush any unterminated INSERT buffer
+        if (partialLine) {
+          insertBuffer.push(partialLine);
+          partialLine = '';
+        }
+        remaining.push(flushInsertBuffer(insertBuffer));
+        insertBuffer = null;
+      }
+
+      if (partialLine) {
+        const kept = processLine(partialLine);
+        if (kept !== null) {
+          remaining.push(kept);
+        }
+        partialLine = '';
+      }
+
+      if (remaining.length > 0) {
+        this.push(remaining.join('\n'));
+      }
+
+      callback();
+    },
+  });
 }

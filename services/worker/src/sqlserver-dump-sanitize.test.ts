@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { sanitizeSqlServerDumpScript } from './sqlserver-dump-sanitize';
+import test, { describe, it } from 'node:test';
+import { sanitizeSqlServerDumpScript, createSqlServerSanitizeTransform } from './sqlserver-dump-sanitize';
 
 test('brackets unquoted Order in CREATE TABLE', () => {
   const out = sanitizeSqlServerDumpScript('CREATE TABLE Order (\n  id int\n);');
@@ -120,4 +120,161 @@ test('quotes slash date with space time', () => {
 test('rewrites PostgreSQL TRUE/FALSE to 1/0 in value position', () => {
   const out = sanitizeSqlServerDumpScript('INSERT INTO t (a, b, c) VALUES (1, TRUE, FALSE);');
   assert.match(out, /VALUES\s*\(\s*1\s*,\s*1\s*,\s*0\s*\)/i);
+});
+
+// ─── Streaming Transform equivalence tests ─────────────────────────────────
+
+async function collectStreamOutput(input: string): Promise<string> {
+  const transform = createSqlServerSanitizeTransform();
+  const chunks: Buffer[] = [];
+  transform.on('data', (chunk: Buffer) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+  const done = new Promise<void>((resolve, reject) => {
+    transform.on('end', resolve);
+    transform.on('error', reject);
+  });
+  // Feed in small chunks to exercise boundary handling
+  const buf = Buffer.from(input, 'utf8');
+  const chunkSize = Math.max(1, Math.floor(buf.length / 3));
+  for (let i = 0; i < buf.length; i += chunkSize) {
+    transform.write(buf.subarray(i, Math.min(i + chunkSize, buf.length)));
+  }
+  transform.end();
+  await done;
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function normalize(s: string): string {
+  return s.replace(/\s+$/, '');
+}
+
+describe('createSqlServerSanitizeTransform (streaming equivalence)', () => {
+  it('matches buffer for CREATE TABLE Order bracketing', async () => {
+    const input = 'CREATE TABLE Order (\n  id int\n);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for dbo.Order', async () => {
+    const input = 'CREATE TABLE dbo.Order (id int);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for OrderItem preservation', async () => {
+    const input = 'CREATE TABLE OrderItem (id int);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for User INSERT bracketing', async () => {
+    const input = 'INSERT INTO User (id) VALUES (1);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for USE strip', async () => {
+    const input = 'USE [Northwind];\r\nGO\r\nCREATE TABLE dbo.authors (id INT);\r\n';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for MySQL backticks', async () => {
+    const input = 'INSERT INTO `doctors` (id) VALUES (1);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for ISO date quoting', async () => {
+    const input = 'INSERT INTO t (a, d) VALUES (1, 2024-06-01);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for multi-line INSERT date quoting', async () => {
+    const input = 'INSERT INTO t (a, d)\nVALUES\n(1, 2024-06-01);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for already-quoted dates', async () => {
+    const input = "INSERT INTO t VALUES ('2024-06-01');";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for MySQL noise strip', async () => {
+    const input = "LOCK TABLES `x` WRITE;\nINSERT INTO [x] VALUES (1);\nUNLOCK TABLES;\nSET NAMES utf8mb4;\n";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for TRUE/FALSE rewriting', async () => {
+    const input = 'INSERT INTO t (a, b, c) VALUES (1, TRUE, FALSE);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for slash dates', async () => {
+    const input = 'INSERT INTO t (d) VALUES (2024/06/01);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for InstPubs sp_addtype bootstrap', async () => {
+    const input =
+      "execute sp_addtype id      ,'varchar(11)' ,'NOT NULL'\n" +
+      "execute sp_addtype tid     ,'varchar(6)'  ,'NOT NULL'\n" +
+      "execute sp_addtype empid   ,'char(9)'     ,'NOT NULL'\n";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for sysdatabases modernization', async () => {
+    const input = "USE master\nGO\nif exists (select * from sysdatabases where name='pubs')\nDROP DATABASE pubs\n";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('preserves dates in line comments', async () => {
+    const input = 'INSERT INTO x VALUES (1); -- 2024-06-01\n';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('preserves dates in block comments', async () => {
+    const input = 'INSERT INTO x VALUES (1); /* 2024-06-01 */\n';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('handles block comment spanning multiple lines', async () => {
+    const input = "/* start\n2024-06-01\nend */\nINSERT INTO t VALUES (2024-06-01);\n";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('handles string literal spanning chunk boundary via small chunks', async () => {
+    // Long string that will be split across chunk boundaries
+    const input = "INSERT INTO t VALUES ('hello world long string here', 2024-06-01);\n";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
 });
