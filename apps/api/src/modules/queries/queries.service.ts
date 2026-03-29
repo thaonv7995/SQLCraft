@@ -69,6 +69,21 @@ function isTerminalQueryStatus(s: QueryExecutionRow['status']): boolean {
   );
 }
 
+function parseSchemaDiffSnapshot(raw: unknown): QueryHistoryItem['schemaDiffSnapshot'] {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const o = raw as Record<string, unknown>;
+  const schemaTemplateId = typeof o.schemaTemplateId === 'string' ? o.schemaTemplateId : '';
+  const hasChanges = Boolean(o.hasChanges);
+  const totalChanges = typeof o.totalChanges === 'number' && Number.isFinite(o.totalChanges) ? o.totalChanges : 0;
+  const brief = typeof o.brief === 'string' ? o.brief : '';
+  if (!schemaTemplateId) {
+    return undefined;
+  }
+  return { schemaTemplateId, hasChanges, totalChanges, brief };
+}
+
 function toListItem(
   row: Pick<
     QueryExecutionRow,
@@ -80,6 +95,7 @@ function toListItem(
     | 'rowsReturned'
     | 'errorMessage'
     | 'submittedAt'
+    | 'schemaDiffSnapshot'
   >,
   sessionIdFallback?: string,
 ): QueryHistoryItem {
@@ -97,6 +113,7 @@ function toListItem(
     rowCount: row.rowsReturned ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
     createdAt,
+    schemaDiffSnapshot: parseSchemaDiffSnapshot(row.schemaDiffSnapshot),
   };
 }
 

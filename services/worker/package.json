@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sqlcraft/sandbox-schema-diff": "workspace:*",
     "@sqlcraft/mysql-explain": "workspace:*",
     "@sqlcraft/types": "workspace:*",
     "bullmq": "^5.7.0",

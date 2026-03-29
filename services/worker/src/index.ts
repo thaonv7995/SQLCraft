@@ -4,6 +4,14 @@ import IORedis from 'ioredis';
 import { Pool } from 'pg';
 import pino from 'pino';
 import {
+  buildPostgresSandboxConnectionString,
+  diffSandboxSchema,
+  fetchSandboxSchemaSnapshot,
+  parseBaseSchemaSnapshot,
+  summarizeSandboxSchemaDiff,
+  type QuerySchemaDiffSnapshot,
+} from '@sqlcraft/sandbox-schema-diff';
+import {
   mainDb,
   fetchDatasetTemplate,
   fetchSchemaTemplate,
@@ -660,6 +668,38 @@ const sandboxResetWorker = sandboxQueuesEnabled
 
 // ─── Worker: execute_query / cancel_query ─────────────────────────────────────
 
+async function maybeCaptureSchemaDiffSnapshot(
+  sandbox: NonNullable<Awaited<ReturnType<typeof fetchSandbox>>>,
+): Promise<QuerySchemaDiffSnapshot | null> {
+  const engine = normalizeSchemaSqlEngine(sandbox.sandboxEngine);
+  if (engine !== 'postgresql') {
+    return null;
+  }
+  if (!sandbox.schemaTemplateId || !sandbox.dbName) {
+    return null;
+  }
+  const definition = await fetchSchemaTemplate(sandbox.schemaTemplateId);
+  if (!definition) {
+    return null;
+  }
+  try {
+    const base = parseBaseSchemaSnapshot(definition);
+    const connectionString = buildPostgresSandboxConnectionString({
+      host: sandbox.containerRef ?? sandboxHost,
+      port: sandbox.containerRef ? sandbox.sandboxDbPort : Number(sandboxPort),
+      user: sandboxUser,
+      password: sandboxPassword,
+      database: sandbox.dbName,
+    });
+    const current = await fetchSandboxSchemaSnapshot(connectionString);
+    const diff = diffSandboxSchema(base, current);
+    return summarizeSandboxSchemaDiff(sandbox.schemaTemplateId, diff);
+  } catch (err) {
+    logger.warn({ err, sandboxId: sandbox.id }, 'schema diff snapshot failed');
+    return null;
+  }
+}
+
 async function handleCancelQueryJob(job: Job): Promise<void> {
   const { queryExecutionId } = job.data as { queryExecutionId: string };
   const row = await fetchQueryExecutionForCancel(queryExecutionId);
@@ -792,11 +832,13 @@ async function handleExecuteQueryJob(job: Job): Promise<void> {
     });
     const preview = shapeResults(result);
 
+    const schemaSnap = await maybeCaptureSchemaDiffSnapshot(sandbox);
     const stored = await updateQueryExecutionSuccess(
       queryExecutionId,
       result.durationMs,
       result.rowCount,
       preview,
+      schemaSnap ?? undefined,
     );
 
     if (stored && explainPlan) {

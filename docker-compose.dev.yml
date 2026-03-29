@@ -73,7 +73,8 @@ services:
       SANDBOX_DB_USER: sandbox
       SANDBOX_DB_PASSWORD: sandbox
       SANDBOX_MSSQL_SA_PASSWORD: SqlForge1!Sb
-    command: sh -c "pnpm db:migrate && pnpm dev"
+    # Anonymous /app/node_modules volume can shadow the image after new workspace deps; sync before dev.
+    command: sh -c "cd /app && (test -d node_modules/@sqlcraft/sandbox-schema-diff || pnpm install --frozen-lockfile) && cd apps/api && pnpm db:migrate && pnpm dev"
     ports:
       - "4000:4000"
     volumes:
@@ -143,6 +144,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: sh -c "cd /app && (test -d node_modules/@sqlcraft/sandbox-schema-diff || pnpm install --frozen-lockfile) && cd services/worker && pnpm dev"
     restart: unless-stopped
     networks:
       - sqlcraft
@@ -174,6 +176,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: sh -c "cd /app && (test -d node_modules/@sqlcraft/sandbox-schema-diff || pnpm install --frozen-lockfile) && cd services/worker && pnpm dev"
     restart: unless-stopped
     networks:
       - sqlcraft

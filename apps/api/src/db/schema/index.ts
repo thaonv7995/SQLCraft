@@ -339,6 +339,8 @@ export const queryExecutions = pgTable(
     /** Backend session id for cancel (pg_backend_pid, MySQL connection id, @@SPID). */
     dbBackendPid: bigint('db_backend_pid', { mode: 'number' }),
     submittedAt: timestamp('submitted_at').notNull().default(sql`now()`),
+    /** Snapshot of sandbox vs base schema template right after this execution completes (PostgreSQL). */
+    schemaDiffSnapshot: jsonb('schema_diff_snapshot'),
   },
   (table) => ({
     sessionIdx: index('qe_session_idx').on(table.learningSessionId, table.submittedAt),

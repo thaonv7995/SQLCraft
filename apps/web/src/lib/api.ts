@@ -588,6 +588,14 @@ export interface QueryExecutionPlan {
   mode?: 'explain' | 'explain_analyze';
 }
 
+/** Captured when the query completes (PostgreSQL sandboxes). */
+export interface QuerySchemaDiffSnapshot {
+  schemaTemplateId: string;
+  hasChanges: boolean;
+  totalChanges: number;
+  brief: string;
+}
+
 export interface QueryExecution {
   id: string;
   sessionId: string;
@@ -599,6 +607,8 @@ export interface QueryExecution {
   result?: QueryResultPreview;
   executionPlan?: QueryExecutionPlan;
   createdAt: string;
+  /** Present when the worker stored schema drift vs catalog at execution time. */
+  schemaDiffSnapshot?: QuerySchemaDiffSnapshot;
 }
 
 function mapQueryExecutionStatus(raw: unknown): QueryExecution['status'] {
@@ -646,6 +656,26 @@ function normalizeQueryResultPreview(
   return undefined;
 }
 
+function normalizeSchemaDiffSnapshot(raw: unknown): QuerySchemaDiffSnapshot | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const o = raw as Record<string, unknown>;
+  const schemaTemplateId =
+    typeof o.schemaTemplateId === 'string' ? o.schemaTemplateId : '';
+  if (!schemaTemplateId) {
+    return undefined;
+  }
+  const totalChanges =
+    typeof o.totalChanges === 'number' && Number.isFinite(o.totalChanges) ? o.totalChanges : 0;
+  return {
+    schemaTemplateId,
+    hasChanges: Boolean(o.hasChanges),
+    totalChanges,
+    brief: typeof o.brief === 'string' ? o.brief : '',
+  };
+}
+
 function normalizeExecutionPlanFromPayload(
   executionPlan: unknown,
 ): QueryExecution['executionPlan'] {
@@ -683,6 +713,9 @@ export function normalizeQueryExecutionItem(item: Record<string, unknown>): Quer
   const createdAt =
     (typeof item.createdAt === 'string' ? item.createdAt : null) ??
     (typeof item.submittedAt === 'string' ? item.submittedAt : new Date().toISOString());
+  const rawSnapshot =
+    (item as Record<string, unknown>).schemaDiffSnapshot ??
+    (item as Record<string, unknown>).schema_diff_snapshot;
   return {
     id: String(item.id ?? ''),
     sessionId,
@@ -699,6 +732,7 @@ export function normalizeQueryExecutionItem(item: Record<string, unknown>): Quer
     result: normalizeQueryResultPreview(item.result),
     executionPlan: normalizeExecutionPlanFromPayload(item.executionPlan),
     createdAt,
+    schemaDiffSnapshot: normalizeSchemaDiffSnapshot(rawSnapshot),
   };
 }
 

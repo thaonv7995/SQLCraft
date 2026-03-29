@@ -35,6 +35,14 @@ export interface GetQueryResult extends QueryExecutionRow {
   executionPlan?: QueryExecutionPlanView;
 }
 
+/** Compact schema-vs-base snapshot captured when the query finishes (PostgreSQL sandboxes). */
+export interface QuerySchemaDiffSnapshot {
+  schemaTemplateId: string;
+  hasChanges: boolean;
+  totalChanges: number;
+  brief: string;
+}
+
 /** List row shape aligned with web `QueryExecution` (sql, sessionId, UI status). */
 export interface QueryHistoryItem {
   id: string;
@@ -45,6 +53,8 @@ export interface QueryHistoryItem {
   rowCount?: number;
   errorMessage?: string;
   createdAt: string;
+  /** Present when the worker stored a diff at execution time. */
+  schemaDiffSnapshot?: QuerySchemaDiffSnapshot;
 }
 
 export interface QueryHistoryResult {

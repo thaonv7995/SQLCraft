@@ -45,6 +45,7 @@ import {
   type QueryExecution,
   type QueryResultColumn,
   type SessionProvisioningEstimate,
+  type SessionSchemaDiffResponse,
   type SessionSchemaTable,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
@@ -1054,7 +1055,119 @@ function findBestIndices(values: Array<number | null>, preference: ComparePrefer
   return new Set(candidates.filter((c) => c.value === bestValue).map((c) => c.index));
 }
 
-function ComparePlanMetricsTable({ items }: { items: CompareSlot[] }) {
+function countSessionSchemaDiffChanges(diff: SessionSchemaDiffResponse): number {
+  const sections = [
+    diff.indexes,
+    diff.views,
+    diff.materializedViews,
+    diff.functions,
+    diff.partitions,
+  ];
+  return sections.reduce(
+    (sum, s) => sum + s.added.length + s.removed.length + s.changed.length,
+    0,
+  );
+}
+
+function formatSessionSchemaDiffBrief(diff: SessionSchemaDiffResponse): string {
+  const parts: string[] = [];
+  const push = (
+    label: string,
+    section: SessionSchemaDiffResponse['indexes'],
+  ) => {
+    const n = section.added.length + section.removed.length + section.changed.length;
+    if (n > 0) {
+      parts.push(`${label} ${n}`);
+    }
+  };
+  push('idx', diff.indexes);
+  push('views', diff.views);
+  push('matv', diff.materializedViews);
+  push('fn', diff.functions);
+  push('part', diff.partitions);
+  return parts.join(' · ');
+}
+
+function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; sessionId: string }) {
+  const { data: liveDiff, isLoading, isError } = useSessionSchemaDiff(sessionId);
+
+  const liveMainLine = useMemo(() => {
+    if (isLoading) {
+      return '…';
+    }
+    if (isError || !liveDiff) {
+      return '—';
+    }
+    if (!liveDiff.hasChanges) {
+      return 'No drift';
+    }
+    const n = countSessionSchemaDiffChanges(liveDiff);
+    return `${n} change${n === 1 ? '' : 's'}`;
+  }, [liveDiff, isError, isLoading]);
+
+  const liveSubLine = useMemo(() => {
+    if (!liveDiff?.hasChanges) {
+      return null;
+    }
+    return formatSessionSchemaDiffBrief(liveDiff);
+  }, [liveDiff]);
+
+  const hasAnySnapshot = items.some((i) => i.execution.schemaDiffSnapshot);
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="align-top text-xs font-medium text-on-surface">Schema vs base</TableCell>
+        {items.map((item) => {
+          const snap = item.execution.schemaDiffSnapshot;
+          const mainLine = snap
+            ? snap.hasChanges
+              ? `${snap.totalChanges} change${snap.totalChanges === 1 ? '' : 's'}`
+              : 'No drift'
+            : liveMainLine;
+          const subLine = snap
+            ? snap.hasChanges && snap.brief
+              ? snap.brief
+              : null
+            : liveSubLine;
+
+          return (
+            <TableCell
+              key={`schema-${item.label}`}
+              className="align-top font-mono text-xs tabular-nums text-on-surface"
+            >
+              <div className="flex flex-col gap-0.5">
+                <span>{mainLine}</span>
+                {subLine ? (
+                  <span className="whitespace-normal break-words font-sans text-[10px] font-normal leading-snug text-on-surface-variant">
+                    {subLine}
+                  </span>
+                ) : null}
+                {!snap ? (
+                  <span className="font-sans text-[10px] italic text-outline">
+                    Current session (no snapshot for this run)
+                  </span>
+                ) : null}
+              </div>
+            </TableCell>
+          );
+        })}
+      </TableRow>
+      <TableRow>
+        <TableCell
+          colSpan={items.length + 1}
+          className="border-t border-outline-variant/10 bg-surface-container-low/40 py-2 text-[10px] leading-snug text-outline"
+        >
+          {hasAnySnapshot
+            ? 'Each column shows catalog template drift at the moment that query finished (PostgreSQL). Older history rows may not have a snapshot.'
+            : 'Per-run snapshots appear after you execute queries with an updated worker. Until then, columns show the current session vs base.'}
+        </TableCell>
+      </TableRow>
+    </>
+  );
+}
+
+function ComparePlanMetricsTable({ items, sessionId }: { items: CompareSlot[]; sessionId: string }) {
   const rows: Array<{
     key: string;
     label: string;
@@ -1149,6 +1262,7 @@ function ComparePlanMetricsTable({ items }: { items: CompareSlot[] }) {
               </TableRow>
             );
           })}
+          <CompareSchemaVsBaseRows sessionId={sessionId} items={items} />
         </TableBody>
       </Table>
     </div>
@@ -1283,9 +1397,11 @@ function ChallengeCompareLeaderboardCard({
 }
 
 function SideBySideComparePanel({
+  sessionId,
   queryHistory,
   challengeVersionId,
 }: {
+  sessionId: string;
   queryHistory: QueryExecution[];
   challengeVersionId?: string | null;
 }) {
@@ -1475,7 +1591,9 @@ function SideBySideComparePanel({
           )}
         </div>
 
-        {selectedItems.length >= 2 ? <ComparePlanMetricsTable items={selectedItems} /> : null}
+        {selectedItems.length >= 2 ? (
+          <ComparePlanMetricsTable items={selectedItems} sessionId={sessionId} />
+        ) : null}
       </div>
     </div>
   );
@@ -3149,6 +3267,7 @@ export default function LabPage({ params }: ClientPageProps) {
             {activeTab === 'plan' && <ExecutionPlanPanel />}
             {activeTab === 'compare' && (
               <SideBySideComparePanel
+                sessionId={sessionId}
                 queryHistory={queryHistory}
                 challengeVersionId={session?.challengeVersionId ?? null}
               />

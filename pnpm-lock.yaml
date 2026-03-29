@@ -50,6 +50,9 @@ importers:
       '@fastify/swagger-ui':
         specifier: ^4.0.1
         version: 4.2.0
+      '@sqlcraft/sandbox-schema-diff':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-schema-diff
       '@sqlcraft/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -262,6 +265,19 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  packages/sandbox-schema-diff:
+    dependencies:
+      pg:
+        specifier: ^8.11.5
+        version: 8.20.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.5
+        version: 8.20.0
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
   packages/types:
     devDependencies:
       typescript:
@@ -273,6 +289,9 @@ importers:
       '@sqlcraft/mysql-explain':
         specifier: workspace:*
         version: link:../../packages/mysql-explain
+      '@sqlcraft/sandbox-schema-diff':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-schema-diff
       '@sqlcraft/types':
         specifier: workspace:*
         version: link:../../packages/types

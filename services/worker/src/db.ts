@@ -212,13 +212,24 @@ export async function updateQueryExecutionSuccess(
   durationMs: number,
   rowsReturned: number,
   resultPreview: unknown,
+  schemaDiffSnapshot?: unknown,
 ): Promise<boolean> {
   const r = await mainDb.query(
     `UPDATE query_executions
-     SET status = 'succeeded', duration_ms = $2, rows_returned = $3, result_preview = $4
+     SET status = 'succeeded',
+         duration_ms = $2,
+         rows_returned = $3,
+         result_preview = $4,
+         schema_diff_snapshot = $5
      WHERE id = $1 AND status = 'running'
      RETURNING id`,
-    [executionId, durationMs, rowsReturned, JSON.stringify(resultPreview)],
+    [
+      executionId,
+      durationMs,
+      rowsReturned,
+      JSON.stringify(resultPreview),
+      schemaDiffSnapshot != null ? JSON.stringify(schemaDiffSnapshot) : null,
+    ],
   );
   return (r.rowCount ?? 0) > 0;
 }

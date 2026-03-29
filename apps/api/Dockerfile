@@ -7,6 +7,7 @@ FROM base AS deps
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY packages/types/package.json ./packages/types/
 COPY packages/config/package.json ./packages/config/
+COPY packages/sandbox-schema-diff/package.json ./packages/sandbox-schema-diff/
 COPY apps/api/package.json ./apps/api/
 RUN pnpm install --frozen-lockfile
 
@@ -18,6 +19,7 @@ COPY apps/api ./apps/api
 # Re-link workspaces after full sources exist (pnpm hoisted layout)
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @sqlcraft/types build
+RUN pnpm --filter @sqlcraft/sandbox-schema-diff build
 RUN pnpm --filter @sqlcraft/api build
 
 FROM base AS runner
