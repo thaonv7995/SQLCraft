@@ -15,6 +15,7 @@ import {
 } from '@/lib/api';
 import {
   formatSqlDumpMaxUploadLabel,
+  SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES,
   SQL_DUMP_FULL_PARSE_MAX_MB,
 } from '@/lib/sql-dump-limits';
 
@@ -316,6 +317,9 @@ export function DatabaseImportPanel({
             <p className="mt-2 text-xs text-on-surface-variant">
               <span className="font-medium text-on-surface">.sql</span> · max{' '}
               <span className="font-medium text-on-surface">{formatSqlDumpMaxUploadLabel()}</span>
+              {' · '}
+              {Math.round(SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES / (1024 * 1024))} MB+ uses direct storage upload
+              (bucket CORS must expose <span className="font-mono">ETag</span> for multipart).
             </p>
             <input
               ref={fileInputRef}

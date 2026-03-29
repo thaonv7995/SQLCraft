@@ -13,6 +13,10 @@ import type {
   AdminIdParams,
   ListPendingScansQuery,
   SqlDumpScanIdParams,
+  SqlDumpUploadSessionIdParams,
+  CreateSqlDumpUploadSessionBody,
+  PresignSqlDumpUploadPartBody,
+  CompleteSqlDumpUploadSessionBody,
 } from './admin.schema';
 import {
   createAdminUserHandler,
@@ -37,6 +41,10 @@ import {
   listPendingScansHandler,
   getSqlDumpScanHandler,
   updateAdminConfigHandler,
+  createSqlDumpUploadSessionHandler,
+  presignSqlDumpUploadPartHandler,
+  completeSqlDumpUploadSessionHandler,
+  abortSqlDumpUploadSessionHandler,
 } from './admin.handler';
 
 export default async function adminRouter(fastify: FastifyInstance): Promise<void> {
@@ -358,6 +366,104 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     getSqlDumpScanHandler,
+  );
+
+  fastify.post<{ Body: CreateSqlDumpUploadSessionBody }>(
+    '/v1/admin/databases/sql-dump-upload-sessions',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Create presigned SQL dump upload session (browser → object storage)',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          required: ['fileName', 'byteSize'],
+          properties: {
+            fileName: { type: 'string' },
+            byteSize: { type: 'integer', minimum: 1 },
+            artifactOnly: { type: 'boolean' },
+            multipart: { type: 'boolean' },
+          },
+        },
+      },
+    },
+    createSqlDumpUploadSessionHandler,
+  );
+
+  fastify.post<{ Params: SqlDumpUploadSessionIdParams; Body: PresignSqlDumpUploadPartBody }>(
+    '/v1/admin/databases/sql-dump-upload-sessions/:sessionId/presign-part',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Presign one multipart upload part',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: { sessionId: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          required: ['partNumber'],
+          properties: { partNumber: { type: 'integer', minimum: 1, maximum: 10000 } },
+        },
+      },
+    },
+    presignSqlDumpUploadPartHandler,
+  );
+
+  fastify.post<{ Params: SqlDumpUploadSessionIdParams; Body: CompleteSqlDumpUploadSessionBody }>(
+    '/v1/admin/databases/sql-dump-upload-sessions/:sessionId/complete',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Finalize direct upload and run SQL dump scan',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: { sessionId: { type: 'string', format: 'uuid' } },
+        },
+        body: {
+          type: 'object',
+          properties: {
+            parts: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['partNumber', 'etag'],
+                properties: {
+                  partNumber: { type: 'integer', minimum: 1 },
+                  etag: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    completeSqlDumpUploadSessionHandler,
+  );
+
+  fastify.post<{ Params: SqlDumpUploadSessionIdParams }>(
+    '/v1/admin/databases/sql-dump-upload-sessions/:sessionId/abort',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Abort direct SQL dump upload and remove staging object',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['sessionId'],
+          properties: { sessionId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    abortSqlDumpUploadSessionHandler,
   );
 
   fastify.delete<{ Params: AdminIdParams }>(

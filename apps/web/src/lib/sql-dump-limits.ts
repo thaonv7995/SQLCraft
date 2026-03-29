@@ -15,6 +15,12 @@ export const SQL_DUMP_FULL_PARSE_MAX_MB =
     ? Math.floor(parsedParse)
     : 256;
 
+/**
+ * Files at least this large use presigned PUT / multipart to object storage instead of posting the
+ * file through the API (avoids reverse-proxy body limits). Keep in sync with operator expectations.
+ */
+export const SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES = 10 * 1024 * 1024;
+
 const MIB = 1024;
 
 /** Human-readable upload cap for UI (e.g. `50 GB` from 51200 MiB). */

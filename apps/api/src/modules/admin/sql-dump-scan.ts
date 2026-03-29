@@ -1273,6 +1273,29 @@ async function persistSqlDumpScanPayload(
   return persistedScan;
 }
 
+async function persistSqlDumpScanFromStagingKey(
+  scan: StoredSqlDumpScan,
+  stagingObjectKey: string,
+): Promise<StoredSqlDumpScan> {
+  const [{ copyObjectSameBucket, deleteFile, uploadFile }, { config }] = await Promise.all([
+    import('../../lib/storage'),
+    import('../../lib/config'),
+  ]);
+  const persistedScan: StoredSqlDumpScan = {
+    ...scan,
+    artifactUrl: `s3://${config.STORAGE_BUCKET}/${scan.artifactObjectName}`,
+  };
+  await copyObjectSameBucket(stagingObjectKey, persistedScan.artifactObjectName);
+  await uploadFile(
+    makeScanMetadataObjectName(persistedScan.scanId),
+    Buffer.from(JSON.stringify(persistedScan), 'utf8'),
+    'application/json',
+  );
+  await deleteFile(stagingObjectKey);
+  setCachedScan(persistedScan);
+  return persistedScan;
+}
+
 export async function createStoredSqlDumpScan(
   buffer: Buffer,
   fileName: string,
@@ -1321,6 +1344,48 @@ export async function createStoredSqlDumpScanFromFile(
   }
 
   const persistedScan = await persistSqlDumpScanPayload(scan, { path: filePath, size: byteSize });
+  return toSqlDumpScanResult(persistedScan);
+}
+
+/**
+ * Scan + persist when the dump already lives in object storage at `stagingObjectKey`
+ * (browser direct upload). Copies staging → final artifact key, writes sidecar JSON, deletes staging.
+ */
+export async function createStoredSqlDumpScanFromStagingObject(
+  stagingObjectKey: string,
+  byteSize: number,
+  fileName: string,
+  options?: CreateStoredSqlDumpScanOptions,
+): Promise<SqlDumpScanResult> {
+  const { config } = await import('../../lib/config');
+  const { readObjectRange, readFullObject } = await import('../../lib/storage');
+  const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
+  const artifactOnly = Boolean(options?.artifactOnly);
+
+  if (!artifactOnly && byteSize > maxFullParse) {
+    throw new ValidationError(
+      `SQL dump is about ${Math.ceil(byteSize / (1024 * 1024))} MiB. Full schema scan supports up to ${config.SQL_DUMP_FULL_PARSE_MAX_MB} MiB. Enable artifact-only for larger dumps (file streams to storage; only the file head is used for dialect heuristics).`,
+    );
+  }
+
+  const scanId = randomUUID();
+  let scan: StoredSqlDumpScan;
+
+  if (artifactOnly) {
+    if (byteSize <= maxFullParse) {
+      const buf = await readFullObject(stagingObjectKey);
+      scan = parseSqlDumpBufferArtifactOnly(buf, fileName, scanId);
+    } else {
+      const headLen = Math.min(SQL_DUMP_INFERENCE_HEAD_BYTES, byteSize);
+      const head = await readObjectRange(stagingObjectKey, 0, headLen);
+      scan = parseSqlDumpBufferArtifactOnly(head, fileName, scanId);
+    }
+  } else {
+    const buf = await readFullObject(stagingObjectKey);
+    scan = parseSqlDumpBuffer(buf, fileName, scanId);
+  }
+
+  const persistedScan = await persistSqlDumpScanFromStagingKey(scan, stagingObjectKey);
   return toSqlDumpScanResult(persistedScan);
 }
 

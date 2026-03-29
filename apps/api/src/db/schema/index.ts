@@ -384,3 +384,28 @@ export const adminConfigs = pgTable(
     scopeIdx: uniqueIndex('admin_configs_scope_idx').on(table.scope),
   }),
 );
+
+/** Browser → object-storage SQL dump uploads before scan (presigned PUT / multipart). */
+export const sqlDumpUploadSessions = pgTable(
+  'sql_dump_upload_sessions',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    stagingKey: text('staging_key').notNull(),
+    uploadMode: varchar('upload_mode', { length: 16 }).notNull(),
+    uploadId: text('upload_id'),
+    expectedByteSize: bigint('expected_byte_size', { mode: 'number' }).notNull(),
+    partSize: bigint('part_size', { mode: 'number' }),
+    fileName: text('file_name').notNull(),
+    artifactOnly: boolean('artifact_only').notNull().default(false),
+    state: varchar('state', { length: 24 }).notNull().default('pending'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (table) => ({
+    userIdx: index('sql_dump_upload_sessions_user_id_idx').on(table.userId),
+    expiresIdx: index('sql_dump_upload_sessions_expires_at_idx').on(table.expiresAt),
+  }),
+);

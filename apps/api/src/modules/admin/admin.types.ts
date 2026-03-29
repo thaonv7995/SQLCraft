@@ -104,6 +104,35 @@ export interface AdminConfigResult extends Omit<AdminConfigRecordRow, 'config'> 
 export type SqlDumpScanResult = AdminSqlDumpScanResult;
 export type AdminDatabaseDomainType = AdminDatabaseDomain;
 
+export interface SqlDumpDirectUploadSessionSingleResult {
+  mode: 'single';
+  sessionId: string;
+  stagingKey: string;
+  putUrl: string;
+  expiresAt: string;
+  presignExpiresInSeconds: number;
+}
+
+export interface SqlDumpDirectUploadSessionMultipartResult {
+  mode: 'multipart';
+  sessionId: string;
+  stagingKey: string;
+  uploadId: string;
+  partSize: number;
+  totalParts: number;
+  expiresAt: string;
+  presignExpiresInSeconds: number;
+}
+
+export type SqlDumpDirectUploadSessionCreateResult =
+  | SqlDumpDirectUploadSessionSingleResult
+  | SqlDumpDirectUploadSessionMultipartResult;
+
+export interface SqlDumpUploadPresignPartResult {
+  url: string;
+  presignExpiresInSeconds: number;
+}
+
 export interface ImportCanonicalDatabaseResult {
   schemaTemplate: AdminSchemaTemplateRow;
   sourceDatasetTemplate: AdminDatasetTemplateRow;

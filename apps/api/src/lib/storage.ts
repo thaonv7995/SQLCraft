@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import type { Readable } from 'node:stream';
 import * as Minio from 'minio';
 import { config } from './config';
 
@@ -160,4 +161,115 @@ export async function listObjectsWithPrefix(
   }
 
   return out;
+}
+
+async function readStreamToBuffer(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+export interface StorageObjectStat {
+  size: number;
+  etag: string;
+}
+
+export async function statStorageObject(objectName: string): Promise<StorageObjectStat> {
+  await ensureBucket();
+  const client = getClient();
+  const st = await client.statObject(config.STORAGE_BUCKET, objectName);
+  const etag = typeof st.etag === 'string' ? st.etag : '';
+  return { size: Number(st.size), etag };
+}
+
+/** Read a byte range [offset, offset + length) from an object (S3 Range GET). */
+export async function readObjectRange(objectName: string, offset: number, length: number): Promise<Buffer> {
+  await ensureBucket();
+  const client = getClient();
+  const stream = await client.getPartialObject(config.STORAGE_BUCKET, objectName, offset, length);
+  return readStreamToBuffer(stream);
+}
+
+export async function readFullObject(objectName: string): Promise<Buffer> {
+  await ensureBucket();
+  const client = getClient();
+  const stream = await client.getObject(config.STORAGE_BUCKET, objectName);
+  return readStreamToBuffer(stream);
+}
+
+/**
+ * Server-side copy within the configured bucket (e.g. staging key → final scan artifact key).
+ */
+export async function copyObjectSameBucket(sourceObjectName: string, destObjectName: string): Promise<void> {
+  await ensureBucket();
+  const client = getClient();
+  const bucket = config.STORAGE_BUCKET;
+  const sourcePath = `/${bucket}/${sourceObjectName}`;
+  await client.copyObject(bucket, destObjectName, sourcePath);
+}
+
+const SQL_STAGING_CONTENT_TYPE = 'application/sql';
+
+export async function presignedPutObjectPublic(objectName: string, expiresSeconds: number): Promise<string> {
+  await ensureBucket();
+  const ttl = Math.min(expiresSeconds, 7 * 24 * 3600);
+  return getPublicClient().presignedPutObject(config.STORAGE_BUCKET, objectName, ttl);
+}
+
+export async function presignedMultipartPartPutUrl(
+  objectName: string,
+  uploadId: string,
+  partNumber: number,
+  expiresSeconds: number,
+): Promise<string> {
+  await ensureBucket();
+  const ttl = Math.min(expiresSeconds, 7 * 24 * 3600);
+  const client = getPublicClient();
+  return client.presignedUrl(
+    'PUT',
+    config.STORAGE_BUCKET,
+    objectName,
+    ttl,
+    { uploadId, partNumber: String(partNumber) },
+  );
+}
+
+export async function initiateMultipartUpload(objectName: string): Promise<string> {
+  await ensureBucket();
+  const client = getClient();
+  return client.initiateNewMultipartUpload(config.STORAGE_BUCKET, objectName, {
+    'Content-Type': SQL_STAGING_CONTENT_TYPE,
+  });
+}
+
+export interface CompletedMultipartPart {
+  part: number;
+  etag: string;
+}
+
+export async function completeMultipartUpload(
+  objectName: string,
+  uploadId: string,
+  parts: CompletedMultipartPart[],
+): Promise<void> {
+  await ensureBucket();
+  const client = getClient();
+  const sorted = [...parts].sort((a, b) => a.part - b.part);
+  await client.completeMultipartUpload(config.STORAGE_BUCKET, objectName, uploadId, sorted);
+}
+
+export async function abortMultipartUpload(objectName: string, uploadId: string): Promise<void> {
+  const client = getClient();
+  try {
+    await client.abortMultipartUpload(config.STORAGE_BUCKET, objectName, uploadId);
+  } catch {
+    // Best-effort: upload may already be completed or absent.
+  }
+}
+
+/** Part size MinIO would use for an object of this size (respects 10k-part limit). */
+export function multipartPartSizeForObjectSize(byteSize: number): number {
+  return getClient().calculatePartSize(byteSize);
 }

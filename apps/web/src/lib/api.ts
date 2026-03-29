@@ -5,6 +5,7 @@ import axios, {
   type AxiosResponse,
   type InternalAxiosRequestConfig,
 } from 'axios';
+import { SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES } from './sql-dump-limits';
 import { getExplainPlanMode } from './utils';
 
 export type { SchemaSqlDialect } from '@sqlcraft/types';
@@ -998,6 +999,31 @@ export interface SqlDumpTableSummary {
 }
 
 export type SqlDialectConfidence = 'high' | 'medium' | 'low';
+
+export type SqlDumpDirectUploadSessionCreateResult =
+  | {
+      mode: 'single';
+      sessionId: string;
+      stagingKey: string;
+      putUrl: string;
+      expiresAt: string;
+      presignExpiresInSeconds: number;
+    }
+  | {
+      mode: 'multipart';
+      sessionId: string;
+      stagingKey: string;
+      uploadId: string;
+      partSize: number;
+      totalParts: number;
+      expiresAt: string;
+      presignExpiresInSeconds: number;
+    };
+
+export interface SqlDumpUploadPresignPartResult {
+  url: string;
+  presignExpiresInSeconds: number;
+}
 
 export interface SqlDumpScanResult {
   scanId: string;
@@ -2021,6 +2047,77 @@ export const adminApi = {
 
 // ─── Databases API ────────────────────────────────────────────────────────────
 
+async function scanSqlDumpViaPresignedStorage(
+  file: File,
+  options?: { artifactOnly?: boolean },
+): Promise<SqlDumpScanResult> {
+  const session = await api
+    .post<SqlDumpDirectUploadSessionCreateResult>('/admin/databases/sql-dump-upload-sessions', {
+      fileName: file.name || 'dump.sql',
+      byteSize: file.size,
+      artifactOnly: options?.artifactOnly,
+    })
+    .then((r) => r.data);
+
+  const abort = () =>
+    api.post(`/admin/databases/sql-dump-upload-sessions/${session.sessionId}/abort`, {}).catch(() => undefined);
+
+  if (session.mode === 'single') {
+    const putRes = await fetch(session.putUrl, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': 'application/sql' },
+    });
+    if (!putRes.ok) {
+      await abort();
+      throw new Error(`Direct upload failed (${putRes.status})`);
+    }
+    return api
+      .post<SqlDumpScanResult>(
+        `/admin/databases/sql-dump-upload-sessions/${session.sessionId}/complete`,
+        {},
+        { timeout: 600_000 },
+      )
+      .then((r) => r.data);
+  }
+
+  const { partSize, totalParts, sessionId } = session;
+  const parts: { partNumber: number; etag: string }[] = [];
+  for (let p = 1; p <= totalParts; p++) {
+    const start = (p - 1) * partSize;
+    const end = Math.min(start + partSize, file.size);
+    const blob = file.slice(start, end);
+    const { url } = await api
+      .post<SqlDumpUploadPresignPartResult>(
+        `/admin/databases/sql-dump-upload-sessions/${sessionId}/presign-part`,
+        { partNumber: p },
+        { timeout: 120_000 },
+      )
+      .then((r) => r.data);
+    const res = await fetch(url, { method: 'PUT', body: blob });
+    if (!res.ok) {
+      await abort();
+      throw new Error(`Part ${p} upload failed (${res.status})`);
+    }
+    const etag = res.headers.get('etag') ?? res.headers.get('ETag');
+    if (!etag) {
+      await abort();
+      throw new Error(
+        'Missing ETag on upload response. Configure object storage CORS to expose ETag for PUT.',
+      );
+    }
+    parts.push({ partNumber: p, etag });
+  }
+
+  return api
+    .post<SqlDumpScanResult>(
+      `/admin/databases/sql-dump-upload-sessions/${sessionId}/complete`,
+      { parts },
+      { timeout: 600_000 },
+    )
+    .then((r) => r.data);
+}
+
 export const databasesApi = {
   list: (params?: {
     domain?: string;
@@ -2051,6 +2148,9 @@ export const databasesApi = {
       .then((r) => normalizeLearningSession(r.data.session)),
 
   scanSqlDump: (file: File, options?: { artifactOnly?: boolean }) => {
+    if (file.size >= SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES) {
+      return scanSqlDumpViaPresignedStorage(file, options);
+    }
     const form = new FormData();
     form.append('dump', file);
     if (options?.artifactOnly) {
@@ -2059,6 +2159,7 @@ export const databasesApi = {
     return api
       .post<SqlDumpScanResult>('/admin/databases/scan', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 600_000,
       })
       .then((r) => r.data);
   },

@@ -92,6 +92,13 @@
       "when": 1774508407000,
       "tag": "0012_schema_templates_catalog_lineage",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1774508408000,
+      "tag": "0013_sql_dump_upload_sessions",
+      "breakpoints": true
     }
   ]
 }

@@ -24,15 +24,22 @@ import type {
   AdminIdParams,
   ListPendingScansQuery,
   SqlDumpScanIdParams,
+  SqlDumpUploadSessionIdParams,
+  CreateSqlDumpUploadSessionBody,
+  PresignSqlDumpUploadPartBody,
+  CompleteSqlDumpUploadSessionBody,
 } from './admin.schema';
 import {
   AdminConfigSchema,
+  CompleteSqlDumpUploadSessionSchema,
   CreateAdminUserSchema,
   CreateChallengeSchema,
+  CreateSqlDumpUploadSessionSchema,
   ImportCanonicalDatabaseSchema,
   ListSystemJobsQuerySchema,
   ListAuditLogsQuerySchema,
   ListPendingScansQuerySchema,
+  PresignSqlDumpUploadPartSchema,
   UpdateAdminUserSchema,
 } from './admin.schema';
 import {
@@ -60,6 +67,12 @@ import {
   getAdminSqlDumpScan,
   updateAdminConfig,
 } from './admin.service';
+import {
+  abortSqlDumpUploadSession,
+  completeSqlDumpUploadSession,
+  createSqlDumpUploadSession,
+  presignSqlDumpUploadPart,
+} from './sql-dump-upload-session.service';
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
@@ -257,6 +270,45 @@ export async function importCanonicalDatabaseHandler(
   const body = ImportCanonicalDatabaseSchema.parse(request.body);
   const result = await importCanonicalDatabase(userId, body);
   reply.status(201).send(created(result, 'Canonical database imported successfully'));
+}
+
+export async function createSqlDumpUploadSessionHandler(
+  request: FastifyRequest<{ Body: CreateSqlDumpUploadSessionBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const body = CreateSqlDumpUploadSessionSchema.parse(request.body);
+  const result = await createSqlDumpUploadSession(userId, body);
+  reply.status(201).send(created(result, 'SQL dump upload session created'));
+}
+
+export async function presignSqlDumpUploadPartHandler(
+  request: FastifyRequest<{ Params: SqlDumpUploadSessionIdParams; Body: PresignSqlDumpUploadPartBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const { partNumber } = PresignSqlDumpUploadPartSchema.parse(request.body);
+  const result = await presignSqlDumpUploadPart(userId, request.params.sessionId, partNumber);
+  reply.send(success(result, 'Part URL issued'));
+}
+
+export async function completeSqlDumpUploadSessionHandler(
+  request: FastifyRequest<{ Params: SqlDumpUploadSessionIdParams; Body: CompleteSqlDumpUploadSessionBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  const body = CompleteSqlDumpUploadSessionSchema.parse(request.body ?? {});
+  const result = await completeSqlDumpUploadSession(userId, request.params.sessionId, body);
+  reply.send(success(result, 'SQL dump scanned successfully'));
+}
+
+export async function abortSqlDumpUploadSessionHandler(
+  request: FastifyRequest<{ Params: SqlDumpUploadSessionIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  await abortSqlDumpUploadSession(userId, request.params.sessionId);
+  reply.send(success({ ok: true }, 'Upload session aborted'));
 }
 
 export async function scanSqlDumpHandler(

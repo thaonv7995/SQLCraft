@@ -310,6 +310,33 @@ export const SqlDumpScanIdParamsSchema = z.object({
   scanId: z.string().uuid(),
 });
 
+export const SqlDumpUploadSessionIdParamsSchema = z.object({
+  sessionId: z.string().uuid(),
+});
+
+export const CreateSqlDumpUploadSessionSchema = z.object({
+  fileName: z.string().min(1).max(512),
+  byteSize: z.number().int().positive(),
+  artifactOnly: z.boolean().optional(),
+  /** When true, use S3 multipart even for smaller files (testing / proxy limits). */
+  multipart: z.boolean().optional(),
+});
+
+export const PresignSqlDumpUploadPartSchema = z.object({
+  partNumber: z.number().int().min(1).max(10_000),
+});
+
+export const CompleteSqlDumpUploadSessionSchema = z.object({
+  parts: z
+    .array(
+      z.object({
+        partNumber: z.number().int().positive(),
+        etag: z.string().min(1),
+      }),
+    )
+    .optional(),
+});
+
 // ─── Inferred Types ───────────────────────────────────────────────────────────
 
 export type CreateChallengeBody = z.infer<typeof CreateChallengeSchema>;
@@ -327,3 +354,7 @@ export type AdminConfigBody = z.infer<typeof AdminConfigSchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;
 export type ListPendingScansQuery = z.infer<typeof ListPendingScansQuerySchema>;
 export type SqlDumpScanIdParams = z.infer<typeof SqlDumpScanIdParamsSchema>;
+export type SqlDumpUploadSessionIdParams = z.infer<typeof SqlDumpUploadSessionIdParamsSchema>;
+export type CreateSqlDumpUploadSessionBody = z.infer<typeof CreateSqlDumpUploadSessionSchema>;
+export type PresignSqlDumpUploadPartBody = z.infer<typeof PresignSqlDumpUploadPartSchema>;
+export type CompleteSqlDumpUploadSessionBody = z.infer<typeof CompleteSqlDumpUploadSessionSchema>;
