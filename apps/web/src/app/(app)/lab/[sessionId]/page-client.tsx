@@ -488,7 +488,8 @@ function ResultsPanel() {
           <span className="text-xs text-on-surface-variant">
             Showing{' '}
             <span className="font-mono text-on-surface">{results.rows.length}</span>
-            {' '}trong{' '}
+            {' '}
+            of{' '}
             <span className="font-mono text-on-surface">{results.totalRows.toLocaleString()}</span>
             {' '}rows — results are limited to the first 500 rows.
           </span>
@@ -1598,7 +1599,7 @@ function RevertSchemaChangeModal({
               Schema Diff
             </p>
             <h2 id="revert-schema-title" className="mt-1 text-lg font-semibold text-on-surface">
-              Revert change trong sandbox?
+              Revert this change in the sandbox?
             </h2>
             <p className="mt-2 text-sm leading-6 text-on-surface-variant">
               This will run SQL on the sandbox database to revert this change.
