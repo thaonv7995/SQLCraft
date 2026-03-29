@@ -14,6 +14,7 @@ vi.mock('next/navigation', () => ({
 const mocks = vi.hoisted(() => ({
   challengesApi: {
     listPublished: vi.fn(),
+    listMine: vi.fn(),
     listAttempts: vi.fn(),
   },
   leaderboardApi: {
@@ -90,6 +91,8 @@ describe('LeaderboardPage', () => {
         expiresIn: 3600,
       },
     });
+
+    mocks.challengesApi.listMine.mockResolvedValue([]);
 
     mocks.challengesApi.listPublished.mockResolvedValue([
       {

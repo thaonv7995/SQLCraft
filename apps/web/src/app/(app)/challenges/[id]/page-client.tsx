@@ -36,20 +36,48 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
     staleTime: 60_000,
   });
 
-  const challenge = useMemo<ChallengeCatalogItem | null>(
-    () =>
-      catalogQuery.data?.find(
-        (item) => item.id === challengeId || item.slug === challengeId,
-      ) ?? null,
-    [catalogQuery.data, challengeId],
+  const mineQuery = useQuery({
+    queryKey: ['my-challenges'],
+    queryFn: () => challengesApi.listMine(),
+    staleTime: 60_000,
+  });
+
+  const challenge = useMemo<ChallengeCatalogItem | null>(() => {
+    const fromPub = catalogQuery.data?.find(
+      (item) => item.id === challengeId || item.slug === challengeId,
+    );
+    if (fromPub) return fromPub;
+    return (
+      mineQuery.data?.find((item) => item.id === challengeId || item.slug === challengeId) ?? null
+    );
+  }, [catalogQuery.data, mineQuery.data, challengeId]);
+
+  const isYours = useMemo(
+    () => mineQuery.data?.some((c) => c.id === challenge?.id) ?? false,
+    [mineQuery.data, challenge?.id],
   );
+
+  const draftQuery = useQuery({
+    queryKey: ['user-challenge-draft', challenge?.id],
+    enabled: Boolean(isYours && challenge?.id),
+    queryFn: () => challengesApi.getDraft(challenge!.id),
+    staleTime: 30_000,
+  });
+
+  const hasPublishedPlay = Boolean(challenge?.publishedVersionId);
 
   const versionQuery = useQuery({
     queryKey: ['challenge-version-detail', challenge?.publishedVersionId],
-    enabled: Boolean(challenge?.publishedVersionId),
+    enabled: hasPublishedPlay,
     queryFn: () => challengesApi.getVersion(challenge!.publishedVersionId!),
     staleTime: 30_000,
   });
+
+  const problemStatement =
+    versionQuery.data?.problemStatement ?? draftQuery.data?.latestVersion.problemStatement ?? '';
+  const hintText = versionQuery.data?.hintText ?? draftQuery.data?.latestVersion.hintText ?? null;
+  const validatorConfigForDisplay =
+    versionQuery.data?.validatorConfig ?? draftQuery.data?.latestVersion.validatorConfig ?? null;
 
   const attemptsQuery = useQuery({
     queryKey: ['challenge-attempts', challenge?.publishedVersionId],
@@ -95,6 +123,8 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
     }
   };
 
+  const pageLoading = catalogQuery.isLoading || mineQuery.isLoading;
+
   if (!challengeId) {
     return (
       <div className="page-shell page-stack">
@@ -103,7 +133,7 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
     );
   }
 
-  if (catalogQuery.isLoading) {
+  if (pageLoading) {
     return (
       <div className="page-shell page-stack">
         <div className="h-10 w-56 animate-pulse rounded bg-surface-container-low" />
@@ -120,11 +150,63 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
     );
   }
 
+  const showOwnerEditCard = isYours && challenge.status === 'draft';
+  const isAdmin = user?.role === 'admin';
+
   return (
     <div className="page-shell page-stack">
       <Link href="/leaderboard" className="text-sm text-on-surface-variant hover:text-on-surface">
         ← Back to challenges
       </Link>
+
+      {isYours ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full bg-primary/20 text-primary px-2 py-0.5">
+            Yours
+          </span>
+          {!hasPublishedPlay ? (
+            <span className="text-[10px] font-semibold uppercase tracking-wide rounded-full bg-amber-500/20 text-amber-200 px-2 py-0.5">
+              Draft
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showOwnerEditCard ? (
+        <section className="rounded-xl border border-primary/25 bg-primary/5 p-5 space-y-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="font-headline text-base font-semibold text-on-surface">Edit your draft</h2>
+              <p className="mt-1 text-xs text-on-surface-variant max-w-xl">
+                Update wording, reference SQL, or pass criteria. Saving creates a new draft version for
+                review (public) or for you to publish (private).
+              </p>
+            </div>
+            <Button type="button" onClick={() => router.push(`/challenges/${challenge.id}/edit`)}>
+              Edit draft
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {isYours && challenge.status === 'published' ? (
+        <section className="rounded-xl border border-outline-variant/15 bg-surface-container-low/50 p-5">
+          <h2 className="font-headline text-base font-semibold text-on-surface">Published challenge</h2>
+          <p className="mt-1 text-xs text-on-surface-variant">
+            Learner-facing content is locked. For in-place edits you need the admin content tools.
+          </p>
+          {isAdmin ? (
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3"
+              onClick={() => router.push(`/admin/content/${challenge.id}/edit`)}
+            >
+              Open in admin
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6 space-y-4">
         <div className="flex items-start justify-between gap-4">
@@ -136,9 +218,17 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-4 text-xs text-on-surface-variant">
-          <span>Points: <span className="font-semibold text-on-surface">{challenge.points}</span></span>
-          <span>Database: <span className="font-semibold text-on-surface">{challenge.databaseName ?? 'N/A'}</span></span>
-          <span>Attempts: <span className="font-semibold text-on-surface">{attemptsQuery.data?.length ?? 0}</span></span>
+          <span>
+            Points: <span className="font-semibold text-on-surface">{challenge.points}</span>
+          </span>
+          <span>
+            Database:{' '}
+            <span className="font-semibold text-on-surface">{challenge.databaseName ?? 'N/A'}</span>
+          </span>
+          <span>
+            Attempts:{' '}
+            <span className="font-semibold text-on-surface">{attemptsQuery.data?.length ?? 0}</span>
+          </span>
           <span>
             Passed:{' '}
             <span className="font-semibold text-on-surface">
@@ -152,23 +242,21 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
         <div className="rounded-xl border border-outline-variant/10 bg-surface-container-low p-6 space-y-4">
           <h2 className="font-headline text-lg font-semibold text-on-surface">Problem Statement</h2>
           <p className="text-sm leading-7 text-on-surface-variant whitespace-pre-wrap">
-            {versionQuery.data?.problemStatement ?? 'Loading challenge content...'}
+            {problemStatement || (draftQuery.isLoading ? 'Loading challenge content...' : '—')}
           </p>
 
-          {versionQuery.data?.hintText ? (
+          {hintText ? (
             <div className="rounded-lg border border-outline-variant/10 bg-surface-container p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-outline mb-2">Hint</p>
-              <p className="text-sm text-on-surface-variant">{versionQuery.data.hintText}</p>
+              <p className="text-sm text-on-surface-variant">{hintText}</p>
             </div>
           ) : null}
 
-          {versionQuery.data ? (
+          {validatorConfigForDisplay ? (
             <div className="rounded-lg border border-outline-variant/10 bg-surface-container p-4">
-              <p className="mb-3 text-xs uppercase tracking-[0.18em] text-outline">
-                Pass criteria
-              </p>
+              <p className="mb-3 text-xs uppercase tracking-[0.18em] text-outline">Pass criteria</p>
               <ChallengePassCriteriaDisplay
-                validatorConfig={versionQuery.data.validatorConfig}
+                validatorConfig={validatorConfigForDisplay}
                 showExplainer={false}
               />
             </div>
@@ -184,8 +272,17 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
               <span className="font-medium text-on-surface">
                 {DATASET_SCALE_META[challenge.datasetScale].label}
               </span>
-              <span className="text-on-surface-variant"> — {DATASET_SCALE_META[challenge.datasetScale].desc}</span>
+              <span className="text-on-surface-variant">
+                {' '}
+                — {DATASET_SCALE_META[challenge.datasetScale].desc}
+              </span>
             </p>
+            {!hasPublishedPlay ? (
+              <p className="text-xs text-amber-200/90">
+                This challenge is still a draft (not published). You cannot start a lab session until it
+                is published.
+              </p>
+            ) : null}
             <Button
               variant="primary"
               onClick={() => void startSubmission()}
@@ -204,7 +301,9 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
               tie-breaker.
             </p>
             <div className="mt-3 space-y-2">
-              {leaderboardQuery.data?.length ? (
+              {!challenge.publishedVersionId ? (
+                <p className="text-sm text-on-surface-variant">No leaderboard until this challenge is published.</p>
+              ) : leaderboardQuery.data?.length ? (
                 leaderboardQuery.data.map((entry) => (
                   <div
                     key={entry.attemptId}
@@ -237,4 +336,3 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
     </div>
   );
 }
-

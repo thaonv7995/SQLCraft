@@ -1570,14 +1570,16 @@ export const challengesApi = {
 
   validateDraft: (payload: {
     challengeId?: string;
-    lessonId: string;
-    databaseId?: string;
+    databaseId: string;
     slug: string;
     title: string;
     description?: string;
     difficulty?: 'beginner' | 'intermediate' | 'advanced';
     sortOrder?: number;
     points?: number;
+    datasetScale?: DatasetScale;
+    visibility?: 'public' | 'private';
+    invitedUserIds?: string[];
     problemStatement: string;
     hintText?: string;
     expectedResultColumns?: string[];
@@ -1590,14 +1592,14 @@ export const challengesApi = {
       .then((r) => r.data),
 
   create: (payload: {
-    lessonId: string;
-    databaseId?: string;
+    databaseId: string;
     slug: string;
     title: string;
     description?: string;
     difficulty?: 'beginner' | 'intermediate' | 'advanced';
     sortOrder?: number;
     points?: number;
+    datasetScale?: DatasetScale;
     problemStatement: string;
     hintText?: string;
     expectedResultColumns?: string[];
@@ -1611,14 +1613,14 @@ export const challengesApi = {
   createVersion: (
     challengeId: string,
     payload: {
-      lessonId: string;
-      databaseId?: string;
+      databaseId: string;
       slug: string;
       title: string;
       description?: string;
       difficulty?: 'beginner' | 'intermediate' | 'advanced';
       sortOrder?: number;
       points?: number;
+      datasetScale?: DatasetScale;
       problemStatement: string;
       hintText?: string;
       expectedResultColumns?: string[];
