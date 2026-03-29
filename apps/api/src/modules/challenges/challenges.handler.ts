@@ -162,7 +162,10 @@ export async function validateChallengeDraftHandler(
   reply: FastifyReply,
 ): Promise<void> {
   const body = ValidateChallengeDraftSchema.parse(request.body);
-  const result = await validateChallengeDraft(body);
+  const jwtUser = request.user as JwtPayload | undefined;
+  const userId = jwtUser?.sub ?? '';
+  const isAdmin = jwtUser?.roles?.includes('admin') ?? false;
+  const result = await validateChallengeDraft(body, userId, isAdmin);
   return reply.send(success(result, 'Challenge draft validated successfully'));
 }
 

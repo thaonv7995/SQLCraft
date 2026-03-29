@@ -66,6 +66,9 @@ import {
   listPendingScans,
   getAdminSqlDumpScan,
   updateAdminConfig,
+  listPendingSchemaTemplatesForReview,
+  approveSchemaTemplateReview,
+  rejectSchemaTemplateReview,
 } from './admin.service';
 import {
   abortSqlDumpUploadSession,
@@ -350,8 +353,10 @@ export async function scanSqlDumpHandler(
       throw new ValidationError('Uploaded SQL dump is empty');
     }
 
+    const userId = (request.user as JwtPayload).sub;
     const result = await scanSqlDumpFromUploadedFile(dumpFileName, tmpPath, st.size, {
       artifactOnly,
+      uploadingUserId: userId,
     });
     reply.send(success(result, 'SQL dump scanned successfully'));
   } finally {
@@ -376,6 +381,31 @@ export async function getSqlDumpScanHandler(
 ): Promise<void> {
   const result = await getAdminSqlDumpScan(request.params.scanId);
   reply.send(success(result, 'SQL dump scan retrieved'));
+}
+
+export async function listPendingSchemaTemplatesForReviewHandler(
+  _request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  const result = await listPendingSchemaTemplatesForReview();
+  reply.send(success(result, 'Pending public database uploads retrieved'));
+}
+
+export async function approveSchemaTemplateReviewHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const userId = (request.user as JwtPayload).sub;
+  await approveSchemaTemplateReview(request.params.id, userId);
+  reply.send(success({ ok: true }, 'Public database approved and published'));
+}
+
+export async function rejectSchemaTemplateReviewHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  await rejectSchemaTemplateReview(request.params.id);
+  reply.send(success({ ok: true }, 'Public database review rejected'));
 }
 
 export async function listSystemJobsHandler(

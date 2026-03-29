@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
+import { ExploreDatabaseImportModal } from '@/components/user/explore-database-import-section';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { databasesApi } from '@/lib/api';
 import type { Database } from '@/lib/api';
@@ -15,6 +17,19 @@ import {
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 import type { ClientPageProps } from '@/lib/page-props';
+
+function wantsImportFromSearchParams(
+  sp: Record<string, string | string[] | undefined>,
+): boolean {
+  const v = sp.import;
+  if (v === '1') {
+    return true;
+  }
+  if (Array.isArray(v)) {
+    return v.some((x) => x === '1');
+  }
+  return false;
+}
 
 // ─── Database Card ────────────────────────────────────────────────────────────
 
@@ -144,8 +159,10 @@ function FilterSelect({
 
 const EXPLORE_PAGE_SIZE = 12;
 
-export default function ExplorePage(_props: ClientPageProps) {
+export default function ExplorePage(props: ClientPageProps) {
   const router = useRouter();
+  const importFromQuery = wantsImportFromSearchParams(props.searchParams);
+  const [importModalOpen, setImportModalOpen] = useState(importFromQuery);
   const [domain, setDomain] = useState('all');
   const [scale, setScale] = useState('all');
   const [dialect, setDialect] = useState('all');
@@ -161,6 +178,21 @@ export default function ExplorePage(_props: ClientPageProps) {
   useEffect(() => {
     setCatalogPage(1);
   }, [domain, scale, dialect, debouncedQ]);
+
+  useEffect(() => {
+    if (importFromQuery) {
+      setImportModalOpen(true);
+    }
+  }, [importFromQuery]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (window.location.hash === '#import-your-database') {
+      setImportModalOpen(true);
+    }
+  }, []);
 
   const {
     data: apiData,
@@ -198,17 +230,42 @@ export default function ExplorePage(_props: ClientPageProps) {
         </p>
       </div>
 
-      {/* Toolbar: one band — title | search + filters (wrap on small screens) */}
+      <ExploreDatabaseImportModal
+        open={importModalOpen}
+        onOpenChange={setImportModalOpen}
+        onCatalogUpdated={() => void refetch()}
+      />
+
+      {/* Toolbar: catalog title + import | search + filters */}
       <div className="mb-6 flex flex-col gap-3 lg:mb-8 lg:flex-row lg:items-end lg:justify-between lg:gap-4">
-        <h2 className="font-headline flex shrink-0 items-center gap-1.5 text-sm font-semibold tracking-tight text-on-surface">
-          <span className="h-3 w-0.5 shrink-0 rounded-full bg-tertiary" aria-hidden />
-          <span className="whitespace-nowrap">
-            Available databases{' '}
-            <span className="font-normal tabular-nums text-on-surface-variant">
-              ({totalMatching})
+        <div
+          id="import-your-database"
+          className="scroll-mt-20 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4"
+        >
+          <h2 className="font-headline flex shrink-0 items-center gap-1.5 text-sm font-semibold tracking-tight text-on-surface">
+            <span className="h-3 w-0.5 shrink-0 rounded-full bg-tertiary" aria-hidden />
+            <span className="whitespace-nowrap">
+              Available databases{' '}
+              <span className="font-normal tabular-nums text-on-surface-variant">
+                ({totalMatching})
+              </span>
             </span>
-          </span>
-        </h2>
+          </h2>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            className="w-full shrink-0 sm:w-auto"
+            leftIcon={
+              <span className="material-symbols-outlined text-base" aria-hidden>
+                upload_file
+              </span>
+            }
+            onClick={() => setImportModalOpen(true)}
+          >
+            Import database
+          </Button>
+        </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2 lg:justify-end">
           <div className="w-full min-w-[11rem] sm:max-w-sm lg:w-56 lg:max-w-none lg:shrink-0">
             <Input

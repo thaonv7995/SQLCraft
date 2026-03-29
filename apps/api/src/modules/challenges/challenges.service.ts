@@ -35,6 +35,7 @@ import {
   repairExplainPlanResult,
   validateSql,
 } from '../../services/query-executor';
+import { assertSchemaTemplateUsableForUserChallenge } from '../databases/databases.service';
 import { getSessionSchemaDiff, type SessionSchemaDiffResult } from '../sessions/sessions.service';
 import type {
   CreateChallengeBody,
@@ -529,14 +530,26 @@ function normalizeChallengeDraftPayload(
 
 async function buildDraftValidation(
   data: ValidateChallengeDraftBody,
+  context: { userId: string; isAdmin: boolean },
 ): Promise<ChallengeDraftValidationResult> {
   const normalized = normalizeChallengeDraftPayload(data);
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  const databaseExists = await sessionsRepository.findSchemaTemplateById(normalized.databaseId);
-  if (!databaseExists) {
-    errors.push('Database not found.');
+  try {
+    await assertSchemaTemplateUsableForUserChallenge(context.userId, normalized.databaseId, {
+      isAdmin: context.isAdmin,
+    });
+  } catch (err) {
+    if (err instanceof NotFoundError) {
+      errors.push('Database not found.');
+    } else if (err instanceof ValidationError) {
+      errors.push(err.message);
+    } else if (err instanceof ForbiddenError) {
+      errors.push('You do not have access to this database.');
+    } else {
+      throw err;
+    }
   }
 
   const existingChallenge = await challengesRepository.findByDatabaseAndSlug(
@@ -1973,15 +1986,17 @@ export async function getEditableChallenge(
 
 export async function validateChallengeDraft(
   data: ValidateChallengeDraftBody,
+  userId: string,
+  isAdmin: boolean,
 ): Promise<ChallengeDraftValidationResult> {
-  return buildDraftValidation(data);
+  return buildDraftValidation(data, { userId, isAdmin });
 }
 
 export async function createChallenge(
   data: CreateChallengeBody,
   userId: string,
 ): Promise<CreateChallengeResult> {
-  const validation = await buildDraftValidation(data);
+  const validation = await buildDraftValidation(data, { userId, isAdmin: false });
   if (!validation.valid) {
     throw new ValidationError(validation.errors.join(' '));
   }
@@ -2046,7 +2061,7 @@ export async function createChallengeVersion(
     throw new ValidationError('Only draft challenges can be revised from the submission flow.');
   }
 
-  const validation = await buildDraftValidation({ ...data, challengeId });
+  const validation = await buildDraftValidation({ ...data, challengeId }, { userId, isAdmin });
   if (!validation.valid) {
     throw new ValidationError(validation.errors.join(' '));
   }
@@ -2166,7 +2181,7 @@ export async function adminUpdateChallenge(
     throw new NotFoundError('Challenge not found');
   }
 
-  const validation = await buildDraftValidation({ ...body, challengeId });
+  const validation = await buildDraftValidation({ ...body, challengeId }, { userId: 'admin', isAdmin: true });
   if (!validation.valid) {
     throw new ValidationError(validation.errors.join(' '));
   }

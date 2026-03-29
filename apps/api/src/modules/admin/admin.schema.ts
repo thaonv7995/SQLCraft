@@ -177,6 +177,24 @@ export const SqlDumpScanImportSchema = z
   })
   .merge(ReplaceSchemaTemplateFieldSchema);
 
+/** End-user SQL dump import (no catalog replace; visibility controls review vs instant private publish). */
+export const UserImportSqlDumpDatabaseSchema = SqlDumpScanImportSchema.omit({
+  replaceSchemaTemplateId: true,
+})
+  .extend({
+    visibility: z.enum(['public', 'private']).default('public'),
+    invitedUserIds: z.array(z.string().uuid()).max(100).optional().default([]),
+  })
+  .superRefine((value, ctx) => {
+    if (value.visibility === 'public' && value.invitedUserIds && value.invitedUserIds.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['invitedUserIds'],
+        message: 'invitedUserIds is only allowed when visibility is private',
+      });
+    }
+  });
+
 export const ImportCanonicalDatabaseSchema = z.union([
   DirectCanonicalDatabaseImportSchema,
   SqlDumpScanImportSchema,
@@ -251,12 +269,20 @@ const AdminFeatureFlagsSchema = z.object({
   snapshotExports: z.boolean(),
 });
 
+const AdminUserDatabasesConfigSchema = z.object({
+  /** Max private (published) user-uploaded databases per user. */
+  maxPrivateDatabasesPerUser: z.string().min(1).max(10),
+  /** Max public databases a user may have waiting for admin review at once. */
+  maxPublicDatabasesPendingReviewPerUser: z.string().min(1).max(10),
+});
+
 export const AdminConfigSchema = z.object({
   platform: AdminPlatformConfigSchema,
   rankings: AdminRankingConfigSchema,
   moderation: AdminModerationConfigSchema,
   infrastructure: AdminInfrastructureConfigSchema,
   flags: AdminFeatureFlagsSchema,
+  userDatabases: AdminUserDatabasesConfigSchema,
 });
 
 export const DEFAULT_ADMIN_CONFIG = {
@@ -306,6 +332,10 @@ export const DEFAULT_ADMIN_CONFIG = {
     submissionQueue: true,
     explanationPanel: false,
     snapshotExports: true,
+  },
+  userDatabases: {
+    maxPrivateDatabasesPerUser: '10',
+    maxPublicDatabasesPendingReviewPerUser: '3',
   },
 } satisfies z.infer<typeof AdminConfigSchema>;
 
@@ -357,6 +387,7 @@ export type UpdateAdminUserBody = z.infer<typeof UpdateAdminUserSchema>;
 export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabaseSchema>;
 export type DirectCanonicalDatabaseImportBody = z.infer<typeof DirectCanonicalDatabaseImportSchema>;
 export type SqlDumpScanImportBody = z.infer<typeof SqlDumpScanImportSchema>;
+export type UserImportSqlDumpDatabaseBody = z.infer<typeof UserImportSqlDumpDatabaseSchema>;
 export type ListSystemJobsQuery = z.infer<typeof ListSystemJobsQuerySchema>;
 export type ListAuditLogsQuery = z.infer<typeof ListAuditLogsQuerySchema>;
 export type AdminConfigBody = z.infer<typeof AdminConfigSchema>;

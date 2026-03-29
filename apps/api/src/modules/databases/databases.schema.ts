@@ -27,10 +27,17 @@ export const ListDatabasesQuerySchema = z.object({
   ),
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
+  /** When true (authenticated), include published private databases you own or are invited to (challenge authoring). */
+  forChallengeAuthoring: z.coerce.boolean().optional().default(false),
 });
 
 export const DatabaseParamsSchema = z.object({
   databaseId: z.string().min(1),
+});
+
+export const GetDatabaseQuerySchema = z.object({
+  /** When true (authenticated), resolve id/slug against authoring catalog (public + your private/invited DBs). */
+  forChallengeAuthoring: z.coerce.boolean().optional().default(false),
 });
 
 export const CreateDatabaseSessionBodySchema = z.object({
@@ -40,4 +47,5 @@ export const CreateDatabaseSessionBodySchema = z.object({
 
 export type ListDatabasesQuery = z.infer<typeof ListDatabasesQuerySchema>;
 export type DatabaseParams = z.infer<typeof DatabaseParamsSchema>;
+export type GetDatabaseQuery = z.infer<typeof GetDatabaseQuerySchema>;
 export type CreateDatabaseSessionBody = z.infer<typeof CreateDatabaseSessionBodySchema>;

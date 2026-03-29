@@ -22,28 +22,14 @@ import {
   databasesApi,
   type ChallengeDraftValidationResult,
   type DatasetScale,
+  type InviteUserSearchItem,
 } from '@/lib/api';
+import { UserInviteMultiSelect } from '@/components/user/user-invite-multi-select';
 import { CHALLENGE_SLUG_PATTERN, slugifyChallengeTitle } from '@/lib/slugify-challenge';
 import toast from 'react-hot-toast';
 import type { ClientPageProps } from '@/lib/page-props';
 import { useAuthStore } from '@/stores/auth';
-
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function parseUuidList(raw: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const part of raw.split(/[\s,]+/)) {
-    const s = part.trim();
-    if (!s || !UUID_RE.test(s)) continue;
-    const lower = s.toLowerCase();
-    if (seen.has(lower)) continue;
-    seen.add(lower);
-    out.push(s);
-  }
-  return out;
-}
+import { parseUuidList } from '@/lib/uuid-list';
 
 const DIFFICULTY_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
@@ -77,8 +63,9 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
   const user = useAuthStore((s) => s.user);
 
   const databasesQuery = useQuery({
-    queryKey: ['catalog-databases', 'challenge-create'],
-    queryFn: () => databasesApi.list({ limit: 100, page: 1 }),
+    queryKey: ['catalog-databases', 'challenge-create', 'authoring'],
+    queryFn: () =>
+      databasesApi.list({ limit: 100, page: 1, forChallengeAuthoring: true }),
   });
 
   const databaseOptions = useMemo(() => {
@@ -100,16 +87,16 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
   const [hintText, setHintText] = useState('');
   const [referenceSolution, setReferenceSolution] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'private'>('public');
-  const [inviteUserIdsRaw, setInviteUserIdsRaw] = useState('');
+  const [inviteUsers, setInviteUsers] = useState<InviteUserSearchItem[]>([]);
   const [passCriteriaRows, setPassCriteriaRows] = useState<PassCriterionDraft[]>(() =>
     passCriteriaDraftsFromConfig(null),
   );
   const [lastValidation, setLastValidation] = useState<ChallengeDraftValidationResult | null>(null);
 
   const databaseSchemaQuery = useQuery({
-    queryKey: ['challenge-form-database', databaseId],
+    queryKey: ['challenge-form-database', databaseId, 'authoring'],
     enabled: Boolean(databaseId),
-    queryFn: () => databasesApi.get(databaseId),
+    queryFn: () => databasesApi.get(databaseId, { forChallengeAuthoring: true }),
   });
 
   const schemaTables = databaseSchemaQuery.data?.schema ?? [];
@@ -126,7 +113,7 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
     const validatorConfig = passCriteriaDraftsToPayload(passCriteriaRows);
     const expectedResultColumns = expectedResultColumnsFromPassCriteriaRows(passCriteriaRows);
     const invitedUserIds =
-      visibility === 'private' ? parseUuidList(inviteUserIdsRaw) : undefined;
+      visibility === 'private' ? inviteUsers.map((u) => u.id) : undefined;
     return {
       databaseId,
       slug,
@@ -223,8 +210,8 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
       toast.error(err instanceof Error ? err.message : 'Invalid pass criteria');
       return;
     }
-    if (visibility === 'public' && parseUuidList(inviteUserIdsRaw).length > 0) {
-      toast.error('Invites are only for private challenges. Switch to private or clear invite IDs.');
+    if (visibility === 'public' && inviteUsers.length > 0) {
+      toast.error('Invites are only for private challenges. Switch to private or clear invited people.');
       return;
     }
     createMutation.mutate();
@@ -249,7 +236,7 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
               Public drafts go through admin review before they appear in the challenge list.
             </span>{' '}
             Private challenges stay off the public catalog; you can publish them yourself and invite
-            others by user ID.
+            other users.
           </p>
         </div>
       </div>
@@ -272,6 +259,16 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
                 ...databaseOptions,
               ]}
             />
+            <p className="text-xs text-on-surface-variant">
+              Not listed?{' '}
+              <Link
+                href="/explore?import=1"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Import a SQL database on Explorer
+              </Link>
+              , then refresh this page or pick it from the dropdown.
+            </p>
 
             <Input
               label="Title"
@@ -323,14 +320,16 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
 
             {visibility === 'private' && (
               <div className="space-y-2 rounded-lg border border-outline-variant/20 bg-surface-container/40 p-3">
-                <Textarea
-                  label="Invite users (optional)"
-                  value={inviteUserIdsRaw}
-                  onChange={(e) => setInviteUserIdsRaw(e.target.value)}
-                  rows={3}
-                  placeholder="One UUID per line or comma-separated"
-                  hint="Registered users only. Invalid IDs are ignored here; the server rejects unknown IDs on save. You can add more invites later from your draft."
-                />
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-on-surface-variant">
+                    Invite people <span className="font-normal text-on-surface-variant/80">(optional)</span>
+                  </p>
+                  <UserInviteMultiSelect value={inviteUsers} onChange={setInviteUsers} />
+                  <p className="text-xs text-on-surface-variant">
+                    Registered users only. The server rejects unknown accounts on save. You can add more
+                    invites later from your draft.
+                  </p>
+                </div>
                 {user?.id ? (
                   <p className="text-xs text-on-surface-variant">
                     Your user ID (share so others can invite you):{' '}

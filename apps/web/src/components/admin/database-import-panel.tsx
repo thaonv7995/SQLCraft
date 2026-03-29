@@ -11,8 +11,11 @@ import {
   type SchemaSqlDialect,
   type SqlDumpImportPayload,
   type SqlDumpScanResult,
+  type UserSqlDumpImportPayload,
+  type InviteUserSearchItem,
   databasesApi,
 } from '@/lib/api';
+import { UserInviteMultiSelect } from '@/components/user/user-invite-multi-select';
 import {
   formatSqlDumpMaxUploadLabel,
   SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES,
@@ -20,6 +23,8 @@ import {
 } from '@/lib/sql-dump-limits';
 
 interface DatabaseImportPanelProps {
+  /** Admin: publish to catalog. User: import with visibility / invites (enforced server-side). */
+  variant?: 'admin' | 'user';
   onClose?: () => void;
   onImported?: (databaseId: string) => void;
   /** When set, load this scan from storage (same payload as after a fresh upload scan). */
@@ -70,6 +75,7 @@ function formatNumber(value: number) {
 }
 
 export function DatabaseImportPanel({
+  variant = 'admin',
   onClose,
   onImported,
   resumeScanId,
@@ -80,6 +86,7 @@ export function DatabaseImportPanel({
   lockedDialect,
   lockedEngineVersion,
 }: DatabaseImportPanelProps) {
+  const isUser = variant === 'user';
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [scanResult, setScanResult] = useState<SqlDumpScanResult | null>(null);
   const [schemaName, setSchemaName] = useState('');
@@ -89,6 +96,8 @@ export function DatabaseImportPanel({
   const [engineVersion, setEngineVersion] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
+  const [dbVisibility, setDbVisibility] = useState<'public' | 'private'>('public');
+  const [invitedUsers, setInvitedUsers] = useState<InviteUserSearchItem[]>([]);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeLoading, setResumeLoading] = useState(false);
@@ -96,25 +105,23 @@ export function DatabaseImportPanel({
   const [skipStrictSchemaScan, setSkipStrictSchemaScan] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const effectiveReplaceId = isUser ? undefined : replaceSchemaTemplateId;
+
   const applyScanResult = useCallback(
     (result: SqlDumpScanResult) => {
       setScanResult(result);
       const fallbackName = result.fileName.replace(/\.sql$/i, '').slice(0, 32);
       const nameFromScan = result.schemaName?.trim() ?? fallbackName;
       setSchemaName(
-        replaceSchemaTemplateId && lockedSchemaName?.trim()
+        effectiveReplaceId && lockedSchemaName?.trim()
           ? lockedSchemaName.trim()
           : nameFromScan,
       );
-      setDomain(
-        replaceSchemaTemplateId && lockedCatalogDomain ? lockedCatalogDomain : result.domain,
-      );
+      setDomain(effectiveReplaceId && lockedCatalogDomain ? lockedCatalogDomain : result.domain);
       setDatasetScale(result.inferredScale ?? '');
-      setDialect(
-        replaceSchemaTemplateId && lockedDialect ? lockedDialect : result.inferredDialect,
-      );
+      setDialect(effectiveReplaceId && lockedDialect ? lockedDialect : result.inferredDialect);
       setEngineVersion(
-        replaceSchemaTemplateId && lockedEngineVersion !== undefined
+        effectiveReplaceId && lockedEngineVersion !== undefined
           ? (lockedEngineVersion?.trim() ?? '')
           : (result.inferredEngineVersion?.trim() ?? ''),
       );
@@ -125,7 +132,7 @@ export function DatabaseImportPanel({
       setSkipStrictSchemaScan(Boolean(result.artifactOnly));
     },
     [
-      replaceSchemaTemplateId,
+      effectiveReplaceId,
       lockedSchemaName,
       lockedCatalogDomain,
       lockedDialect,
@@ -140,7 +147,7 @@ export function DatabaseImportPanel({
   }, [lockedSchemaName]);
 
   useEffect(() => {
-    if (!replaceSchemaTemplateId) {
+    if (!effectiveReplaceId) {
       return;
     }
     if (lockedCatalogDomain) {
@@ -153,7 +160,7 @@ export function DatabaseImportPanel({
       setEngineVersion(lockedEngineVersion?.trim() ?? '');
     }
   }, [
-    replaceSchemaTemplateId,
+    effectiveReplaceId,
     lockedCatalogDomain,
     lockedDialect,
     lockedEngineVersion,
@@ -167,8 +174,7 @@ export function DatabaseImportPanel({
     let cancelled = false;
     setResumeLoading(true);
     setResumeError(null);
-    void databasesApi
-      .getSqlDumpScan(id)
+    void (isUser ? databasesApi.userGetSqlDumpScan(id) : databasesApi.getSqlDumpScan(id))
       .then((result) => {
         if (cancelled) return;
         applyScanResult(result);
@@ -184,23 +190,43 @@ export function DatabaseImportPanel({
     return () => {
       cancelled = true;
     };
-  }, [resumeScanId, applyScanResult, onResumeConsumed]);
+  }, [resumeScanId, applyScanResult, onResumeConsumed, isUser]);
 
   const scanMutation = useMutation({
     mutationFn: ({ file, artifactOnly }: { file: File; artifactOnly: boolean }) =>
-      databasesApi.scanSqlDump(file, { artifactOnly }),
+      isUser
+        ? databasesApi.userScanSqlDump(file, { artifactOnly })
+        : databasesApi.scanSqlDump(file, { artifactOnly }),
     onSuccess(result) {
       applyScanResult(result);
     },
   });
 
   const importMutation = useMutation({
-    mutationFn: (payload: SqlDumpImportPayload) => databasesApi.importFromScan(payload),
-    onSuccess(result) {
-      setImportSuccess(
-        `Published schema template ${result.schemaTemplateId}` +
-          (result.datasetTemplateId ? ` and dataset ${result.datasetTemplateId}` : ''),
-      );
+    mutationFn: (payload: SqlDumpImportPayload | UserSqlDumpImportPayload) =>
+      isUser
+        ? databasesApi.userImportFromScan(payload as UserSqlDumpImportPayload)
+        : databasesApi.importFromScan(payload as SqlDumpImportPayload),
+    onSuccess(result, variables) {
+      if (isUser) {
+        const vis = (variables as UserSqlDumpImportPayload).visibility ?? 'public';
+        if (vis === 'public') {
+          setImportSuccess(
+            'Submitted for catalog review. An admin must approve before it appears in the public list.',
+          );
+        } else {
+          setImportSuccess(
+            `Imported — schema ${result.schemaTemplateId}` +
+              (result.datasetTemplateId ? `, dataset ${result.datasetTemplateId}` : '') +
+              '. You can use it when authoring challenges.',
+          );
+        }
+      } else {
+        setImportSuccess(
+          `Published schema template ${result.schemaTemplateId}` +
+            (result.datasetTemplateId ? ` and dataset ${result.datasetTemplateId}` : ''),
+        );
+      }
       onImported?.(result.databaseId ?? result.schemaTemplateId);
     },
   });
@@ -209,23 +235,23 @@ export function DatabaseImportPanel({
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     setScanResult(null);
-    if (replaceSchemaTemplateId && lockedSchemaName?.trim()) {
+    if (effectiveReplaceId && lockedSchemaName?.trim()) {
       setSchemaName(lockedSchemaName.trim());
     } else {
       setSchemaName('');
     }
-    if (replaceSchemaTemplateId && lockedCatalogDomain) {
+    if (effectiveReplaceId && lockedCatalogDomain) {
       setDomain(lockedCatalogDomain);
     } else {
       setDomain('');
     }
     setDatasetScale('');
-    if (replaceSchemaTemplateId && lockedDialect) {
+    if (effectiveReplaceId && lockedDialect) {
       setDialect(lockedDialect);
     } else {
       setDialect('postgresql');
     }
-    if (replaceSchemaTemplateId && lockedEngineVersion !== undefined) {
+    if (effectiveReplaceId && lockedEngineVersion !== undefined) {
       setEngineVersion(lockedEngineVersion?.trim() ?? '');
     } else {
       setEngineVersion('');
@@ -241,9 +267,9 @@ export function DatabaseImportPanel({
     [scanResult],
   );
 
-  const domainLocked = Boolean(replaceSchemaTemplateId && lockedCatalogDomain);
-  const dialectLocked = Boolean(replaceSchemaTemplateId && lockedDialect);
-  const engineVersionLocked = replaceSchemaTemplateId && lockedEngineVersion !== undefined;
+  const domainLocked = Boolean(effectiveReplaceId && lockedCatalogDomain);
+  const dialectLocked = Boolean(effectiveReplaceId && lockedDialect);
+  const engineVersionLocked = effectiveReplaceId && lockedEngineVersion !== undefined;
 
   const allowImport =
     Boolean(scanResult) &&
@@ -269,6 +295,26 @@ export function DatabaseImportPanel({
       .map((tag) => tag.trim())
       .filter(Boolean);
 
+    if (isUser) {
+      const invited = invitedUsers.map((u) => u.id);
+      const payload: UserSqlDumpImportPayload = {
+        scanId: scanResult.scanId,
+        schemaName: schemaName.trim(),
+        domain: domain || 'other',
+        datasetScale: datasetScale || undefined,
+        dialect,
+        ...(engineVersion.trim()
+          ? { engineVersion: engineVersion.trim() }
+          : {}),
+        description: description.trim() || undefined,
+        tags: normalizedTags.length ? normalizedTags : undefined,
+        visibility: dbVisibility,
+        ...(dbVisibility === 'private' && invited.length ? { invitedUserIds: invited } : {}),
+      };
+      importMutation.mutate(payload);
+      return;
+    }
+
     const payload: SqlDumpImportPayload = {
       scanId: scanResult.scanId,
       schemaName: schemaName.trim(),
@@ -280,20 +326,24 @@ export function DatabaseImportPanel({
         : {}),
       description: description.trim() || undefined,
       tags: normalizedTags.length ? normalizedTags : undefined,
-      ...(replaceSchemaTemplateId ? { replaceSchemaTemplateId } : {}),
+      ...(effectiveReplaceId ? { replaceSchemaTemplateId: effectiveReplaceId } : {}),
     };
 
     importMutation.mutate(payload);
   };
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
+    <section className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr,0.8fr]">
       <Card className="border border-outline-variant/10">
         <CardHeader className="flex-col items-start gap-3">
           <div className="flex w-full items-start justify-between gap-3">
             <div>
-              <CardTitle>SQL Import</CardTitle>
-              <CardDescription className="mt-1">Upload a .sql file, scan, then publish.</CardDescription>
+              <CardTitle>{isUser ? 'Import SQL database' : 'SQL Import'}</CardTitle>
+              <CardDescription className="mt-1">
+                {isUser
+                  ? 'Upload a .sql dump. Public submissions need admin approval before they appear in the catalog.'
+                  : 'Upload a .sql file, scan, then publish.'}
+              </CardDescription>
             </div>
             {onClose ? (
               <Button variant="ghost" size="sm" onClick={onClose}>
@@ -303,7 +353,7 @@ export function DatabaseImportPanel({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {replaceSchemaTemplateId ? (
+          {effectiveReplaceId ? (
             <p className="rounded-lg border border-secondary/30 bg-secondary/5 px-3 py-2 text-xs text-on-surface">
               New version replaces the default template; public catalog links stay the same.
             </p>
@@ -433,7 +483,7 @@ export function DatabaseImportPanel({
       <div className="space-y-4">
         <Card className="border border-outline-variant/10">
           <CardHeader className="flex-col items-start gap-2">
-            <CardTitle>Publish</CardTitle>
+            <CardTitle>{isUser ? 'Details & visibility' : 'Publish'}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <Input
@@ -441,7 +491,7 @@ export function DatabaseImportPanel({
               value={schemaName}
               onChange={(event) => setSchemaName(event.target.value)}
               placeholder="Enter schema name"
-              disabled={Boolean(replaceSchemaTemplateId && lockedSchemaName?.trim())}
+              disabled={Boolean(effectiveReplaceId && lockedSchemaName?.trim())}
             />
 
             <Select
@@ -496,8 +546,44 @@ export function DatabaseImportPanel({
               placeholder="Comma separated tags"
             />
 
+            {isUser ? (
+              <>
+                <Select
+                  label="Visibility"
+                  value={dbVisibility}
+                  onChange={(event) =>
+                    setDbVisibility(event.target.value as 'public' | 'private')
+                  }
+                  options={[
+                    {
+                      value: 'public',
+                      label: 'Public (pending admin review)',
+                    },
+                    {
+                      value: 'private',
+                      label: 'Private (yours immediately; optional invites)',
+                    },
+                  ]}
+                />
+                {dbVisibility === 'private' ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-on-surface-variant">
+                      Invite people <span className="font-normal text-on-surface-variant/80">(optional)</span>
+                    </p>
+                    <UserInviteMultiSelect value={invitedUsers} onChange={setInvitedUsers} />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
             <Button variant="primary" fullWidth onClick={handleImport} disabled={!allowImport}>
-              {importMutation.isPending ? 'Publishing…' : 'Publish'}
+              {importMutation.isPending
+                ? isUser
+                  ? 'Submitting…'
+                  : 'Publishing…'
+                : isUser
+                  ? 'Submit import'
+                  : 'Publish'}
             </Button>
 
             {importMutation.isError ? (

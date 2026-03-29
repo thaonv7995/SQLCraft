@@ -28,6 +28,7 @@ const SECTION_LABELS: Record<ConfigSectionKey, string> = {
   moderation: 'Submission Moderation',
   infrastructure: 'Workers & Storage',
   flags: 'Feature Flags',
+  userDatabases: 'User SQL uploads',
 };
 
 const FEATURE_FLAGS: FeatureFlagMeta[] = [
@@ -837,6 +838,40 @@ export function AdminConfigPanel() {
                       checked={currentConfig.infrastructure.enableNightlyExports}
                       onChange={(value) =>
                         updateSection('infrastructure', { enableNightlyExports: value })
+                      }
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="items-start gap-3 border-b border-outline-variant/10 sm:flex-row sm:items-center">
+                  <div>
+                    <CardTitle>User SQL uploads</CardTitle>
+                    <CardDescription>
+                      Per-user caps for private databases and public submissions awaiting review.
+                    </CardDescription>
+                  </div>
+                  <Badge className="bg-tertiary/10 text-tertiary">Limits</Badge>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Input
+                      label="Max private databases per user"
+                      value={currentConfig.userDatabases.maxPrivateDatabasesPerUser}
+                      onChange={(event) =>
+                        updateSection('userDatabases', {
+                          maxPrivateDatabasesPerUser: event.target.value,
+                        })
+                      }
+                    />
+                    <Input
+                      label="Max public DBs pending review per user"
+                      value={currentConfig.userDatabases.maxPublicDatabasesPendingReviewPerUser}
+                      onChange={(event) =>
+                        updateSection('userDatabases', {
+                          maxPublicDatabasesPendingReviewPerUser: event.target.value,
+                        })
                       }
                     />
                   </div>

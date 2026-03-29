@@ -7,9 +7,30 @@ import {
   changePasswordHandler,
   getMySessionsHandler,
   getMyQueryHistoryHandler,
+  searchUsersForInviteHandler,
 } from './users.handler';
 
 export default async function usersRouter(fastify: FastifyInstance): Promise<void> {
+  fastify.get<{ Querystring: Record<string, unknown> }>(
+    '/v1/users/invite-search',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Users'],
+        summary: 'Search active users to invite to private databases or challenges',
+        security: [{ bearerAuth: [] }],
+        querystring: {
+          type: 'object',
+          properties: {
+            q: { type: 'string', maxLength: 100 },
+            limit: { type: 'integer', minimum: 1, maximum: 30, default: 20 },
+          },
+        },
+      },
+    },
+    searchUsersForInviteHandler,
+  );
+
   fastify.get(
     '/v1/users/me',
     {

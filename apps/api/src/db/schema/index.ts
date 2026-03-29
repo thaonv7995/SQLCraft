@@ -222,12 +222,37 @@ export const schemaTemplates = pgTable(
     engineVersion: varchar('engine_version', { length: 64 }),
     definition: jsonb('definition').notNull(),
     status: contentStatusEnum('status').notNull().default('draft'),
+    visibility: challengeVisibilityEnum('visibility').notNull().default('public'),
+    reviewStatus: reviewStatusEnum('review_status').notNull().default('approved'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: timestamp('created_at').notNull().default(sql`now()`),
     updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
   },
   (table) => ({
     catalogAnchorIdx: index('schema_templates_catalog_anchor_idx').on(table.catalogAnchorId),
+  }),
+);
+
+export const schemaTemplateInvites = pgTable(
+  'schema_template_invites',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    schemaTemplateId: uuid('schema_template_id')
+      .notNull()
+      .references(() => schemaTemplates.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    schemaUserUidx: uniqueIndex('schema_template_invites_schema_user_uidx').on(
+      table.schemaTemplateId,
+      table.userId,
+    ),
+    schemaIdx: index('schema_template_invites_schema_idx').on(table.schemaTemplateId),
+    userIdx: index('schema_template_invites_user_idx').on(table.userId),
   }),
 );
 

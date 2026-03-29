@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
 import { getDb, schema } from '../../db';
 import {
@@ -23,7 +23,7 @@ import {
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
 import { toStoredRoleName } from '../../lib/roles';
-import { ConflictError, NotFoundError, ValidationError } from '../../lib/errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { enqueueDestroySandbox } from '../../lib/queue';
 import { resolvePublicAvatarUrl } from '../../lib/storage';
 import { DEFAULT_ADMIN_CONFIG } from './admin.schema';
@@ -32,12 +32,13 @@ import type {
   CreateAdminUserBody,
   CreateChallengeBody,
   ListUsersQuery,
+  SqlDumpScanImportBody,
+  UserImportSqlDumpDatabaseBody,
   UpdateAdminUserBody,
   UpdateUserStatusBody,
   UpdateUserRoleBody,
   ImportCanonicalDatabaseBody,
   DirectCanonicalDatabaseImportBody,
-  SqlDumpScanImportBody,
   ListSystemJobsQuery,
   ListAuditLogsQuery,
   ListPendingScansQuery,
@@ -64,6 +65,7 @@ import {
   createStoredSqlDumpScan,
   createStoredSqlDumpScanFromFile,
   loadStoredSqlDumpScan,
+  toSqlDumpScanResult,
 } from './sql-dump-scan';
 import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
@@ -512,12 +514,22 @@ export async function getSystemHealth(): Promise<SystemHealthResult> {
   };
 }
 
+function withMergedUserDatabasesConfig(config: AdminConfigBody): AdminConfigBody {
+  return {
+    ...config,
+    userDatabases: {
+      ...DEFAULT_ADMIN_CONFIG.userDatabases,
+      ...(config.userDatabases ?? {}),
+    },
+  };
+}
+
 export async function getAdminConfig(): Promise<AdminConfigResult> {
   const existing = await adminRepository.findAdminConfig(ADMIN_CONFIG_SCOPE);
   if (existing) {
     return {
       ...existing,
-      config: existing.config as AdminConfigBody,
+      config: withMergedUserDatabasesConfig(existing.config as AdminConfigBody),
     };
   }
 
@@ -588,6 +600,159 @@ function isSqlDumpScanImport(
   return 'scanId' in body;
 }
 
+function parsePositiveIntSetting(value: string | undefined, fallback: number): number {
+  const n = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+async function countUserPrivatePublishedDatabases(userId: string): Promise<number> {
+  const [row] = await getDb()
+    .select({ c: sql<number>`count(*)::int` })
+    .from(schema.schemaTemplates)
+    .where(
+      and(
+        eq(schema.schemaTemplates.createdBy, userId),
+        eq(schema.schemaTemplates.visibility, 'private'),
+        eq(schema.schemaTemplates.status, 'published'),
+        isNull(schema.schemaTemplates.replacedById),
+      ),
+    );
+  return row?.c ?? 0;
+}
+
+async function countUserPublicPendingReviewDatabases(userId: string): Promise<number> {
+  const [row] = await getDb()
+    .select({ c: sql<number>`count(*)::int` })
+    .from(schema.schemaTemplates)
+    .where(
+      and(
+        eq(schema.schemaTemplates.createdBy, userId),
+        eq(schema.schemaTemplates.visibility, 'public'),
+        eq(schema.schemaTemplates.status, 'draft'),
+        eq(schema.schemaTemplates.reviewStatus, 'pending'),
+        isNull(schema.schemaTemplates.replacedById),
+      ),
+    );
+  return row?.c ?? 0;
+}
+
+async function importCanonicalDatabaseFromSqlDumpScan(
+  userId: string,
+  body: SqlDumpScanImportBody,
+  persist: {
+    contentStatus: 'draft' | 'published';
+    replaceSchemaTemplateId?: string;
+    schemaVisibility: 'public' | 'private';
+    schemaReviewStatus: 'pending' | 'approved' | 'changes_requested' | 'rejected';
+    inviteUserIds?: string[];
+  },
+): Promise<ImportCanonicalDatabaseResult> {
+  const storedScan = await loadStoredSqlDumpScan(body.scanId);
+  if (!storedScan) {
+    throw new NotFoundError('SQL dump scan not found or has expired');
+  }
+
+  const tableNamesForRowCounts = storedScan.definition.tables.map((t) => t.name);
+  const rowCountsForImport = ensurePositiveDatasetRowCounts(
+    storedScan.rowCounts,
+    tableNamesForRowCounts,
+  );
+
+  const sourceScale =
+    body.datasetScale ??
+    storedScan.inferredScale ??
+    classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(rowCountsForImport));
+
+  const reviewedDialect = body.dialect ?? storedScan.inferredDialect ?? 'postgresql';
+  const reviewedEngineVersion =
+    body.engineVersion ?? storedScan.inferredEngineVersion ?? null;
+
+  const normalizedEngine = normalizeSchemaSqlEngine(reviewedDialect);
+  const isArtifactOnlyScan = Boolean(
+    storedScan.artifactOnly ?? storedScan.definition.metadata.artifactOnly,
+  );
+  const allowDerivedMaterialization =
+    normalizedEngine === 'postgresql' && !isArtifactOnlyScan;
+
+  let materializedDerivedDatasets:
+    | Array<{
+        size: 'tiny' | 'small' | 'medium' | 'large';
+        rowCounts: Record<string, number>;
+        artifactUrl: string;
+      }>
+    | undefined;
+
+  try {
+    if (allowDerivedMaterialization) {
+      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, rowCountsForImport);
+      if (requestedDerivedDatasets.length > 0) {
+        const [{ readFile, uploadFile }, { config }] = await Promise.all([
+          import('../../lib/storage'),
+          import('../../lib/config'),
+        ]);
+        const sourceSql = await readFile(storedScan.artifactObjectName);
+        const derivedArtifacts = materializeDerivedSqlDumpArtifacts({
+          sourceSql,
+          definition: storedScan.definition,
+          derivedDatasets: requestedDerivedDatasets,
+        });
+
+        materializedDerivedDatasets = (
+          await Promise.all(
+            derivedArtifacts.map(async (artifact) => {
+              const objectName = makeDerivedSqlArtifactObjectName(storedScan.scanId, artifact.size);
+              await uploadFile(objectName, artifact.buffer, 'application/gzip');
+              return {
+                size: artifact.size,
+                rowCounts: artifact.rowCounts,
+                artifactUrl: `s3://${config.STORAGE_BUCKET}/${objectName}`,
+              };
+            }),
+          )
+        ).filter((artifact) => sumDatasetRowCounts(artifact.rowCounts) > 0);
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to materialize derived SQL dump artifacts from scan import', {
+      scanId: storedScan.scanId,
+      error,
+    });
+  }
+
+  return persistCanonicalDatabaseImport(
+    userId,
+    {
+      name: body.schemaName,
+      description: body.description?.trim() || undefined,
+      definition: mergeDefinitionMetadata(storedScan.definition, {
+        reviewedDomain: body.domain,
+        reviewedScale: sourceScale,
+        reviewedDialect,
+        reviewedEngineVersion,
+        tags: body.tags ?? [],
+        scanId: storedScan.scanId,
+        sourceArtifactUrl: storedScan.artifactUrl,
+      }),
+      canonicalDataset: {
+        name: `${body.schemaName} Canonical`,
+        rowCounts: rowCountsForImport,
+        artifactUrl: storedScan.artifactUrl,
+      },
+      generateDerivedDatasets: allowDerivedMaterialization,
+      status: persist.contentStatus,
+      dialect: reviewedDialect,
+      engineVersion: reviewedEngineVersion,
+    },
+    {
+      materializedDerivedDatasets,
+      replaceSchemaTemplateId: persist.replaceSchemaTemplateId,
+      schemaVisibility: persist.schemaVisibility,
+      schemaReviewStatus: persist.schemaReviewStatus,
+      inviteUserIds: persist.inviteUserIds,
+    },
+  );
+}
+
 function mergeDefinitionMetadata(
   definition: Record<string, unknown>,
   metadata: Record<string, unknown>,
@@ -610,17 +775,24 @@ function makeDerivedSqlArtifactObjectName(scanId: string, size: 'tiny' | 'small'
   return `admin/sql-dumps/${scanId}/derived/${size}.sql.gz`;
 }
 
+export type PersistCanonicalDatabaseImportOptions = {
+  materializedDerivedDatasets?: Array<{
+    size: 'tiny' | 'small' | 'medium' | 'large';
+    rowCounts: Record<string, number>;
+    artifactUrl: string;
+  }>;
+  replaceSchemaTemplateId?: string;
+  /** User-uploaded DB visibility / review (defaults: public + approved). */
+  schemaVisibility?: 'public' | 'private';
+  schemaReviewStatus?: 'pending' | 'approved' | 'changes_requested' | 'rejected';
+  /** For private templates: users who may use this database in challenges / sessions. */
+  inviteUserIds?: string[];
+};
+
 async function persistCanonicalDatabaseImport(
   userId: string,
   body: DirectCanonicalDatabaseImportBody,
-  options?: {
-    materializedDerivedDatasets?: Array<{
-      size: 'tiny' | 'small' | 'medium' | 'large';
-      rowCounts: Record<string, number>;
-      artifactUrl: string;
-    }>;
-    replaceSchemaTemplateId?: string;
-  },
+  options?: PersistCanonicalDatabaseImportOptions,
 ): Promise<ImportCanonicalDatabaseResult> {
   const normalizedRowCounts = normalizeDatasetRowCounts(body.canonicalDataset.rowCounts);
   const sourceTotalRows = sumDatasetRowCounts(normalizedRowCounts);
@@ -676,12 +848,24 @@ async function persistCanonicalDatabaseImport(
         engineVersion: body.engineVersion ?? null,
         definition: body.definition,
         status: body.status,
+        visibility: options?.schemaVisibility ?? 'public',
+        reviewStatus: options?.schemaReviewStatus ?? 'approved',
         createdBy: userId,
       })
       .returning();
 
     if (!schemaTemplate) {
       throw new ValidationError('Failed to create schema template');
+    }
+
+    if (options?.inviteUserIds?.length) {
+      await tx.insert(schema.schemaTemplateInvites).values(
+        options.inviteUserIds.map((invitedUserId) => ({
+          schemaTemplateId: newSchemaId,
+          userId: invitedUserId,
+          invitedBy: userId,
+        })),
+      );
     }
 
     if (replaceHead) {
@@ -805,7 +989,7 @@ async function persistCanonicalDatabaseImport(
 export async function scanSqlDump(
   fileName: string,
   buffer: Buffer,
-  options?: { artifactOnly?: boolean },
+  options?: { artifactOnly?: boolean; uploadingUserId?: string },
 ): Promise<SqlDumpScanResult> {
   if (!/\.sql$/i.test(fileName)) {
     throw new ValidationError('Only .sql dump files are supported');
@@ -819,7 +1003,7 @@ export async function scanSqlDumpFromUploadedFile(
   fileName: string,
   filePath: string,
   byteSize: number,
-  options?: { artifactOnly?: boolean },
+  options?: { artifactOnly?: boolean; uploadingUserId?: string },
 ): Promise<SqlDumpScanResult> {
   if (!/\.sql$/i.test(fileName)) {
     throw new ValidationError('Only .sql dump files are supported');
@@ -840,6 +1024,19 @@ export async function getAdminSqlDumpScan(scanId: string): Promise<SqlDumpScanRe
   return result;
 }
 
+/** End-user: scan metadata only if the authenticated user created the scan (upload session or multipart). */
+export async function getSqlDumpScanForUser(scanId: string, userId: string): Promise<SqlDumpScanResult> {
+  const stored = await loadStoredSqlDumpScan(scanId);
+  if (!stored) {
+    throw new NotFoundError('SQL dump scan not found or has expired');
+  }
+  const owner = stored.definition.metadata.uploadedByUserId;
+  if (!owner || owner !== userId) {
+    throw new ForbiddenError('You do not have access to this SQL dump scan');
+  }
+  return toSqlDumpScanResult(stored);
+}
+
 export async function importCanonicalDatabase(
   userId: string,
   body: ImportCanonicalDatabaseBody,
@@ -851,105 +1048,158 @@ export async function importCanonicalDatabase(
     return persistCanonicalDatabaseImport(userId, body, { replaceSchemaTemplateId });
   }
 
-  const storedScan = await loadStoredSqlDumpScan(body.scanId);
-  if (!storedScan) {
+  return importCanonicalDatabaseFromSqlDumpScan(userId, body, {
+    contentStatus: 'published',
+    replaceSchemaTemplateId,
+    schemaVisibility: 'public',
+    schemaReviewStatus: 'approved',
+  });
+}
+
+export async function importUserDatabaseFromSqlDumpScan(
+  userId: string,
+  body: UserImportSqlDumpDatabaseBody,
+): Promise<ImportCanonicalDatabaseResult> {
+  const storedForOwnership = await loadStoredSqlDumpScan(body.scanId);
+  if (!storedForOwnership) {
     throw new NotFoundError('SQL dump scan not found or has expired');
   }
+  const scanOwner = storedForOwnership.definition.metadata.uploadedByUserId;
+  if (!scanOwner || scanOwner !== userId) {
+    throw new ForbiddenError('You can only import databases from your own SQL dump upload.');
+  }
 
-  const tableNamesForRowCounts = storedScan.definition.tables.map((t) => t.name);
-  const rowCountsForImport = ensurePositiveDatasetRowCounts(
-    storedScan.rowCounts,
-    tableNamesForRowCounts,
+  const cfg = await getAdminConfig();
+  const maxPrivate = parsePositiveIntSetting(
+    cfg.config.userDatabases.maxPrivateDatabasesPerUser,
+    10,
+  );
+  const maxPublicPending = parsePositiveIntSetting(
+    cfg.config.userDatabases.maxPublicDatabasesPendingReviewPerUser,
+    3,
   );
 
-  const sourceScale =
-    body.datasetScale ??
-    storedScan.inferredScale ??
-    classifyDatasetScaleFromTotalRows(sumDatasetRowCounts(rowCountsForImport));
-
-  const reviewedDialect = body.dialect ?? storedScan.inferredDialect ?? 'postgresql';
-  const reviewedEngineVersion =
-    body.engineVersion ?? storedScan.inferredEngineVersion ?? null;
-
-  const normalizedEngine = normalizeSchemaSqlEngine(reviewedDialect);
-  const isArtifactOnlyScan = Boolean(
-    storedScan.artifactOnly ?? storedScan.definition.metadata.artifactOnly,
-  );
-  const allowDerivedMaterialization =
-    normalizedEngine === 'postgresql' && !isArtifactOnlyScan;
-
-  let materializedDerivedDatasets:
-    | Array<{
-        size: 'tiny' | 'small' | 'medium' | 'large';
-        rowCounts: Record<string, number>;
-        artifactUrl: string;
-      }>
-    | undefined;
-
-  try {
-    if (allowDerivedMaterialization) {
-      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, rowCountsForImport);
-      if (requestedDerivedDatasets.length > 0) {
-        const [{ readFile, uploadFile }, { config }] = await Promise.all([
-          import('../../lib/storage'),
-          import('../../lib/config'),
-        ]);
-        const sourceSql = await readFile(storedScan.artifactObjectName);
-        const derivedArtifacts = materializeDerivedSqlDumpArtifacts({
-          sourceSql,
-          definition: storedScan.definition,
-          derivedDatasets: requestedDerivedDatasets,
-        });
-
-        materializedDerivedDatasets = (
-          await Promise.all(
-            derivedArtifacts.map(async (artifact) => {
-              const objectName = makeDerivedSqlArtifactObjectName(storedScan.scanId, artifact.size);
-              await uploadFile(objectName, artifact.buffer, 'application/gzip');
-              return {
-                size: artifact.size,
-                rowCounts: artifact.rowCounts,
-                artifactUrl: `s3://${config.STORAGE_BUCKET}/${objectName}`,
-              };
-            }),
-          )
-        ).filter((artifact) => sumDatasetRowCounts(artifact.rowCounts) > 0);
-      }
+  if (body.visibility === 'private') {
+    const current = await countUserPrivatePublishedDatabases(userId);
+    if (current >= maxPrivate) {
+      throw new ValidationError(
+        `You already have ${maxPrivate} private database(s) (platform limit). Remove or archive one before uploading another.`,
+      );
     }
-  } catch (error) {
-    console.warn('Failed to materialize derived SQL dump artifacts from scan import', {
-      scanId: storedScan.scanId,
-      error,
+    const invitees = await validatePrivateInviteUserIds('private', body.invitedUserIds, userId);
+    return importCanonicalDatabaseFromSqlDumpScan(userId, body, {
+      contentStatus: 'published',
+      schemaVisibility: 'private',
+      schemaReviewStatus: 'approved',
+      inviteUserIds: invitees,
     });
   }
 
-  return persistCanonicalDatabaseImport(
-    userId,
-    {
-      name: body.schemaName,
-      description: body.description?.trim() || undefined,
-      definition: mergeDefinitionMetadata(storedScan.definition, {
-        reviewedDomain: body.domain,
-        reviewedScale: sourceScale,
-        reviewedDialect,
-        reviewedEngineVersion,
-        tags: body.tags ?? [],
-        scanId: storedScan.scanId,
-        sourceArtifactUrl: storedScan.artifactUrl,
-      }),
-      canonicalDataset: {
-        name: `${body.schemaName} Canonical`,
-        rowCounts: rowCountsForImport,
-        artifactUrl: storedScan.artifactUrl,
-      },
-      generateDerivedDatasets: allowDerivedMaterialization,
-      status: 'published',
-      dialect: reviewedDialect,
-      engineVersion: reviewedEngineVersion,
-    },
-    {
-      materializedDerivedDatasets,
-      replaceSchemaTemplateId,
-    },
-  );
+  const pending = await countUserPublicPendingReviewDatabases(userId);
+  if (pending >= maxPublicPending) {
+    throw new ValidationError(
+      `You already have ${maxPublicPending} public database(s) awaiting review. Wait for moderation or use a private upload with invites.`,
+    );
+  }
+
+  return importCanonicalDatabaseFromSqlDumpScan(userId, body, {
+    contentStatus: 'draft',
+    schemaVisibility: 'public',
+    schemaReviewStatus: 'pending',
+  });
+}
+
+export async function listPendingSchemaTemplatesForReview(): Promise<
+  Array<{
+    id: string;
+    catalogAnchorId: string;
+    name: string;
+    description: string | null;
+    dialect: string;
+    createdBy: string | null;
+    createdAt: Date;
+  }>
+> {
+  return getDb()
+    .select({
+      id: schema.schemaTemplates.id,
+      catalogAnchorId: schema.schemaTemplates.catalogAnchorId,
+      name: schema.schemaTemplates.name,
+      description: schema.schemaTemplates.description,
+      dialect: schema.schemaTemplates.dialect,
+      createdBy: schema.schemaTemplates.createdBy,
+      createdAt: schema.schemaTemplates.createdAt,
+    })
+    .from(schema.schemaTemplates)
+    .where(
+      and(
+        eq(schema.schemaTemplates.visibility, 'public'),
+        eq(schema.schemaTemplates.status, 'draft'),
+        eq(schema.schemaTemplates.reviewStatus, 'pending'),
+        isNull(schema.schemaTemplates.replacedById),
+      ),
+    )
+    .orderBy(desc(schema.schemaTemplates.createdAt));
+}
+
+export async function approveSchemaTemplateReview(
+  schemaTemplateId: string,
+  _reviewerId: string,
+): Promise<void> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: schema.schemaTemplates.id })
+    .from(schema.schemaTemplates)
+    .where(
+      and(
+        eq(schema.schemaTemplates.id, schemaTemplateId),
+        eq(schema.schemaTemplates.visibility, 'public'),
+        eq(schema.schemaTemplates.status, 'draft'),
+        eq(schema.schemaTemplates.reviewStatus, 'pending'),
+        isNull(schema.schemaTemplates.replacedById),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new NotFoundError('Pending public database not found');
+  }
+
+  const now = new Date();
+  await db
+    .update(schema.schemaTemplates)
+    .set({ status: 'published', reviewStatus: 'approved', updatedAt: now })
+    .where(eq(schema.schemaTemplates.id, schemaTemplateId));
+
+  await db
+    .update(schema.datasetTemplates)
+    .set({ status: 'published' })
+    .where(eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId));
+}
+
+export async function rejectSchemaTemplateReview(schemaTemplateId: string): Promise<void> {
+  const db = getDb();
+  const [row] = await db
+    .select({ id: schema.schemaTemplates.id })
+    .from(schema.schemaTemplates)
+    .where(
+      and(
+        eq(schema.schemaTemplates.id, schemaTemplateId),
+        eq(schema.schemaTemplates.visibility, 'public'),
+        eq(schema.schemaTemplates.status, 'draft'),
+        eq(schema.schemaTemplates.reviewStatus, 'pending'),
+        isNull(schema.schemaTemplates.replacedById),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new NotFoundError('Pending public database not found');
+  }
+
+  const now = new Date();
+  await db
+    .update(schema.schemaTemplates)
+    .set({ reviewStatus: 'rejected', updatedAt: now })
+    .where(eq(schema.schemaTemplates.id, schemaTemplateId));
 }

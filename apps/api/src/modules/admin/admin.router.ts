@@ -40,6 +40,9 @@ import {
   scanSqlDumpHandler,
   listPendingScansHandler,
   getSqlDumpScanHandler,
+  listPendingSchemaTemplatesForReviewHandler,
+  approveSchemaTemplateReviewHandler,
+  rejectSchemaTemplateReviewHandler,
   updateAdminConfigHandler,
   createSqlDumpUploadSessionHandler,
   presignSqlDumpUploadPartHandler,
@@ -366,6 +369,55 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     getSqlDumpScanHandler,
+  );
+
+  fastify.get(
+    '/v1/admin/databases/schema-templates/pending-review',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List user-uploaded public databases awaiting moderation',
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    listPendingSchemaTemplatesForReviewHandler,
+  );
+
+  fastify.post<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/schema-templates/:id/approve-review',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Approve a pending public user database and publish it to the catalog',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    approveSchemaTemplateReviewHandler,
+  );
+
+  fastify.post<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/schema-templates/:id/reject-review',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Reject a pending public user database review',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    rejectSchemaTemplateReviewHandler,
   );
 
   fastify.post<{ Body: CreateSqlDumpUploadSessionBody }>(

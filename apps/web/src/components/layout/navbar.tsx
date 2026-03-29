@@ -16,6 +16,7 @@ function isAdminUser(user: User): boolean {
 function buildUserMenuItems(user: User) {
   const items: { href: string; label: string; icon: string }[] = [
     { href: '/profile', label: 'Profile', icon: 'person' },
+    { href: '/explore?import=1', label: 'Import database', icon: 'upload_file' },
     { href: '/settings', label: 'Settings', icon: 'settings' },
     { href: '/docs', label: 'Documentation', icon: 'menu_book' },
     { href: '/history', label: 'Query History', icon: 'history' },

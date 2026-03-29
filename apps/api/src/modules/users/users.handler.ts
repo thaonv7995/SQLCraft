@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, MESSAGES } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
 import type { UpdateProfileBody, PaginationQuery, ChangePasswordBody } from './users.schema';
+import { InviteSearchQuerySchema } from './users.schema';
 import {
   getUserProfile,
   updateUserProfile,
@@ -9,6 +10,7 @@ import {
   changePassword,
   getUserSessions,
   getUserQueryHistory,
+  searchUsersForInvite,
 } from './users.service';
 
 export async function getMeHandler(
@@ -76,4 +78,14 @@ export async function getMyQueryHistoryHandler(
   const { page, limit } = request.query;
   const result = await getUserQueryHistory(jwtUser.sub, page, limit);
   reply.send(success(result, MESSAGES.QUERY_HISTORY_RETRIEVED));
+}
+
+export async function searchUsersForInviteHandler(
+  request: FastifyRequest<{ Querystring: Record<string, unknown> }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const jwtUser = request.user as JwtPayload;
+  const query = InviteSearchQuerySchema.parse(request.query);
+  const result = await searchUsersForInvite(jwtUser.sub, query);
+  reply.send(success(result, MESSAGES.USERS_RETRIEVED));
 }

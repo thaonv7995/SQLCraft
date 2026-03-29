@@ -816,6 +816,11 @@ export interface AdminConfig {
     explanationPanel: boolean;
     snapshotExports: boolean;
   };
+  /** Limits for end-user SQL dump uploads (enforced server-side). */
+  userDatabases: {
+    maxPrivateDatabasesPerUser: string;
+    maxPublicDatabasesPendingReviewPerUser: string;
+  };
 }
 
 export interface AdminConfigRecord {
@@ -1069,6 +1074,30 @@ export interface SqlDumpImportPayload {
   engineVersion?: string | null;
   /** When set, publish as a new version of this catalog database (stable URL id unchanged). */
   replaceSchemaTemplateId?: string;
+}
+
+/** POST /v1/databases/import-from-scan — public awaits admin review; private publishes with optional invites. */
+export interface UserSqlDumpImportPayload {
+  scanId: string;
+  schemaName: string;
+  domain: DatabaseDomain;
+  datasetScale?: DatasetScale | null;
+  description?: string | null;
+  tags?: string[];
+  dialect?: SchemaSqlDialect;
+  engineVersion?: string | null;
+  visibility?: 'public' | 'private';
+  invitedUserIds?: string[];
+}
+
+export interface PendingSchemaTemplateReviewItem {
+  id: string;
+  catalogAnchorId: string;
+  name: string;
+  description: string | null;
+  dialect: string;
+  createdBy: string | null;
+  createdAt: string;
 }
 
 export interface SqlDumpImportResult {
@@ -1853,7 +1882,20 @@ export interface AdminUpdateUserPayload {
   status?: 'active' | 'disabled' | 'invited';
 }
 
+/** Row from GET /v1/users/invite-search — pick users for private invites. */
+export interface InviteUserSearchItem {
+  id: string;
+  username: string;
+  displayName: string | null;
+}
+
 export const usersApi = {
+  /** Authed: search active users (excludes you) for private DB/challenge invites. */
+  searchForInvite: (params?: { q?: string; limit?: number }) =>
+    api
+      .get<{ items: InviteUserSearchItem[] }>('/users/invite-search', { params })
+      .then((r) => r.data.items),
+
   // Admin-only: list all users
   list: (params?: { search?: string; role?: UserRole; status?: string; page?: number }) =>
     api
@@ -2037,6 +2079,25 @@ export const adminApi = {
       .delete<DeleteDatabaseResult>(`/admin/databases/${databaseId}`)
       .then((r) => r.data),
 
+  listPendingSchemaTemplateReviews: () =>
+    api
+      .get<PendingSchemaTemplateReviewItem[]>('/admin/databases/schema-templates/pending-review')
+      .then((r) => r.data),
+
+  approveSchemaTemplateReview: (schemaTemplateId: string) =>
+    api
+      .post<{ ok: boolean }>(
+        `/admin/databases/schema-templates/${schemaTemplateId}/approve-review`,
+      )
+      .then((r) => r.data),
+
+  rejectSchemaTemplateReview: (schemaTemplateId: string) =>
+    api
+      .post<{ ok: boolean }>(
+        `/admin/databases/schema-templates/${schemaTemplateId}/reject-review`,
+      )
+      .then((r) => r.data),
+
   createChallenge: (payload: AdminCreateChallengePayload) =>
     api.post<AdminCreateChallengeResult>('/admin/challenges', payload).then((r) => r.data),
 
@@ -2077,12 +2138,14 @@ export const adminApi = {
 
 // ─── Databases API ────────────────────────────────────────────────────────────
 
+/** `prefix` is `/admin/databases` or `/databases` (authenticated user uploads). */
 async function scanSqlDumpViaPresignedStorage(
   file: File,
-  options?: { artifactOnly?: boolean },
+  options: { artifactOnly?: boolean; prefix: string },
 ): Promise<SqlDumpScanResult> {
+  const { prefix } = options;
   const session = await api
-    .post<SqlDumpDirectUploadSessionCreateResult>('/admin/databases/sql-dump-upload-sessions', {
+    .post<SqlDumpDirectUploadSessionCreateResult>(`${prefix}/sql-dump-upload-sessions`, {
       fileName: file.name || 'dump.sql',
       byteSize: file.size,
       artifactOnly: options?.artifactOnly,
@@ -2090,7 +2153,7 @@ async function scanSqlDumpViaPresignedStorage(
     .then((r) => r.data);
 
   const abort = () =>
-    api.post(`/admin/databases/sql-dump-upload-sessions/${session.sessionId}/abort`, {}).catch(() => undefined);
+    api.post(`${prefix}/sql-dump-upload-sessions/${session.sessionId}/abort`, {}).catch(() => undefined);
 
   if (session.mode === 'single') {
     const putRes = await fetch(session.putUrl, {
@@ -2104,7 +2167,7 @@ async function scanSqlDumpViaPresignedStorage(
     }
     return api
       .post<SqlDumpScanResult>(
-        `/admin/databases/sql-dump-upload-sessions/${session.sessionId}/complete`,
+        `${prefix}/sql-dump-upload-sessions/${session.sessionId}/complete`,
         {},
         { timeout: 600_000 },
       )
@@ -2119,7 +2182,7 @@ async function scanSqlDumpViaPresignedStorage(
     const blob = file.slice(start, end);
     const { url } = await api
       .post<SqlDumpUploadPresignPartResult>(
-        `/admin/databases/sql-dump-upload-sessions/${sessionId}/presign-part`,
+        `${prefix}/sql-dump-upload-sessions/${sessionId}/presign-part`,
         { partNumber: p },
         { timeout: 120_000 },
       )
@@ -2141,7 +2204,7 @@ async function scanSqlDumpViaPresignedStorage(
 
   return api
     .post<SqlDumpScanResult>(
-      `/admin/databases/sql-dump-upload-sessions/${sessionId}/complete`,
+      `${prefix}/sql-dump-upload-sessions/${sessionId}/complete`,
       { parts },
       { timeout: 600_000 },
     )
@@ -2158,6 +2221,8 @@ export const databasesApi = {
     q?: string;
     page?: number;
     limit?: number;
+    /** Requires auth: include your private DBs and those you are invited to (challenge authoring). */
+    forChallengeAuthoring?: boolean;
   }) =>
     api
       .get<PaginatedResponse<Database>>('/databases', { params })
@@ -2166,8 +2231,12 @@ export const databasesApi = {
         items: r.data.items.map(normalizeDatabase),
       })),
 
-  get: (id: string) =>
-    api.get<Database>(`/databases/${id}`).then((r) => normalizeDatabase(r.data)),
+  get: (id: string, opts?: { forChallengeAuthoring?: boolean }) =>
+    api
+      .get<Database>(`/databases/${id}`, {
+        params: opts?.forChallengeAuthoring ? { forChallengeAuthoring: true } : undefined,
+      })
+      .then((r) => normalizeDatabase(r.data)),
 
   createSession: (databaseId: string, scale?: DatabaseScale) =>
     api
@@ -2179,7 +2248,7 @@ export const databasesApi = {
 
   scanSqlDump: (file: File, options?: { artifactOnly?: boolean }) => {
     if (file.size >= SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES) {
-      return scanSqlDumpViaPresignedStorage(file, options);
+      return scanSqlDumpViaPresignedStorage(file, { ...options, prefix: '/admin/databases' });
     }
     const form = new FormData();
     form.append('dump', file);
@@ -2193,6 +2262,32 @@ export const databasesApi = {
       })
       .then((r) => r.data);
   },
+
+  /** Current user: scan then POST import-from-scan (visibility / invites). */
+  userScanSqlDump: (file: File, options?: { artifactOnly?: boolean }) => {
+    if (file.size >= SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES) {
+      return scanSqlDumpViaPresignedStorage(file, { ...options, prefix: '/databases' });
+    }
+    const form = new FormData();
+    form.append('dump', file);
+    if (options?.artifactOnly) {
+      form.append('artifactOnly', 'true');
+    }
+    return api
+      .post<SqlDumpScanResult>('/databases/scan', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 600_000,
+      })
+      .then((r) => r.data);
+  },
+
+  userImportFromScan: (payload: UserSqlDumpImportPayload) =>
+    api
+      .post<SqlDumpImportResult>('/databases/import-from-scan', payload)
+      .then((r) => normalizeSqlDumpImportResult(r.data)),
+
+  userGetSqlDumpScan: (scanId: string) =>
+    api.get<SqlDumpScanResult>(`/databases/scans/${scanId}`).then((r) => r.data),
 
   importFromScan: (payload: SqlDumpImportPayload) =>
     api

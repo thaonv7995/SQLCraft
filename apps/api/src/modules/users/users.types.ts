@@ -60,3 +60,9 @@ export interface PaginatedResult<T> {
     limit: number;
   };
 }
+
+export interface InviteUserSearchItem {
+  id: string;
+  username: string;
+  displayName: string | null;
+}

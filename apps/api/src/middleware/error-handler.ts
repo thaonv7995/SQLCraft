@@ -54,7 +54,8 @@ export function errorHandler(
   ) {
     request.log.warn({ err: error }, 'Multipart upload rejected');
     const path = (request.url ?? '').split('?')[0];
-    const isSqlDumpScan = path.includes('/admin/databases/scan');
+    const isSqlDumpScan =
+      path.includes('/admin/databases/scan') || path.includes('/v1/databases/scan');
     const isAvatar = path.includes('/users/me/avatar');
     let message: string;
     if (isSqlDumpScan) {

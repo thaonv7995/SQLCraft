@@ -1,9 +1,9 @@
 import type { SchemaSqlDialect } from '@sqlcraft/types';
 import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
 import { sessionsRepository } from '../../db/repositories';
-import { NotFoundError, ValidationError } from '../../lib/errors';
+import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { inferDatabaseDomain } from '../../lib/infer-database-domain';
 import { enqueueProvisionSandbox } from '../../lib/queue';
 import { databaseMatchesListQuery } from './databases.filters';
@@ -284,6 +284,85 @@ function buildDatabaseItem(
   };
 }
 
+async function findSchemaTemplateHeadRow(
+  databaseId: string,
+): Promise<SchemaTemplateRow | null> {
+  const db = getDb();
+  const [direct] = await db
+    .select()
+    .from(dbSchema.schemaTemplates)
+    .where(eq(dbSchema.schemaTemplates.id, databaseId))
+    .limit(1);
+  if (!direct) {
+    return null;
+  }
+  const anchor = direct.catalogAnchorId;
+  const [head] = await db
+    .select()
+    .from(dbSchema.schemaTemplates)
+    .where(
+      and(
+        eq(dbSchema.schemaTemplates.catalogAnchorId, anchor),
+        isNull(dbSchema.schemaTemplates.replacedById),
+      ),
+    )
+    .limit(1);
+  if (head) {
+    return head;
+  }
+  return direct.replacedById ? null : direct;
+}
+
+/** Ensures the schema template exists, is published, and the user may build challenges on it. */
+export async function assertSchemaTemplateUsableForUserChallenge(
+  userId: string,
+  databaseId: string,
+  opts: { isAdmin?: boolean } = {},
+): Promise<void> {
+  const head = await findSchemaTemplateHeadRow(databaseId);
+  if (!head) {
+    throw new NotFoundError('Database not found');
+  }
+
+  if (opts.isAdmin) {
+    if (head.status !== 'published') {
+      throw new ValidationError('Database is not published.');
+    }
+    return;
+  }
+
+  if (head.status !== 'published') {
+    throw new ValidationError('Database is not published or is still awaiting review.');
+  }
+
+  if (head.visibility === 'public') {
+    if (head.reviewStatus !== 'approved') {
+      throw new ValidationError('This public database is not approved for use yet.');
+    }
+    return;
+  }
+
+  if (head.createdBy === userId) {
+    return;
+  }
+
+  const db = getDb();
+  const [inv] = await db
+    .select({ id: dbSchema.schemaTemplateInvites.id })
+    .from(dbSchema.schemaTemplateInvites)
+    .where(
+      and(
+        eq(dbSchema.schemaTemplateInvites.schemaTemplateId, head.id),
+        eq(dbSchema.schemaTemplateInvites.userId, userId),
+      ),
+    )
+    .limit(1);
+
+  if (!inv) {
+    throw new ForbiddenError('You do not have access to this private database.');
+  }
+}
+
 async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
   const db = getDb();
 
@@ -295,6 +374,8 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
         and(
           eq(dbSchema.schemaTemplates.status, 'published'),
           isNull(dbSchema.schemaTemplates.replacedById),
+          eq(dbSchema.schemaTemplates.visibility, 'public'),
+          eq(dbSchema.schemaTemplates.reviewStatus, 'approved'),
         ),
       )
       .orderBy(
@@ -325,6 +406,70 @@ async function loadDatabaseCatalog(): Promise<DatabaseItem[]> {
   );
 }
 
+async function loadChallengeAuthoringCatalog(viewerUserId: string): Promise<DatabaseItem[]> {
+  const publicItems = await loadDatabaseCatalog();
+  const db = getDb();
+  const inviteRows = await db
+    .select({ sid: dbSchema.schemaTemplateInvites.schemaTemplateId })
+    .from(dbSchema.schemaTemplateInvites)
+    .where(eq(dbSchema.schemaTemplateInvites.userId, viewerUserId));
+  const inviteIds = [...new Set(inviteRows.map((r) => r.sid))];
+
+  const accessCond =
+    inviteIds.length > 0
+      ? or(
+          eq(dbSchema.schemaTemplates.createdBy, viewerUserId),
+          inArray(dbSchema.schemaTemplates.id, inviteIds),
+        )
+      : eq(dbSchema.schemaTemplates.createdBy, viewerUserId);
+
+  const privateTemplates = await db
+    .select()
+    .from(dbSchema.schemaTemplates)
+    .where(
+      and(
+        eq(dbSchema.schemaTemplates.status, 'published'),
+        isNull(dbSchema.schemaTemplates.replacedById),
+        eq(dbSchema.schemaTemplates.visibility, 'private'),
+        accessCond,
+      ),
+    );
+
+  if (privateTemplates.length === 0) {
+    return publicItems;
+  }
+
+  const privateIds = privateTemplates.map((t) => t.id);
+  const privateDatasets = await db
+    .select()
+    .from(dbSchema.datasetTemplates)
+    .where(
+      and(
+        inArray(dbSchema.datasetTemplates.schemaTemplateId, privateIds),
+        eq(dbSchema.datasetTemplates.status, 'published'),
+      ),
+    )
+    .orderBy(desc(dbSchema.datasetTemplates.createdAt));
+
+  const datasetsBySchema = privateDatasets.reduce<Record<string, Record<string, DatasetTemplateRow>>>(
+    (acc, dataset) => {
+      const bucket = acc[dataset.schemaTemplateId] ?? {};
+      if (!bucket[dataset.size]) {
+        bucket[dataset.size] = dataset;
+      }
+      acc[dataset.schemaTemplateId] = bucket;
+      return acc;
+    },
+    {},
+  );
+
+  const privateItems = privateTemplates.map((template) =>
+    buildDatabaseItem(template, Object.values(datasetsBySchema[template.id] ?? {})),
+  );
+
+  return [...publicItems, ...privateItems];
+}
+
 async function findDatasetForSchema(
   schemaTemplateId: string,
   requestedScale: DatabaseScale,
@@ -347,8 +492,12 @@ async function findDatasetForSchema(
 
 export async function listDatabases(
   query: ListDatabasesQuery,
+  viewerUserId?: string | null,
 ): Promise<PaginatedDatabasesResult> {
-  const catalog = await loadDatabaseCatalog();
+  const catalog =
+    query.forChallengeAuthoring && viewerUserId
+      ? await loadChallengeAuthoringCatalog(viewerUserId)
+      : await loadDatabaseCatalog();
   const filtered = catalog.filter((database) => databaseMatchesListQuery(database, query));
 
   const offset = (query.page - 1) * query.limit;
@@ -363,8 +512,14 @@ export async function listDatabases(
   };
 }
 
-export async function getDatabase(databaseId: string): Promise<DatabaseItem> {
-  const catalog = await loadDatabaseCatalog();
+export async function getDatabase(
+  databaseId: string,
+  opts?: { forChallengeAuthoring?: boolean; viewerUserId?: string | null },
+): Promise<DatabaseItem> {
+  const catalog =
+    opts?.forChallengeAuthoring && opts.viewerUserId
+      ? await loadChallengeAuthoringCatalog(opts.viewerUserId)
+      : await loadDatabaseCatalog();
   const database = catalog.find((item) => item.id === databaseId || item.slug === databaseId);
 
   if (!database) {
@@ -378,7 +533,12 @@ export async function createDatabaseSession(
   userId: string,
   body: CreateDatabaseSessionBody,
 ): Promise<CreateDatabaseSessionResult> {
-  const database = await getDatabase(body.databaseId);
+  const catalog = await loadChallengeAuthoringCatalog(userId);
+  const database = catalog.find((item) => item.id === body.databaseId || item.slug === body.databaseId);
+
+  if (!database) {
+    throw new NotFoundError('Database not found');
+  }
   const sourceScale = database.sourceScale ?? database.scale;
   const requestedScale = body.scale ?? sourceScale;
 

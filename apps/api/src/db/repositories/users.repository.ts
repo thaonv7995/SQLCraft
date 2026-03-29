@@ -1,4 +1,4 @@
-import { eq, and, isNull, desc, ilike, or, sql, count, gte } from 'drizzle-orm';
+import { eq, and, ne, asc, isNull, desc, ilike, or, sql, count, gte } from 'drizzle-orm';
 import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { getDb, schema } from '../index';
 import { queriesSubmittedSince } from '../../lib/user-stats';
@@ -238,6 +238,41 @@ export class UsersRepository {
 
     const items = rows.map((r) => ({ ...r, roles: rolesMap[r.id] ?? [] }));
     return { items, total: countRows[0]?.total ?? 0 };
+  }
+
+  /**
+   * Active users eligible to receive private invites (excludes caller). Optional `q` (min 2 chars)
+   * filters by email, username, or display name; otherwise returns an alphabetical browse window.
+   */
+  async searchUsersForInvite(
+    excludeUserId: string,
+    opts: { q?: string; limit: number },
+  ): Promise<Array<{ id: string; username: string; displayName: string | null }>> {
+    const cap = Math.min(Math.max(opts.limit, 1), 30);
+    const q = opts.q?.trim();
+    const base = and(eq(schema.users.status, 'active'), ne(schema.users.id, excludeUserId));
+    const where =
+      q && q.length >= 2
+        ? and(
+            base,
+            or(
+              ilike(schema.users.email, `%${q}%`),
+              ilike(schema.users.username, `%${q}%`),
+              ilike(schema.users.displayName, `%${q}%`),
+            ),
+          )
+        : base;
+
+    return this.db
+      .select({
+        id: schema.users.id,
+        username: schema.users.username,
+        displayName: schema.users.displayName,
+      })
+      .from(schema.users)
+      .where(where)
+      .orderBy(asc(schema.users.username))
+      .limit(cap);
   }
 
   async getUserStats(userId: string): Promise<{

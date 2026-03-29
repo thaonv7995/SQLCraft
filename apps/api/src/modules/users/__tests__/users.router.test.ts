@@ -14,6 +14,7 @@ const usersServiceMocks = vi.hoisted(() => ({
   changePassword: vi.fn(),
   getUserSessions: vi.fn(),
   getUserQueryHistory: vi.fn(),
+  searchUsersForInvite: vi.fn(),
 }));
 
 vi.mock('../users.service', () => usersServiceMocks);
@@ -52,6 +53,15 @@ describe('users router HTTP contracts', () => {
       pageSize: 20,
       totalPages: 0,
     });
+    usersServiceMocks.searchUsersForInvite.mockResolvedValue({
+      items: [
+        {
+          id: 'invitee-1',
+          username: 'teammate',
+          displayName: 'Team Mate',
+        },
+      ],
+    });
 
     app = Fastify({ logger: false });
     await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
@@ -74,6 +84,51 @@ describe('users router HTTP contracts', () => {
       username: 'sqlforger',
       roles: ['user'],
     });
+
+  it('requires bearer auth for invite user search', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/users/invite-search',
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(usersServiceMocks.searchUsersForInvite).not.toHaveBeenCalled();
+    expect(response.json()).toMatchObject({
+      success: false,
+      code: ApiCode.UNAUTHORIZED,
+      message: 'Authentication required',
+    });
+  });
+
+  it('returns invite-search results for the authenticated user', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/users/invite-search?q=team&limit=10',
+      headers: {
+        authorization: `Bearer ${signToken()}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(usersServiceMocks.searchUsersForInvite).toHaveBeenCalledWith('user-123', {
+      q: 'team',
+      limit: 10,
+    });
+    expect(response.json()).toEqual({
+      success: true,
+      code: ApiCode.SUCCESS,
+      message: 'Users retrieved successfully',
+      data: {
+        items: [
+          {
+            id: 'invitee-1',
+            username: 'teammate',
+            displayName: 'Team Mate',
+          },
+        ],
+      },
+    });
+  });
 
   it('requires bearer auth to read the current profile', async () => {
     const response = await app.inject({

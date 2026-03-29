@@ -65,13 +65,17 @@ describe('databases router HTTP contracts', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(databaseServiceMocks.listDatabases).toHaveBeenCalledWith({
-      domain: 'ecommerce',
-      page: 2,
-      limit: 5,
-      dialect: undefined,
-      q: undefined,
-    });
+    expect(databaseServiceMocks.listDatabases).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: 'ecommerce',
+        page: 2,
+        limit: 5,
+        forChallengeAuthoring: false,
+        dialect: undefined,
+        q: undefined,
+      }),
+      undefined,
+    );
     expect(response.json()).toEqual({
       success: true,
       code: ApiCode.SUCCESS,
@@ -98,7 +102,9 @@ describe('databases router HTTP contracts', () => {
         dialect: 'postgresql',
         q: 'orders',
         difficulty: 'beginner',
+        forChallengeAuthoring: false,
       }),
+      undefined,
     );
   });
 
@@ -109,7 +115,10 @@ describe('databases router HTTP contracts', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(databaseServiceMocks.getDatabase).toHaveBeenCalledWith('db-ecommerce');
+    expect(databaseServiceMocks.getDatabase).toHaveBeenCalledWith('db-ecommerce', {
+      forChallengeAuthoring: false,
+      viewerUserId: null,
+    });
     expect(response.json()).toEqual({
       success: true,
       code: ApiCode.SUCCESS,

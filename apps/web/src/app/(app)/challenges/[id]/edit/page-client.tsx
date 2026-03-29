@@ -55,8 +55,9 @@ export default function UserEditChallengePage({ params }: ClientPageProps) {
   });
 
   const databasesQuery = useQuery({
-    queryKey: ['catalog-databases', 'challenge-edit', challengeId],
-    queryFn: () => databasesApi.list({ limit: 100, page: 1 }),
+    queryKey: ['catalog-databases', 'challenge-edit', challengeId, 'authoring'],
+    queryFn: () =>
+      databasesApi.list({ limit: 100, page: 1, forChallengeAuthoring: true }),
   });
 
   const databaseOptions = useMemo(() => {
@@ -84,9 +85,9 @@ export default function UserEditChallengePage({ params }: ClientPageProps) {
   const [lockedVisibility, setLockedVisibility] = useState<'public' | 'private'>('public');
 
   const databaseSchemaQuery = useQuery({
-    queryKey: ['challenge-form-database', databaseId],
+    queryKey: ['challenge-form-database', databaseId, 'authoring'],
     enabled: Boolean(databaseId),
-    queryFn: () => databasesApi.get(databaseId),
+    queryFn: () => databasesApi.get(databaseId, { forChallengeAuthoring: true }),
   });
 
   const schemaTables = databaseSchemaQuery.data?.schema ?? [];
@@ -326,6 +327,16 @@ export default function UserEditChallengePage({ params }: ClientPageProps) {
                 ...databaseOptions,
               ]}
             />
+            <p className="text-xs text-on-surface-variant">
+              Not listed?{' '}
+              <Link
+                href="/explore?import=1"
+                className="font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Import a SQL database on Explorer
+              </Link>
+              , then refresh this page or pick it from the dropdown.
+            </p>
 
             <Input
               label="Title"

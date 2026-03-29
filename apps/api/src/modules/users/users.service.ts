@@ -12,6 +12,7 @@ import type {
   SessionSummary,
   QueryHistoryItem,
   PaginatedResult,
+  InviteUserSearchItem,
 } from './users.types';
 
 export async function getUserProfile(userId: string): Promise<UserProfileResponse> {
@@ -154,6 +155,18 @@ export async function getUserSessions(
     items: sessions,
     meta: { page, limit },
   };
+}
+
+export async function searchUsersForInvite(
+  currentUserId: string,
+  query: { q?: string; limit?: number },
+): Promise<{ items: InviteUserSearchItem[] }> {
+  const limit = Math.min(Math.max(query.limit ?? 20, 1), 30);
+  const items = await usersRepository.searchUsersForInvite(currentUserId, {
+    q: query.q,
+    limit,
+  });
+  return { items };
 }
 
 export async function getUserQueryHistory(

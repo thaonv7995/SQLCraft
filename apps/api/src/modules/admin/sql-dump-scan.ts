@@ -86,6 +86,8 @@ export interface StoredSqlDumpScan extends SqlDumpScanResult {
       scannedAt: string;
       /** When true, {@link definition.tables} is empty; sandbox relies on self-contained SQL restore. */
       artifactOnly?: boolean;
+      /** Set when the scan was created by an authenticated user (upload session or multipart scan). */
+      uploadedByUserId?: string;
     };
   };
   rowCounts: Record<string, number>;
@@ -1222,6 +1224,27 @@ export function parseSqlDumpBufferArtifactOnly(
 
 export interface CreateStoredSqlDumpScanOptions {
   artifactOnly?: boolean;
+  /** When set, stored in scan metadata for access control on user-facing import/read APIs. */
+  uploadingUserId?: string;
+}
+
+function withUploadingUserMetadata(
+  scan: StoredSqlDumpScan,
+  uploadingUserId?: string,
+): StoredSqlDumpScan {
+  if (!uploadingUserId) {
+    return scan;
+  }
+  return {
+    ...scan,
+    definition: {
+      ...scan.definition,
+      metadata: {
+        ...scan.definition.metadata,
+        uploadedByUserId: uploadingUserId,
+      },
+    },
+  };
 }
 
 /** Matches {@link inferSqlDialectFromDump} window. */
@@ -1301,9 +1324,10 @@ export async function createStoredSqlDumpScan(
   fileName: string,
   options?: CreateStoredSqlDumpScanOptions,
 ): Promise<SqlDumpScanResult> {
-  const scan = options?.artifactOnly
+  let scan: StoredSqlDumpScan = options?.artifactOnly
     ? parseSqlDumpBufferArtifactOnly(buffer, fileName)
     : parseSqlDumpBuffer(buffer, fileName);
+  scan = withUploadingUserMetadata(scan, options?.uploadingUserId);
   const persistedScan = await persistSqlDumpScanPayload(scan, buffer);
   return toSqlDumpScanResult(persistedScan);
 }
@@ -1343,6 +1367,7 @@ export async function createStoredSqlDumpScanFromFile(
     scan = parseSqlDumpBuffer(buf, fileName, scanId);
   }
 
+  scan = withUploadingUserMetadata(scan, options?.uploadingUserId);
   const persistedScan = await persistSqlDumpScanPayload(scan, { path: filePath, size: byteSize });
   return toSqlDumpScanResult(persistedScan);
 }
@@ -1385,6 +1410,7 @@ export async function createStoredSqlDumpScanFromStagingObject(
     scan = parseSqlDumpBuffer(buf, fileName, scanId);
   }
 
+  scan = withUploadingUserMetadata(scan, options?.uploadingUserId);
   const persistedScan = await persistSqlDumpScanFromStagingKey(scan, stagingObjectKey);
   return toSqlDumpScanResult(persistedScan);
 }

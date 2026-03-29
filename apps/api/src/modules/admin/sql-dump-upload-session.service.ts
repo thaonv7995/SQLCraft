@@ -253,7 +253,7 @@ export async function completeSqlDumpUploadSession(
     row.stagingKey,
     stat.size,
     row.fileName,
-    { artifactOnly: row.artifactOnly },
+    { artifactOnly: row.artifactOnly, uploadingUserId: userId },
   );
 
   await getDb()
