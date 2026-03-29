@@ -123,6 +123,7 @@ export interface CreateSessionResult {
     'id' | 'userId' | 'challengeVersionId' | 'status' | 'startedAt' | 'createdAt'
   > & {
     databaseName: string | null;
+    dialect: string | null;
     sourceScale: DatasetSize | null;
     selectedScale: DatasetSize | null;
     availableScales: DatasetSize[];
@@ -135,6 +136,8 @@ export interface CreateSessionResult {
 
 export interface GetSessionResult extends SessionRow {
   databaseName: string | null;
+  /** Engine family for the sandbox (from schema template), e.g. postgresql, mysql. */
+  dialect: string | null;
   sandbox: Pick<SandboxRow, 'id' | 'status' | 'dbName' | 'expiresAt' | 'updatedAt'> | null;
   dataset: SessionDatasetSummary;
   sourceScale: DatasetSize | null;
@@ -537,6 +540,7 @@ export async function createSession(
       startedAt: session.startedAt,
       createdAt: session.createdAt,
       databaseName: schemaTemplate?.name ?? null,
+      dialect: schemaTemplate?.dialect ?? null,
       sourceScale: dataset.sourceScale,
       selectedScale: dataset.selectedScale,
       availableScales: dataset.availableScales,
@@ -638,6 +642,7 @@ export async function getSession(
   return {
     ...normalizedSession,
     databaseName: schemaTemplate?.name ?? null,
+    dialect: schemaTemplate?.dialect ?? null,
     sandbox: sandbox ?? null,
     dataset,
     sourceScale: dataset.sourceScale,

@@ -143,16 +143,33 @@ const DATASET_SCALE_META: Record<DatasetScale, { label: string; desc: string }> 
   large: { label: 'Large', desc: '10M+ rows' },
 };
 
+function formatSandboxDialect(dialect: string | null | undefined): string {
+  if (dialect == null || !String(dialect).trim()) return 'N/A';
+  const key = String(dialect).toLowerCase().trim();
+  const labels: Record<string, string> = {
+    postgresql: 'PostgreSQL',
+    postgres: 'PostgreSQL',
+    mysql: 'MySQL',
+    mariadb: 'MariaDB',
+    mssql: 'SQL Server',
+    sqlserver: 'SQL Server',
+    sqlite: 'SQLite',
+  };
+  return labels[key] ?? key;
+}
+
 function DatasetScaleSelector({
   selectedScale,
   sourceScale,
   sourceRowCount,
   databaseName,
+  dialect,
 }: {
   selectedScale: DatasetScale | null;
   sourceScale: DatasetScale | null;
   sourceRowCount: number | null;
   databaseName?: string | null;
+  dialect?: string | null;
 }) {
   const sourceScaleLabel = sourceScale ? DATASET_SCALE_META[sourceScale].label : null;
   const sourceSummary =
@@ -160,19 +177,25 @@ function DatasetScaleSelector({
       ? `${formatRows(sourceRowCount)} rows`
       : sourceScaleLabel ?? 'Unknown';
 
-  const hintText = `DB ${databaseName ?? 'N/A'} · Source ${sourceSummary}${
+  const dialectLabel = formatSandboxDialect(dialect);
+  const hintText = `DB ${databaseName ?? 'N/A'} · Dialect ${dialectLabel} · Source ${sourceSummary}${
     sourceScaleLabel && typeof sourceRowCount === 'number' ? ` (${sourceScaleLabel})` : ''
   }${selectedScale ? ` · Scale ${DATASET_SCALE_META[selectedScale].label}` : ''}`;
 
   return (
     <div
-      className="inline-flex h-9 items-center gap-2 rounded-lg border border-outline-variant/10 bg-surface-container-low px-3"
+      className="inline-flex h-9 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-outline-variant/10 bg-surface-container-low px-3 py-1 sm:gap-2 sm:py-0"
       title={hintText}
       aria-label={hintText}
     >
       <span className="text-[10px] uppercase tracking-[0.14em] text-outline">DB</span>
       <span className="max-w-[120px] truncate text-xs font-medium text-on-surface-variant">
         {databaseName ?? 'N/A'}
+      </span>
+      <span className="text-outline">•</span>
+      <span className="text-[10px] uppercase tracking-[0.14em] text-outline">Dialect</span>
+      <span className="rounded-md bg-surface-container-high px-2 py-1 text-xs font-medium text-on-surface">
+        {dialectLabel}
       </span>
       <span className="text-outline">•</span>
       <span className="text-[10px] uppercase tracking-[0.14em] text-outline">Scale</span>
@@ -2215,6 +2238,15 @@ export default function LabPage({ params }: ClientPageProps) {
     session?.displayTitle?.trim() ||
     session?.lessonTitle?.trim() ||
     'N/A';
+  /** Avoid repeating the DB/catalog label next to "Sandbox" when it already appears in the DB / Dialect / Scale chip. */
+  const headerContextTitle = (() => {
+    const t = lessonTitle?.trim();
+    if (!t) return null;
+    if (t === displayDatabaseName.trim()) return null;
+    const wireDb = session?.sandbox?.dbName?.trim();
+    if (wireDb && t === wireDb) return null;
+    return lessonTitle;
+  })();
   const latestSuccessfulExecution =
     queryHistory.find((execution) => execution.status === 'success') ?? null;
   const isLatestExecutionAlreadySubmitted = Boolean(
@@ -2825,6 +2857,7 @@ export default function LabPage({ params }: ClientPageProps) {
               sourceScale={sourceScale}
               sourceRowCount={sourceRowCount}
               databaseName={displayDatabaseName}
+              dialect={session?.dialect ?? null}
             />
           </div>
 
@@ -2838,9 +2871,9 @@ export default function LabPage({ params }: ClientPageProps) {
                 {entryLabel}
               </Link>
             )}
-            {lessonTitle && (
+            {headerContextTitle && (
               <span className="hidden max-w-[14rem] truncate text-xs text-on-surface-variant md:block">
-                {lessonTitle}
+                {headerContextTitle}
               </span>
             )}
             <div

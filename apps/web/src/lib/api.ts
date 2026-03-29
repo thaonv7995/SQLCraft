@@ -531,6 +531,8 @@ export interface LearningSession {
   lessonVersionId: string | null;
   challengeVersionId?: string | null;
   databaseName?: string | null;
+  /** Sandbox SQL engine family from schema template (e.g. postgresql, mysql). */
+  dialect?: string | null;
   status: 'provisioning' | 'active' | 'paused' | 'ended' | 'expired' | 'failed';
   sandboxStatus?: string | null;
   lessonTitle?: string | null;
