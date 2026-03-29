@@ -1,5 +1,7 @@
 import { gunzipSync } from 'node:zlib';
+import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import pino from 'pino';
 import type { DatasetTemplateDefinition, SchemaDefinition } from './db';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
@@ -7,10 +9,12 @@ import {
   createMcCatObjectReadStream,
   readS3ObjectViaMinioContainer,
   runMysqlInSandboxContainer,
+  runMysqlInSandboxContainerStreaming,
   runPgRestoreInSandboxContainer,
   runPsqlInSandboxContainer,
   runPsqlInSandboxContainerStreaming,
   runSqlcmdInSandboxContainer,
+  runSqlcmdInSandboxContainerStreaming,
 } from './docker';
 import { sanitizeSqlServerDumpPayload } from './sqlserver-dump-sanitize';
 
@@ -133,6 +137,16 @@ function rewriteUnquotedMysqlCreateDbTable(
  * `mysql -u user sandbox_db` still creates objects in another database. Force the
  * session database to the sandbox MYSQL_DATABASE name.
  */
+function needsMysqlDatabaseRewrite(sql: string): boolean {
+  return (
+    /\/\*![0-9]*\s*USE\b/i.test(sql) ||
+    /^\s*USE\b/im.test(sql) ||
+    /^\s*(?:CREATE|DROP)\s+(?:DATABASE|SCHEMA)\b/im.test(sql) ||
+    /\/\*![0-9]*\s*(?:CREATE|DROP)\s+(?:DATABASE|SCHEMA)\b/i.test(sql) ||
+    /\bTYPE\s*=\s*[A-Za-z0-9_]+\b/i.test(sql)
+  );
+}
+
 export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8: string): string {
   let s = sqlUtf8.replace(/^\uFEFF/, '');
 
@@ -141,7 +155,12 @@ export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8:
   if (useDb) qualifierDbs.add(useDb);
   qualifierDbs.delete(dbName);
 
-  // /*!40101 USE `dbname` */; (mysqldump)
+  const q = quoteMysqlIdentifier(dbName);
+
+  if (qualifierDbs.size === 0 && !needsMysqlDatabaseRewrite(s)) {
+    return `SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\n`;
+  }
+
   s = s.replace(/\/\*![0-9]*\s*USE\b[^*]*\*\/\s*;?/gi, '');
   s = s.replace(/^\s*USE\b[^;]*;/gim, '');
   s = s.replace(/\/\*![0-9]*\s*DROP\s+DATABASE\b[^*]*\*\/\s*;?/gi, '');
@@ -153,7 +172,6 @@ export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8:
   s = s.replace(/^\s*DROP\s+SCHEMA\b[^;]*;/gim, '');
   s = s.replace(/^\s*CREATE\s+SCHEMA\b[^;]*;/gim, '');
 
-  // MySQL 4.0 mysqldump used TYPE=InnoDB; TYPE was removed (use ENGINE) — rejects on MySQL 8+.
   s = s.replace(/\bTYPE\s*=\s*([A-Za-z0-9_]+)\b/gi, 'ENGINE=$1');
 
   for (const srcDb of Array.from(qualifierDbs).sort((a, b) => b.length - a.length)) {
@@ -161,7 +179,6 @@ export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8:
   }
   s = rewriteUnquotedMysqlCreateDbTable(s, qualifierDbs, dbName);
 
-  const q = quoteMysqlIdentifier(dbName);
   return `SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\n`;
 }
 
@@ -489,6 +506,25 @@ async function readArtifactBytes(artifactRef: string): Promise<Buffer> {
   return readFile(artifactRef);
 }
 
+async function createArtifactReadStream(artifactRef: string): Promise<Readable> {
+  if (/^s3:\/\//i.test(artifactRef)) {
+    return createMcCatObjectReadStream(artifactRef);
+  }
+
+  if (/^https?:\/\//i.test(artifactRef)) {
+    const response = await fetch(artifactRef);
+    if (!response.ok) {
+      throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
+    }
+    if (!response.body) {
+      throw new Error(`No response body for artifact: ${artifactRef}`);
+    }
+    return Readable.fromWeb(response.body as import('node:stream/web').ReadableStream);
+  }
+
+  return createReadStream(artifactRef);
+}
+
 function getArtifactExtension(pathLike: string): string {
   const normalized = pathLike.split('?')[0].toLowerCase();
   if (normalized.endsWith('.sql.gz')) return '.sql.gz';
@@ -590,17 +626,35 @@ async function restoreFromArtifact(params: {
   }
 
   const isS3 = /^s3:\/\//i.test(artifactRef);
-  if (engine === 'postgresql' && isS3 && (extension === '.sql' || extension === '.sql.gz')) {
-    const source = createMcCatObjectReadStream(artifactRef);
-    await runPsqlInSandboxContainerStreaming({
-      containerRef,
-      dbUser,
-      dbName,
-      source,
-      gzip: extension === '.sql.gz',
-    });
-    logger.info({ artifactRef, extension }, 'Dataset restored from S3 artifact (streaming)');
-    return true;
+  const canStream = isS3 || /^https?:\/\//i.test(artifactRef) || !artifactRef.startsWith('{');
+  const gzip = extension === '.sql.gz';
+
+  if (canStream && (extension === '.sql' || extension === '.sql.gz')) {
+    if (engine === 'postgresql') {
+      const source = await createArtifactReadStream(artifactRef);
+      await runPsqlInSandboxContainerStreaming({ containerRef, dbUser, dbName, source, gzip });
+      logger.info({ artifactRef, extension, engine }, 'Dataset restored (streaming)');
+      return true;
+    }
+
+    if ((engine === 'mysql' || engine === 'mariadb') && isS3) {
+      const source = await createArtifactReadStream(artifactRef);
+      await runMysqlInSandboxContainerStreaming({
+        engine: engine === 'mariadb' ? 'mariadb' : 'mysql',
+        containerRef, dbUser, dbPassword, dbName, source, gzip,
+      });
+      logger.info({ artifactRef, extension, engine }, 'Dataset restored (streaming)');
+      return true;
+    }
+
+    if (engine === 'sqlserver' && isS3) {
+      const source = await createArtifactReadStream(artifactRef);
+      await runSqlcmdInSandboxContainerStreaming({
+        containerRef, saPassword: mssqlSaPassword, dbName, source, gzip,
+      });
+      logger.info({ artifactRef, extension, engine }, 'Dataset restored (streaming)');
+      return true;
+    }
   }
 
   const bytes = await readArtifactBytes(artifactRef);
@@ -611,17 +665,12 @@ async function restoreFromArtifact(params: {
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
         engine: mysqlFamilyEngine,
-        containerRef,
-        dbUser,
-        dbPassword,
-        dbName,
+        containerRef, dbUser, dbPassword, dbName,
         sql: prepareMysqlRestorePayload(dbName, bytes),
       });
     } else if (engine === 'sqlserver') {
       await runSqlcmdInSandboxContainer({
-        containerRef,
-        saPassword: mssqlSaPassword,
-        dbName,
+        containerRef, saPassword: mssqlSaPassword, dbName,
         sql: sanitizeSqlServerDumpPayload(bytes),
       });
     } else {
@@ -638,17 +687,12 @@ async function restoreFromArtifact(params: {
     } else if (engine === 'mysql' || engine === 'mariadb') {
       await runMysqlInSandboxContainer({
         engine: mysqlFamilyEngine,
-        containerRef,
-        dbUser,
-        dbPassword,
-        dbName,
+        containerRef, dbUser, dbPassword, dbName,
         sql: prepareMysqlRestorePayload(dbName, sqlBuf),
       });
     } else if (engine === 'sqlserver') {
       await runSqlcmdInSandboxContainer({
-        containerRef,
-        saPassword: mssqlSaPassword,
-        dbName,
+        containerRef, saPassword: mssqlSaPassword, dbName,
         sql: sanitizeSqlServerDumpPayload(sqlBuf),
       });
     } else {
@@ -663,12 +707,7 @@ async function restoreFromArtifact(params: {
       logger.warn({ artifactRef, engine }, 'pg_restore artifacts require PostgreSQL sandbox');
       return false;
     }
-    await runPgRestoreInSandboxContainer({
-      containerRef,
-      dbUser,
-      dbName,
-      dump: bytes,
-    });
+    await runPgRestoreInSandboxContainer({ containerRef, dbUser, dbName, dump: bytes });
     logger.info({ artifactRef }, 'Dataset restored from pg_restore artifact');
     return true;
   }
@@ -754,7 +793,16 @@ export async function loadDatasetIntoSandbox(params: {
       rowCounts: datasetTemplate.rowCounts,
     });
   } else {
-    logger.info({ engine }, 'Skipping synthetic rowCounts seed (PostgreSQL-only)');
+    const totalRequested = Object.values(datasetTemplate.rowCounts).reduce<number>(
+      (sum, v) => sum + (typeof v === 'number' ? v : 0),
+      0,
+    );
+    if (totalRequested > 0) {
+      logger.warn(
+        { engine, datasetTemplateId: datasetTemplate.id, totalRequested },
+        'Synthetic rowCounts seed requested but only supported for PostgreSQL; sandbox will have empty tables',
+      );
+    }
   }
 }
 

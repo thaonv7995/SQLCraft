@@ -21,6 +21,15 @@ const sandboxPostgresCheckpointCompletionTarget =
 const sandboxPostgresWalCompression = process.env.SANDBOX_POSTGRES_WAL_COMPRESSION ?? 'on';
 const sandboxPostgresSynchronousCommit =
   process.env.SANDBOX_POSTGRES_SYNCHRONOUS_COMMIT ?? 'off';
+const sandboxMysqlMaxAllowedPacket =
+  process.env.SANDBOX_MYSQL_MAX_ALLOWED_PACKET ?? '256M';
+const sandboxMysqlInnodbBufferPoolSize =
+  process.env.SANDBOX_MYSQL_INNODB_BUFFER_POOL_SIZE ?? '256M';
+const sandboxMysqlInnodbLogFileSize =
+  process.env.SANDBOX_MYSQL_INNODB_LOG_FILE_SIZE ?? '128M';
+const sandboxContainerMemoryLimit = process.env.SANDBOX_CONTAINER_MEMORY_LIMIT?.trim() || '';
+const sandboxContainerCpuLimit = process.env.SANDBOX_CONTAINER_CPU_LIMIT?.trim() || '';
+const sandboxContainerPidsLimit = process.env.SANDBOX_CONTAINER_PIDS_LIMIT?.trim() || '';
 const storageDockerContainer = process.env.STORAGE_DOCKER_CONTAINER ?? 'sqlcraft-minio';
 const storageAccessKey = process.env.STORAGE_ACCESS_KEY ?? 'minioadmin';
 const storageSecretKey = process.env.STORAGE_SECRET_KEY ?? 'minioadmin';
@@ -50,6 +59,14 @@ function isDockerExecBinaryMissing(error: unknown): boolean {
   return false;
 }
 
+const DOCKER_OUTPUT_CAP_BYTES = 64 * 1024;
+
+function appendCapped(existing: string, chunk: string, cap: number): string {
+  if (existing.length >= cap) return existing;
+  const remaining = cap - existing.length;
+  return existing + (chunk.length <= remaining ? chunk : chunk.slice(0, remaining));
+}
+
 async function runDockerWithInput(args: string[], input: string | Buffer): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const child = spawn('docker', args, {
@@ -63,10 +80,10 @@ async function runDockerWithInput(args: string[], input: string | Buffer): Promi
     child.stderr.setEncoding('utf8');
 
     child.stdout.on('data', (chunk) => {
-      stdout += chunk;
+      stdout = appendCapped(stdout, chunk, DOCKER_OUTPUT_CAP_BYTES);
     });
     child.stderr.on('data', (chunk) => {
-      stderr += chunk;
+      stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
     });
     child.on('error', (error) => {
       reject(error);
@@ -238,10 +255,21 @@ export async function createSandboxEngineContainer(params: {
   await ensureSandboxContainerRemoved(containerRef);
 
   const platform = sandboxDockerRunPlatform({ engine, dockerImage });
+  const resourceArgs: string[] = [];
+  if (sandboxContainerMemoryLimit) {
+    resourceArgs.push('--memory', sandboxContainerMemoryLimit);
+  }
+  if (sandboxContainerCpuLimit) {
+    resourceArgs.push('--cpus', sandboxContainerCpuLimit);
+  }
+  if (sandboxContainerPidsLimit) {
+    resourceArgs.push('--pids-limit', sandboxContainerPidsLimit);
+  }
   const baseArgs = [
     'run',
     '-d',
     ...(platform ? ['--platform', platform] : []),
+    ...resourceArgs,
     '--name',
     containerRef,
     '--network',
@@ -297,6 +325,9 @@ export async function createSandboxEngineContainer(params: {
       '-e',
       `MYSQL_PASSWORD=${dbPassword}`,
       dockerImage,
+      `--max-allowed-packet=${sandboxMysqlMaxAllowedPacket}`,
+      `--innodb-buffer-pool-size=${sandboxMysqlInnodbBufferPoolSize}`,
+      `--innodb-log-file-size=${sandboxMysqlInnodbLogFileSize}`,
     ]);
     return;
   }
@@ -575,17 +606,13 @@ export async function runSqlcmdInSandboxContainer(params: {
   sql: string | Buffer;
 }): Promise<void> {
   const { containerRef, saPassword, dbName, sql } = params;
-  const tmpFile = `/tmp/sqlforge_restore_${Date.now()}_${Math.random().toString(36).slice(2, 14)}.sql`;
-  const qTmp = shQuote(tmpFile);
-  const qDb = shQuote(dbName);
 
   const tryRun = async (toolsPath: 'tools18' | 'tools'): Promise<void> => {
     const bin =
       toolsPath === 'tools18'
         ? '/opt/mssql-tools18/bin/sqlcmd'
         : '/opt/mssql-tools/bin/sqlcmd';
-    const trust = toolsPath === 'tools18' ? '-C ' : '';
-    const inner = `tmp=${qTmp} && cat >"$tmp" && ${bin} ${trust}-S localhost -U sa -d ${qDb} -b -I -i "$tmp"; e=$?; rm -f "$tmp"; exit $e`;
+    const trustArgs = toolsPath === 'tools18' ? ['-C'] : [];
     await runDockerWithInput(
       [
         'exec',
@@ -593,13 +620,138 @@ export async function runSqlcmdInSandboxContainer(params: {
         '-e',
         `SQLCMDPASSWORD=${saPassword}`,
         containerRef,
-        'sh',
-        '-lc',
-        inner,
+        bin,
+        ...trustArgs,
+        '-S', 'localhost',
+        '-U', 'sa',
+        '-d', dbName,
+        '-b',
+        '-I',
       ],
       sql,
     );
   };
+  try {
+    await tryRun('tools18');
+  } catch (error) {
+    if (!isDockerExecBinaryMissing(error)) {
+      throw error;
+    }
+    await tryRun('tools');
+  }
+}
+
+export async function runMysqlInSandboxContainerStreaming(params: {
+  engine: 'mysql' | 'mariadb';
+  containerRef: string;
+  dbUser: string;
+  dbPassword: string;
+  dbName: string;
+  source: Readable;
+  gzip?: boolean;
+}): Promise<void> {
+  const { engine, containerRef, dbUser, dbPassword, dbName, source, gzip } = params;
+  const clientBin = sandboxMysqlFamilyClientBin(engine);
+  const args = [
+    'exec',
+    '-i',
+    '-e',
+    `MYSQL_PWD=${dbPassword}`,
+    containerRef,
+    clientBin,
+    '--default-character-set=utf8mb4',
+    `-u${dbUser}`,
+    dbName,
+  ];
+  const child = spawn('docker', args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
+  });
+
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  const pipelinePromise = gzip
+    ? pipeline(source, createGunzip(), child.stdin)
+    : pipeline(source, child.stdin);
+
+  try {
+    await pipelinePromise;
+  } catch (err) {
+    child.kill('SIGKILL');
+    throw err;
+  }
+
+  const code = await closePromise;
+  if (code !== 0) {
+    const detail = stderr.trim().slice(0, 2000);
+    throw new Error(`mysql restore failed with code ${code}: ${detail || '(no stderr)'}`);
+  }
+}
+
+export async function runSqlcmdInSandboxContainerStreaming(params: {
+  containerRef: string;
+  saPassword: string;
+  dbName: string;
+  source: Readable;
+  gzip?: boolean;
+}): Promise<void> {
+  const { containerRef, saPassword, dbName, source, gzip } = params;
+
+  const tryRun = async (toolsPath: 'tools18' | 'tools'): Promise<void> => {
+    const bin =
+      toolsPath === 'tools18'
+        ? '/opt/mssql-tools18/bin/sqlcmd'
+        : '/opt/mssql-tools/bin/sqlcmd';
+    const trustArgs = toolsPath === 'tools18' ? ['-C'] : [];
+    const args = [
+      'exec',
+      '-i',
+      '-e',
+      `SQLCMDPASSWORD=${saPassword}`,
+      containerRef,
+      bin,
+      ...trustArgs,
+      '-S', 'localhost',
+      '-U', 'sa',
+      '-d', dbName,
+      '-b',
+      '-I',
+    ];
+    const child = spawn('docker', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
+    });
+
+    const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+    const pipelinePromise = gzip
+      ? pipeline(source, createGunzip(), child.stdin)
+      : pipeline(source, child.stdin);
+
+    try {
+      await pipelinePromise;
+    } catch (err) {
+      child.kill('SIGKILL');
+      throw err;
+    }
+
+    const code = await closePromise;
+    if (code !== 0) {
+      const detail = stderr.trim().slice(0, 2000);
+      throw new Error(`sqlcmd restore failed with code ${code}: ${detail || '(no stderr)'}`);
+    }
+  };
+
   try {
     await tryRun('tools18');
   } catch (error) {
@@ -686,7 +838,7 @@ export async function runPsqlInSandboxContainerStreaming(params: {
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
-    stderr += chunk;
+    stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
   });
 
   const closePromise = once(child, 'close').then(([code]) => Number(code));

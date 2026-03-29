@@ -726,7 +726,12 @@ function buildTrackedColumns(schemaTables: SchemaTable[]): Map<string, Set<strin
   return tracked;
 }
 
-function buildSelectionOrder(schemaTables: SchemaTable[]): string[] {
+interface SelectionOrderResult {
+  ordered: string[];
+  cycleTables: Set<string>;
+}
+
+function buildSelectionOrder(schemaTables: SchemaTable[]): SelectionOrderResult {
   const incoming = new Map<string, Set<string>>();
   const outgoing = new Map<string, Set<string>>();
   const tableNames = schemaTables.map((table) => table.name);
@@ -768,13 +773,15 @@ function buildSelectionOrder(schemaTables: SchemaTable[]): string[] {
     }
   }
 
+  const cycleTables = new Set<string>();
   for (const name of tableNames) {
     if (!ordered.includes(name)) {
+      cycleTables.add(name);
       ordered.push(name);
     }
   }
 
-  return ordered;
+  return { ordered, cycleTables };
 }
 
 function createSelectedValueIndex(
@@ -799,8 +806,13 @@ function rowSatisfiesForeignKeys(
   row: ParsedDumpRow,
   schemaTable: SchemaTable,
   selectedValues: Map<string, Map<string, Set<string>>>,
+  cycleTables: Set<string>,
 ): boolean {
   for (const foreignKey of schemaTable.foreignKeys) {
+    if (cycleTables.has(foreignKey.referencedTable) || cycleTables.has(schemaTable.name)) {
+      continue;
+    }
+
     const value = row.valuesByColumn.get(foreignKey.columnName) ?? null;
     if (value === null) {
       continue;
@@ -824,7 +836,7 @@ function selectRowsForTargets(params: {
   const { schemaTables, rowsByTable, requestedRowCounts } = params;
   const trackedColumns = buildTrackedColumns(schemaTables);
   const selectedValues = createSelectedValueIndex(schemaTables, trackedColumns);
-  const selectionOrder = buildSelectionOrder(schemaTables);
+  const { ordered: selectionOrder, cycleTables } = buildSelectionOrder(schemaTables);
   const schemaByName = new Map(schemaTables.map((table) => [table.name, table]));
   const selectedRowIds = new Set<string>();
   const actualRowCounts = Object.fromEntries(
@@ -847,7 +859,7 @@ function selectRowsForTargets(params: {
         break;
       }
 
-      if (!rowSatisfiesForeignKeys(row, tableSchema, selectedValues)) {
+      if (!rowSatisfiesForeignKeys(row, tableSchema, selectedValues, cycleTables)) {
         continue;
       }
 

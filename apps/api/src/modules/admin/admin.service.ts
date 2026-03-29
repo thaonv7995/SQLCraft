@@ -653,9 +653,13 @@ async function importCanonicalDatabaseFromSqlDumpScan(
   }
 
   const tableNamesForRowCounts = storedScan.definition.tables.map((t) => t.name);
+  const isArtifactOnly = Boolean(
+    storedScan.artifactOnly ?? storedScan.definition.metadata.artifactOnly,
+  );
   const rowCountsForImport = ensurePositiveDatasetRowCounts(
     storedScan.rowCounts,
     tableNamesForRowCounts,
+    { artifactOnly: isArtifactOnly },
   );
 
   const sourceScale =
@@ -681,6 +685,7 @@ async function importCanonicalDatabaseFromSqlDumpScan(
         artifactUrl: string;
       }>
     | undefined;
+  const importWarnings: string[] = [];
 
   try {
     if (allowDerivedMaterialization) {
@@ -713,13 +718,13 @@ async function importCanonicalDatabaseFromSqlDumpScan(
       }
     }
   } catch (error) {
-    console.warn('Failed to materialize derived SQL dump artifacts from scan import', {
-      scanId: storedScan.scanId,
-      error,
-    });
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const warning = `Failed to materialize derived scale datasets: ${errMsg}. Import continues with canonical scale only.`;
+    importWarnings.push(warning);
+    console.warn(warning, { scanId: storedScan.scanId, error });
   }
 
-  return persistCanonicalDatabaseImport(
+  const result = await persistCanonicalDatabaseImport(
     userId,
     {
       name: body.schemaName,
@@ -751,6 +756,12 @@ async function importCanonicalDatabaseFromSqlDumpScan(
       inviteUserIds: persist.inviteUserIds,
     },
   );
+
+  if (importWarnings.length > 0) {
+    result.warnings = [...(result.warnings ?? []), ...importWarnings];
+  }
+
+  return result;
 }
 
 function mergeDefinitionMetadata(

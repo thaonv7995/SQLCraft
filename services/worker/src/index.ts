@@ -90,6 +90,11 @@ const mssqlSaPassword = (() => {
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000;
 // Expiry scanner interval: 5 minutes
 const EXPIRY_SCAN_INTERVAL_MS = 5 * 60 * 1000;
+// Total timeout for dataset restore (schema + data load); 0 = no limit.
+const DATASET_RESTORE_TIMEOUT_MS = Math.max(
+  0,
+  Number(process.env.SANDBOX_DATASET_RESTORE_TIMEOUT_MS) || 10 * 60 * 1000,
+);
 
 // ─── Redis connection ─────────────────────────────────────────────────────────
 
@@ -212,7 +217,21 @@ function buildCreateTableDdl(
   });
 }
 
-async function applySchemaAndDataset(params: {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  if (timeoutMs <= 0) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`)),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
+async function applySchemaAndDatasetInner(params: {
   sandboxInstanceId: string;
   containerRef: string;
   dbName: string;
@@ -334,7 +353,30 @@ async function applySchemaAndDataset(params: {
   );
 }
 
+async function applySchemaAndDataset(params: {
+  sandboxInstanceId: string;
+  containerRef: string;
+  dbName: string;
+  schemaTemplateId: string | null;
+  datasetTemplateId: string | null;
+  engine: SchemaSqlEngine;
+}): Promise<void> {
+  const inner = applySchemaAndDatasetInner(params);
+  if (DATASET_RESTORE_TIMEOUT_MS > 0) {
+    return withTimeout(inner, DATASET_RESTORE_TIMEOUT_MS, 'applySchemaAndDataset');
+  }
+  return inner;
+}
+
 // ─── Worker: provision_sandbox ────────────────────────────────────────────────
+
+const LONG_JOB_LOCK_DURATION_MS = 10 * 60 * 1000;
+const LONG_JOB_STALLED_INTERVAL_MS = 5 * 60 * 1000;
+const longJobOpts = {
+  ...queueOptions,
+  lockDuration: LONG_JOB_LOCK_DURATION_MS,
+  stalledInterval: LONG_JOB_STALLED_INTERVAL_MS,
+};
 
 const sandboxProvisioningWorker = new Worker(
   QUEUES.SANDBOX_PROVISIONING,
@@ -423,7 +465,7 @@ const sandboxProvisioningWorker = new Worker(
       throw err;
     }
   },
-  queueOptions,
+  longJobOpts,
 );
 
 // ─── Worker: destroy_sandbox ──────────────────────────────────────────────────
@@ -477,7 +519,7 @@ const sandboxCleanupWorker = new Worker(
 
     logger.info({ sandboxInstanceId }, 'Sandbox destroyed');
   },
-  queueOptions,
+  longJobOpts,
 );
 
 // ─── Worker: reset_sandbox ────────────────────────────────────────────────────
@@ -571,7 +613,7 @@ const sandboxResetWorker = new Worker(
       throw err;
     }
   },
-  queueOptions,
+  longJobOpts,
 );
 
 // ─── Worker: execute_query ────────────────────────────────────────────────────

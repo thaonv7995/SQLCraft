@@ -107,13 +107,21 @@ export function normalizeDatasetRowCounts(
 /**
  * Canonical import requires at least one positive row count. DDL-only dumps (or dialects we do not
  * count yet) yield all zeros — use one row per known table so publish/metadata stay consistent.
+ *
+ * When `artifactOnly` is true the dump was too large for full parsing; table structure is unknown
+ * and forcing synthetic 1-row counts would produce a misleading "tiny" classification.
+ * Return the placeholder as-is so the caller can handle "unknown scale" appropriately.
  */
 export function ensurePositiveDatasetRowCounts(
   rowCounts: Record<string, unknown>,
   tableNames: string[],
+  options?: { artifactOnly?: boolean },
 ): Record<string, number> {
   const normalized = normalizeDatasetRowCounts(rowCounts);
   if (sumDatasetRowCounts(normalized) > 0) {
+    return normalized;
+  }
+  if (options?.artifactOnly) {
     return normalized;
   }
   const names = tableNames.map((n) => n.trim()).filter((n) => n.length > 0);
@@ -139,7 +147,7 @@ export function scaleDatasetRowCounts(
     return normalized;
   }
 
-  const target = Math.max(1, Math.floor(targetTotalRows));
+  const target = Math.max(entries.length, Math.floor(targetTotalRows));
   const allocatableTables = entries
     .map(([tableName, count]) => ({
       tableName,
@@ -157,40 +165,45 @@ export function scaleDatasetRowCounts(
     allocatedTotal += entry.allocated;
   }
 
-  while (allocatedTotal > target) {
-    const candidate = allocatableTables
-      .filter((entry) => entry.allocated > 1)
-      .sort((left, right) => {
-        if (left.allocated === right.allocated) {
-          return left.remainder - right.remainder;
-        }
-        return right.allocated - left.allocated;
-      })[0];
+  const maxAdjustIterations = allocatableTables.length * 2;
 
-    if (!candidate) {
-      break;
+  for (let i = 0; i < maxAdjustIterations && allocatedTotal > target; i += 1) {
+    let bestIdx = -1;
+    let bestScore = Infinity;
+    for (let j = 0; j < allocatableTables.length; j += 1) {
+      const entry = allocatableTables[j];
+      if (entry.allocated <= 1) continue;
+      const score = entry.allocated * 1_000_000 - entry.remainder * 1_000;
+      if (bestIdx === -1 || score > bestScore) {
+        bestScore = score;
+        bestIdx = j;
+      }
     }
-
-    candidate.allocated -= 1;
+    if (bestIdx === -1) break;
+    allocatableTables[bestIdx].allocated -= 1;
     allocatedTotal -= 1;
   }
 
-  while (allocatedTotal < target) {
-    const candidate = [...allocatableTables].sort((left, right) => {
-      if (left.remainder === right.remainder) {
-        return right.count - left.count;
+  for (let i = 0; i < maxAdjustIterations && allocatedTotal < target; i += 1) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+    for (let j = 0; j < allocatableTables.length; j += 1) {
+      const entry = allocatableTables[j];
+      const score = entry.remainder * 1_000_000 + entry.count;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = j;
       }
-      return right.remainder - left.remainder;
-    })[0];
-
-    candidate.allocated += 1;
+    }
+    allocatableTables[bestIdx].allocated += 1;
+    allocatableTables[bestIdx].remainder = 0;
     allocatedTotal += 1;
   }
 
+  const byName = new Map(allocatableTables.map((entry) => [entry.tableName, entry.allocated]));
   return Object.fromEntries(
     Object.entries(normalized).map(([tableName, count]) => {
-      const derived = allocatableTables.find((entry) => entry.tableName === tableName);
-      return [tableName, derived ? derived.allocated : count];
+      return [tableName, byName.get(tableName) ?? count];
     }),
   );
 }

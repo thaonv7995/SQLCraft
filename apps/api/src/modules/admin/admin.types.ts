@@ -145,6 +145,7 @@ export interface ImportCanonicalDatabaseResult {
     importJob: AdminSystemJobRow;
     datasetGenerationJob: AdminSystemJobRow | null;
   };
+  warnings?: string[];
 }
 
 export interface AuditLogListItem {
