@@ -925,10 +925,13 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                       idx
                     </span>
                   ) : null;
+                  const pkBadge = col.isPrimary ? (
+                    <span className="inline-flex h-4 items-center rounded-[10px] border border-primary/25 bg-primary/10 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-primary/90">
+                      pk
+                    </span>
+                  ) : null;
                   const colTooltip = [
                     `${col.name}: ${col.type}`,
-                    col.isPrimary ? 'PRIMARY KEY' : null,
-                    col.isForeign ? 'FOREIGN KEY' : null,
                     col.references ? `→ ${col.references}` : null,
                     indexedFieldSet.has(col.name) || addedIndexedFieldSet.has(col.name)
                       ? 'Indexed'
@@ -958,8 +961,11 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                             <span className="text-xs font-mono text-on-surface-variant break-all">{col.name}</span>
+                            {pkBadge}
                             {idxBadge}
-                            <span className="text-xs font-mono text-outline shrink-0 ml-auto">{col.type}</span>
+                            <span className="text-xs font-mono text-outline shrink-0 ml-auto max-w-[min(100%,14rem)] text-right break-all">
+                              {col.type}
+                            </span>
                           </div>
                           {col.references ? (
                             <p className="text-[10px] font-mono text-secondary/90 leading-snug break-all pl-0.5">
