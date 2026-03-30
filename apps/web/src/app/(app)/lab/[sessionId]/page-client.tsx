@@ -1194,7 +1194,15 @@ function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; s
   );
 }
 
-function ComparePlanMetricsTable({ items, sessionId }: { items: CompareSlot[]; sessionId: string }) {
+function ComparePlanMetricsTable({
+  items,
+  sessionId,
+  onViewSql,
+}: {
+  items: CompareSlot[];
+  sessionId: string;
+  onViewSql: (label: string, sql: string) => void;
+}) {
   const rows: Array<{
     key: string;
     label: string;
@@ -1292,6 +1300,20 @@ function ComparePlanMetricsTable({ items, sessionId }: { items: CompareSlot[]; s
           <CompareSchemaVsBaseRows sessionId={sessionId} items={items} />
         </TableBody>
       </Table>
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 border-t border-outline-variant/10 bg-surface-container-low/35 px-3 py-2">
+        {items.map((item) => (
+          <button
+            key={`sql-${item.label}`}
+            type="button"
+            className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-on-surface-variant transition-colors hover:bg-surface-container-high/60 hover:text-on-surface"
+            title="View full SQL"
+            onClick={() => onViewSql(item.label, item.execution.sql)}
+          >
+            <span className="material-symbols-outlined text-[13px] leading-none">code</span>
+            <span className="font-mono tabular-nums">SQL · {item.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1423,6 +1445,85 @@ function ChallengeCompareLeaderboardCard({
   );
 }
 
+function CompareSqlModal({
+  open,
+  label,
+  sql,
+  onClose,
+}: {
+  open: boolean;
+  label: string;
+  sql: string;
+  onClose: () => void;
+}) {
+  const displaySql = useMemo(() => {
+    try {
+      return formatSqlInBrowser(sql);
+    } catch {
+      return sql;
+    }
+  }, [sql]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, open]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="compare-sql-title"
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-low shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-outline-variant/10 px-4 py-3">
+          <h2 id="compare-sql-title" className="text-sm font-semibold text-on-surface">
+            Query SQL · Slot {label}
+          </h2>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard.writeText(sql).then(() => toast.success('Copied SQL'));
+              }}
+              leftIcon={<span className="material-symbols-outlined text-[16px]">content_copy</span>}
+            >
+              Copy
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 p-4">
+          <div className="h-[min(55vh,480px)] min-h-[200px] overflow-hidden rounded-lg border border-outline-variant/10">
+            <SqlEditor value={displaySql} readOnly onChange={() => {}} className="h-full" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SideBySideComparePanel({
   sessionId,
   queryHistory,
@@ -1436,6 +1537,7 @@ function SideBySideComparePanel({
   const compareLabels: CompareLabel[] = ['A', 'B', 'C', 'D'];
   const [picks, setPicks] = useState<string[]>(['', '', '', '']);
   const [activeSlotCount, setActiveSlotCount] = useState(2);
+  const [sqlModal, setSqlModal] = useState<{ label: string; sql: string } | null>(null);
 
   const executions = useMemo(() => {
     return [...queryHistory]
@@ -1560,6 +1662,7 @@ function SideBySideComparePanel({
               {compareLabels.slice(0, activeSlotCount).map((label, slotIndex) => {
                 const current = picks[slotIndex] ?? '';
                 const blocked = new Set(picks.filter((id, i) => i !== slotIndex && id));
+                const slotExecution = current ? executions.find((e) => e.id === current) : undefined;
                 return (
                   <div key={label} className="relative">
                   <label className="block">
@@ -1567,10 +1670,11 @@ function SideBySideComparePanel({
                       <span className="inline-flex h-9 min-w-9 items-center justify-center rounded-md bg-surface-container-high px-1.5 text-[11px] font-semibold text-on-surface-variant">
                         {label}
                       </span>
-                    <div className="relative flex-1">
+                    <div className="relative min-w-0 flex-1">
                       <select
                         className={selectClass}
                         value={current}
+                        title={slotExecution?.sql}
                         onChange={(e) => {
                           const value = e.target.value;
                           setPicks((prev) => {
@@ -1589,7 +1693,7 @@ function SideBySideComparePanel({
                         {executions
                           .filter((e) => !blocked.has(e.id) || e.id === current)
                           .map((e) => (
-                            <option key={e.id} value={e.id}>
+                            <option key={e.id} value={e.id} title={e.sql}>
                               {formatRelativeTime(e.createdAt)} · {e.durationMs ?? '—'}ms · {truncateSql(e.sql, 48)}
                             </option>
                           ))}
@@ -1619,9 +1723,19 @@ function SideBySideComparePanel({
         </div>
 
         {selectedItems.length >= 2 ? (
-          <ComparePlanMetricsTable items={selectedItems} sessionId={sessionId} />
+          <ComparePlanMetricsTable
+            items={selectedItems}
+            sessionId={sessionId}
+            onViewSql={(label, sql) => setSqlModal({ label, sql })}
+          />
         ) : null}
       </div>
+      <CompareSqlModal
+        open={sqlModal !== null}
+        label={sqlModal?.label ?? ''}
+        sql={sqlModal?.sql ?? ''}
+        onClose={() => setSqlModal(null)}
+      />
     </div>
   );
 }
