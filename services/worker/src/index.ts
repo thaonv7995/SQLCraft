@@ -3,9 +3,8 @@ import { Worker, Queue, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import pino from 'pino';
 import {
-  buildPostgresSandboxConnectionString,
   diffSandboxSchema,
-  fetchSandboxSchemaSnapshot,
+  fetchSandboxSchemaSnapshotForEngine,
   parseBaseSchemaSnapshot,
   summarizeSandboxSchemaDiff,
   type QuerySchemaDiffSnapshot,
@@ -73,6 +72,8 @@ const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const queuePrefix = process.env.QUEUE_PREFIX?.trim() || undefined;
 const sandboxHost = process.env.SANDBOX_DB_HOST ?? 'localhost';
 const sandboxPort = process.env.SANDBOX_DB_PORT ?? '5433';
+const sandboxMysqlPort = process.env.SANDBOX_MYSQL_PORT ?? '3306';
+const sandboxMssqlPort = process.env.SANDBOX_MSSQL_PORT ?? '1433';
 const sandboxUser = process.env.SANDBOX_DB_USER ?? 'sandbox';
 const sandboxPassword = process.env.SANDBOX_DB_PASSWORD ?? 'sandbox';
 
@@ -693,11 +694,27 @@ if (datasetGoldenBakeWorker) {
 
 // ─── Worker: execute_query / cancel_query ─────────────────────────────────────
 
+function workerSchemaIntrospectionPort(
+  engine: SchemaSqlEngine,
+  sandbox: { containerRef: string | null; sandboxDbPort: number },
+): number {
+  if (sandbox.containerRef) {
+    return sandbox.sandboxDbPort;
+  }
+  if (engine === 'mysql' || engine === 'mariadb') {
+    return Number(sandboxMysqlPort);
+  }
+  if (engine === 'sqlserver') {
+    return Number(sandboxMssqlPort);
+  }
+  return Number(sandboxPort);
+}
+
 async function maybeCaptureSchemaDiffSnapshot(
   sandbox: NonNullable<Awaited<ReturnType<typeof fetchSandbox>>>,
 ): Promise<QuerySchemaDiffSnapshot | null> {
   const engine = normalizeSchemaSqlEngine(sandbox.sandboxEngine);
-  if (engine !== 'postgresql') {
+  if (engine !== 'postgresql' && engine !== 'mysql' && engine !== 'mariadb' && engine !== 'sqlserver') {
     return null;
   }
   if (!sandbox.schemaTemplateId || !sandbox.dbName) {
@@ -709,14 +726,15 @@ async function maybeCaptureSchemaDiffSnapshot(
   }
   try {
     const base = parseBaseSchemaSnapshot(definition);
-    const connectionString = buildPostgresSandboxConnectionString({
+    const user = engine === 'sqlserver' ? 'sa' : sandboxUser;
+    const password = engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword;
+    const current = await fetchSandboxSchemaSnapshotForEngine(engine, {
       host: sandbox.containerRef ?? sandboxHost,
-      port: sandbox.containerRef ? sandbox.sandboxDbPort : Number(sandboxPort),
-      user: sandboxUser,
-      password: sandboxPassword,
+      port: workerSchemaIntrospectionPort(engine, sandbox),
+      user,
+      password,
       database: sandbox.dbName,
     });
-    const current = await fetchSandboxSchemaSnapshot(connectionString);
     const diff = diffSandboxSchema(base, current);
     return summarizeSandboxSchemaDiff(sandbox.schemaTemplateId, diff);
   } catch (err) {

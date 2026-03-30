@@ -5,9 +5,8 @@ import type {
   DatasetTemplateRow,
   SchemaTemplateRow,
 } from '../../db/repositories/sessions.repository';
-import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
+import { ForbiddenError, NotFoundError, ServiceUnavailableError, ValidationError } from '../../lib/errors';
 import { LAB_SESSION_TTL_MS, labSessionExpiresAtFromNow } from '../../lib/lab-session-ttl';
-import { config } from '../../lib/config';
 import {
   diffSandboxSchema,
   fetchSandboxSchemaSnapshot,
@@ -19,7 +18,6 @@ import {
   type SandboxSchemaPartition,
   type SandboxSchemaView,
 } from '../../services/sandbox-schema';
-import { Pool } from 'pg';
 import {
   getLargestDatasetScale,
   isDatasetScaleAllowed,
@@ -35,6 +33,13 @@ import {
 } from '../../lib/sandbox-provision-estimate';
 import type { CreateSessionBody } from './sessions.schema';
 import type { RevertSchemaDiffChangeBody } from './sessions.schema';
+import {
+  assertSchemaRevertSupported,
+  buildMysqlRevertStatements,
+  buildPostgresRevertStatements,
+  buildSqlServerRevertStatements,
+  executeSchemaRevert,
+} from './schema-revert-sql';
 
 const AUTO_EXPIRE_SESSION_STATUSES: SessionRow['status'][] = ['provisioning', 'active', 'paused'];
 
@@ -359,77 +364,6 @@ function buildSessionDisplayTitle(params: {
   return `Lab session #${code}`;
 }
 
-function buildSandboxConnectionString(params: {
-  dbName: string;
-  containerRef: string | null;
-}): string {
-  const user = encodeURIComponent(config.SANDBOX_DB_USER);
-  const password = encodeURIComponent(config.SANDBOX_DB_PASSWORD);
-  const host = params.containerRef ?? config.SANDBOX_DB_HOST;
-  const port = params.containerRef ? 5432 : config.SANDBOX_DB_PORT;
-  return `postgresql://${user}:${password}@${host}:${port}/${params.dbName}`;
-}
-
-function quoteIdent(identifier: string): string {
-  return `"${identifier.replace(/"/g, '""')}"`;
-}
-
-function toCreateViewSql(name: string, definition: string, materialized = false): string {
-  const trimmed = definition.trim();
-  if (/^create\s+/i.test(trimmed)) {
-    return trimmed.endsWith(';') ? trimmed : `${trimmed};`;
-  }
-  const kind = materialized ? 'MATERIALIZED VIEW' : 'VIEW';
-  return `CREATE ${kind} public.${quoteIdent(name)} AS ${trimmed};`;
-}
-
-function toCreateFunctionSql(definition: string): string {
-  const trimmed = definition.trim();
-  if (!/^create\s+/i.test(trimmed)) {
-    throw new ValidationError('Function definition is not executable');
-  }
-  return trimmed.endsWith(';') ? trimmed : `${trimmed};`;
-}
-
-function toCreatePartitionSql(partition: SandboxSchemaPartition): string {
-  const trimmed = (partition.definition ?? '').trim();
-  if (!trimmed) {
-    throw new ValidationError('Partition definition is missing and cannot be recreated');
-  }
-  if (/^create\s+/i.test(trimmed)) {
-    return trimmed.endsWith(';') ? trimmed : `${trimmed};`;
-  }
-  return `CREATE TABLE public.${quoteIdent(partition.name)} PARTITION OF public.${quoteIdent(partition.parentTable)} ${trimmed};`;
-}
-
-async function executeSchemaRevertStatements(params: {
-  dbName: string;
-  containerRef: string | null;
-  statements: string[];
-}): Promise<void> {
-  const pool = new Pool({
-    connectionString: buildSandboxConnectionString({
-      dbName: params.dbName,
-      containerRef: params.containerRef,
-    }),
-    max: 1,
-  });
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const statement of params.statements) {
-      await client.query(statement);
-    }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-    await pool.end();
-  }
-}
-
 export async function listUserSessions(userId: string, limit = 20): Promise<SessionListItem[]> {
   const rows = await sessionsRepository.findByUserId(userId, limit);
   const normalizedRows = await Promise.all(rows.map((row) => expireSessionForTimeout(row)));
@@ -703,32 +637,26 @@ export async function getSessionSchemaDiff(
   }
 
   const baseSnapshot = parseBaseSchemaSnapshot(schemaTemplate.definition);
-  const currentSnapshot = await fetchSandboxSchemaSnapshot({
-    dbName: sandbox.dbName,
-    containerRef: sandbox.containerRef ?? null,
-  });
+  let currentSnapshot;
+  try {
+    currentSnapshot = await fetchSandboxSchemaSnapshot({
+      dbName: sandbox.dbName,
+      containerRef: sandbox.containerRef ?? null,
+      dialect: schemaTemplate.dialect ?? 'postgresql',
+      sandboxDbPort: sandbox.sandboxDbPort,
+    });
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new ServiceUnavailableError(
+      `Could not introspect the sandbox database for schema diff. ${cause}`,
+    );
+  }
   const diff = diffSandboxSchema(baseSnapshot, currentSnapshot);
 
   return {
     schemaTemplateId: schemaTemplate.id,
     ...diff,
   };
-}
-
-function matchesRevertTarget<T extends { name: string }>(
-  item: T,
-  target: RevertSchemaDiffChangeBody,
-): boolean {
-  if (item.name !== target.name) {
-    return false;
-  }
-  if ('tableName' in item && typeof item.tableName === 'string' && target.tableName) {
-    return item.tableName === target.tableName;
-  }
-  if ('signature' in item && typeof item.signature === 'string' && target.signature) {
-    return item.signature === target.signature;
-  }
-  return true;
 }
 
 export async function revertSessionSchemaDiffChange(
@@ -748,97 +676,41 @@ export async function revertSessionSchemaDiffChange(
     throw new ValidationError('Sandbox must be ready before schema changes can be reverted');
   }
 
+  const engine = assertSchemaRevertSupported(schemaTemplate.dialect);
+
   const baseSnapshot = parseBaseSchemaSnapshot(schemaTemplate.definition);
-  const currentSnapshot = await fetchSandboxSchemaSnapshot({
-    dbName: sandbox.dbName,
-    containerRef: sandbox.containerRef ?? null,
-  });
+  let currentSnapshot;
+  try {
+    currentSnapshot = await fetchSandboxSchemaSnapshot({
+      dbName: sandbox.dbName,
+      containerRef: sandbox.containerRef ?? null,
+      dialect: schemaTemplate.dialect ?? 'postgresql',
+      sandboxDbPort: sandbox.sandboxDbPort,
+    });
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new ServiceUnavailableError(
+      `Could not introspect the sandbox database for schema revert. ${cause}`,
+    );
+  }
   const diff = diffSandboxSchema(baseSnapshot, currentSnapshot);
 
-  let statements: string[] = [];
-
-  if (target.resourceType === 'indexes') {
-    const section = diff.indexes;
-    if (target.changeType === 'added') {
-      const current = section.added.find((item) => matchesRevertTarget(item, target));
-      if (!current) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [`DROP INDEX IF EXISTS public.${quoteIdent(current.name)};`];
-    } else if (target.changeType === 'removed') {
-      const base = section.removed.find((item) => matchesRevertTarget(item, target));
-      if (!base) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [base.definition.trim().endsWith(';') ? base.definition.trim() : `${base.definition.trim()};`];
-    } else {
-      const changed = section.changed.find((item) => matchesRevertTarget(item.current, target));
-      if (!changed) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [
-        `DROP INDEX IF EXISTS public.${quoteIdent(changed.current.name)};`,
-        changed.base.definition.trim().endsWith(';')
-          ? changed.base.definition.trim()
-          : `${changed.base.definition.trim()};`,
-      ];
-    }
-  } else if (target.resourceType === 'views' || target.resourceType === 'materializedViews') {
-    const section =
-      target.resourceType === 'materializedViews' ? diff.materializedViews : diff.views;
-    const isMaterialized = target.resourceType === 'materializedViews';
-    const dropSql = (name: string) =>
-      `DROP ${isMaterialized ? 'MATERIALIZED VIEW' : 'VIEW'} IF EXISTS public.${quoteIdent(name)};`;
-
-    if (target.changeType === 'added') {
-      const current = section.added.find((item) => matchesRevertTarget(item, target));
-      if (!current) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [dropSql(current.name)];
-    } else if (target.changeType === 'removed') {
-      const base = section.removed.find((item) => matchesRevertTarget(item, target));
-      if (!base) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [toCreateViewSql(base.name, base.definition, isMaterialized)];
-    } else {
-      const changed = section.changed.find((item) => matchesRevertTarget(item.current, target));
-      if (!changed) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [dropSql(changed.current.name), toCreateViewSql(changed.base.name, changed.base.definition, isMaterialized)];
-    }
-  } else if (target.resourceType === 'functions') {
-    const section = diff.functions;
-    const dropSql = (name: string, signature: string) =>
-      `DROP FUNCTION IF EXISTS public.${quoteIdent(name)}(${signature});`;
-    if (target.changeType === 'added') {
-      const current = section.added.find((item) => matchesRevertTarget(item, target));
-      if (!current) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [dropSql(current.name, current.signature)];
-    } else if (target.changeType === 'removed') {
-      const base = section.removed.find((item) => matchesRevertTarget(item, target));
-      if (!base) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [toCreateFunctionSql(base.definition)];
-    } else {
-      const changed = section.changed.find((item) => matchesRevertTarget(item.current, target));
-      if (!changed) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [dropSql(changed.current.name, changed.current.signature), toCreateFunctionSql(changed.base.definition)];
-    }
-  } else if (target.resourceType === 'partitions') {
-    const section = diff.partitions;
-    const dropSql = (name: string) => `DROP TABLE IF EXISTS public.${quoteIdent(name)};`;
-    if (target.changeType === 'added') {
-      const current = section.added.find((item) => matchesRevertTarget(item, target));
-      if (!current) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [dropSql(current.name)];
-    } else if (target.changeType === 'removed') {
-      const base = section.removed.find((item) => matchesRevertTarget(item, target));
-      if (!base) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [toCreatePartitionSql(base)];
-    } else {
-      const changed = section.changed.find((item) => matchesRevertTarget(item.current, target));
-      if (!changed) throw new NotFoundError('Target change was not found in schema diff');
-      statements = [dropSql(changed.current.name), toCreatePartitionSql(changed.base)];
-    }
-  }
+  const statements =
+    engine === 'postgresql'
+      ? buildPostgresRevertStatements(target, diff)
+      : engine === 'sqlserver'
+        ? buildSqlServerRevertStatements(target, diff)
+        : buildMysqlRevertStatements(target, diff);
 
   if (statements.length === 0) {
     throw new ValidationError('No revert statements generated for this change');
   }
 
-  await executeSchemaRevertStatements({
+  await executeSchemaRevert({
+    dialect: schemaTemplate.dialect ?? 'postgresql',
     dbName: sandbox.dbName,
     containerRef: sandbox.containerRef ?? null,
+    sandboxDbPort: sandbox.sandboxDbPort,
     statements,
   });
 

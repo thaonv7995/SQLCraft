@@ -13,6 +13,7 @@ import {
   readS3ObjectViaMinioContainer,
   runMysqlInSandboxContainer,
   runPgRestoreInSandboxContainer,
+  runPgRestoreInSandboxContainerStreaming,
   runPsqlInSandboxContainer,
   runPsqlInSandboxContainerStreaming,
   runSqlcmdInSandboxContainer,
@@ -21,6 +22,19 @@ import {
 } from './docker';
 import { sanitizePostgresDumpForPsql, createPostgresSanitizeTransform } from './postgres-dump-sanitize';
 import { sanitizeSqlServerDumpPayload, createSqlServerSanitizeTransform } from './sqlserver-dump-sanitize';
+
+/**
+ * Optional `fetch` options for HTTP(S) dataset artifacts. Env `ARTIFACT_HTTP_FETCH_TIMEOUT_MS`
+ * sets a hard cap on the whole request (connect + download body); unset or ≤0 = no limit.
+ * Does not apply to `s3://` (MinIO) or local paths.
+ */
+function artifactHttpFetchInit(): RequestInit {
+  const raw = process.env.ARTIFACT_HTTP_FETCH_TIMEOUT_MS?.trim();
+  if (!raw) return {};
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms <= 0) return {};
+  return { signal: AbortSignal.timeout(ms) };
+}
 
 function quoteMysqlIdentifier(name: string): string {
   return '`' + name.replace(/`/g, '``') + '`';
@@ -253,7 +267,7 @@ export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8:
   const q = quoteMysqlIdentifier(dbName);
 
   if (qualifierDbs.size === 0 && !needsMysqlDatabaseRewrite(s)) {
-    return `SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\n`;
+    return `SET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\nSET UNIQUE_CHECKS=1;\n`;
   }
 
   s = s.replace(/\/\*![0-9]*\s*USE\b[^*]*\*\/\s*;?/gi, '');
@@ -274,7 +288,7 @@ export function rewriteMysqlRestoreSqlForTargetDatabase(dbName: string, sqlUtf8:
   }
   s = rewriteUnquotedMysqlCreateDbTable(s, qualifierDbs, dbName);
 
-  return `SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\n`;
+  return `SET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\nUSE ${q};\n${s.trim()}\nSET FOREIGN_KEY_CHECKS=1;\nSET UNIQUE_CHECKS=1;\n`;
 }
 
 function prepareMysqlRestorePayload(dbName: string, sql: string | Buffer): Buffer {
@@ -469,6 +483,7 @@ function createMysqlRewriteTransform(dbName: string, qualifierDbs: Set<string>):
       // Emit header before first content
       if (!headerEmitted) {
         output.push(`SET FOREIGN_KEY_CHECKS=0;`);
+        output.push(`SET UNIQUE_CHECKS=0;`);
         output.push(`USE ${q};`);
         headerEmitted = true;
       }
@@ -490,6 +505,7 @@ function createMysqlRewriteTransform(dbName: string, qualifierDbs: Set<string>):
 
       if (!headerEmitted) {
         remaining.push(`SET FOREIGN_KEY_CHECKS=0;`);
+        remaining.push(`SET UNIQUE_CHECKS=0;`);
         remaining.push(`USE ${q};`);
         headerEmitted = true;
       }
@@ -501,6 +517,7 @@ function createMysqlRewriteTransform(dbName: string, qualifierDbs: Set<string>):
       }
 
       remaining.push('SET FOREIGN_KEY_CHECKS=1;');
+      remaining.push('SET UNIQUE_CHECKS=1;');
 
       if (remaining.length > 0) {
         this.push(remaining.join('\n') + '\n');
@@ -532,7 +549,7 @@ function createMysqlPassthroughTransform(dbName: string): Transform {
       }
 
       if (!headerEmitted) {
-        this.push(`SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n`);
+        this.push(`SET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\nUSE ${q};\n`);
         headerEmitted = true;
       }
 
@@ -542,9 +559,9 @@ function createMysqlPassthroughTransform(dbName: string): Transform {
 
     flush(callback: TransformCallback) {
       if (!headerEmitted) {
-        this.push(`SET FOREIGN_KEY_CHECKS=0;\nUSE ${q};\n`);
+        this.push(`SET FOREIGN_KEY_CHECKS=0;\nSET UNIQUE_CHECKS=0;\nUSE ${q};\n`);
       }
-      this.push('\nSET FOREIGN_KEY_CHECKS=1;\n');
+      this.push('\nSET FOREIGN_KEY_CHECKS=1;\nSET UNIQUE_CHECKS=1;\n');
       callback();
     },
   });
@@ -859,7 +876,7 @@ async function readArtifactBytes(artifactRef: string): Promise<Buffer> {
 
   const isHttp = /^https?:\/\//i.test(artifactRef);
   if (isHttp) {
-    const response = await fetch(artifactRef);
+    const response = await fetch(artifactRef, artifactHttpFetchInit());
     if (!response.ok) {
       throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
     }
@@ -879,7 +896,7 @@ async function createArtifactReadStream(artifactRef: string): Promise<Readable> 
   }
 
   if (/^https?:\/\//i.test(artifactRef)) {
-    const response = await fetch(artifactRef);
+    const response = await fetch(artifactRef, artifactHttpFetchInit());
     if (!response.ok) {
       throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
     }
@@ -914,7 +931,7 @@ async function resolveMysqlArtifactStreamingSource(
       await rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
     };
     const rawPath = join(tmpRoot, extension === '.sql.gz' ? 'raw.sql.gz' : 'raw.sql');
-    const response = await fetch(artifactRef);
+    const response = await fetch(artifactRef, artifactHttpFetchInit());
     if (!response.ok) {
       throw new Error(`Failed to download dataset artifact (${response.status}): ${artifactRef}`);
     }
@@ -1062,8 +1079,9 @@ async function restoreFromArtifact(params: {
   engine: SchemaSqlEngine;
   mssqlSaPassword: string;
   schema: SchemaDefinition | null;
+  mysqlForce?: boolean;
 }): Promise<boolean> {
-  const { logger, containerRef, dbUser, dbPassword, dbName, artifactUrl, engine, mssqlSaPassword, schema } =
+  const { logger, containerRef, dbUser, dbPassword, dbName, artifactUrl, engine, mssqlSaPassword, schema, mysqlForce } =
     params;
   const mysqlFamilyEngine = engine === 'mariadb' ? 'mariadb' : 'mysql';
   const inlineSql = maybeExtractInlineSql(artifactUrl);
@@ -1136,6 +1154,7 @@ async function restoreFromArtifact(params: {
         dbPassword,
         dbName,
         source: dataStream.pipe(tail),
+        force: mysqlForce,
       });
 
       logger.info(
@@ -1181,14 +1200,14 @@ async function restoreFromArtifact(params: {
       return true;
     }
 
-    // ── pg_restore formats — requires random access, cannot stream ────
+    // ── pg_restore formats — custom/tar format supports reading from stdin ────
     if (extension === '.dump' || extension === '.backup' || extension === '.tar') {
       if (engine !== 'postgresql') {
         logger.warn({ artifactRef, engine }, 'pg_restore artifacts require PostgreSQL sandbox');
         return false;
       }
-      const bytes = await readArtifactBytes(artifactRef);
-      await runPgRestoreInSandboxContainer({ containerRef, dbUser, dbName, dump: bytes });
+      const source = await createArtifactReadStream(artifactRef);
+      await runPgRestoreInSandboxContainerStreaming({ containerRef, dbUser, dbName, source });
       logger.info({ artifactRef }, 'Dataset restored from pg_restore artifact');
       return true;
     }
@@ -1221,6 +1240,8 @@ export async function loadDatasetIntoSandbox(params: {
   ensureSchemaApplied?: () => Promise<void>;
   /** Golden-bake must restore from the raw artifact, not an existing snapshot. */
   preferArtifactOverGoldenSnapshot?: boolean;
+  /** Pass -f (force) to mysql client — continue past errors like duplicate key violations. */
+  mysqlForce?: boolean;
 }): Promise<void> {
   const {
     logger,
@@ -1234,6 +1255,7 @@ export async function loadDatasetIntoSandbox(params: {
     schema,
     ensureSchemaApplied,
     preferArtifactOverGoldenSnapshot,
+    mysqlForce,
   } = params;
 
   if (
@@ -1254,6 +1276,7 @@ export async function loadDatasetIntoSandbox(params: {
         engine,
         mssqlSaPassword,
         schema,
+        mysqlForce,
       });
       if (restored) {
         logger.info(
@@ -1301,6 +1324,7 @@ export async function loadDatasetIntoSandbox(params: {
         engine,
         mssqlSaPassword,
         schema,
+        mysqlForce,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

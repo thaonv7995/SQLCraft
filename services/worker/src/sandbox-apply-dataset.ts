@@ -63,6 +63,8 @@ export async function applySchemaAndDatasetToContainer(params: {
    * provisioning should omit this (default false) so `sandboxGoldenSnapshotUrl` is used when set.
    */
   preferArtifactOverGoldenSnapshot?: boolean;
+  /** Pass -f (force) to mysql client during dataset restore — continues past duplicate key errors. */
+  mysqlForce?: boolean;
 }): Promise<void> {
   const {
     logger,
@@ -76,6 +78,7 @@ export async function applySchemaAndDatasetToContainer(params: {
     sandboxPassword,
     mssqlSaPassword,
     preferArtifactOverGoldenSnapshot = false,
+    mysqlForce,
   } = params;
 
   const [schemaDef, datasetTemplate] = await Promise.all([
@@ -180,6 +183,7 @@ export async function applySchemaAndDatasetToContainer(params: {
     schema: schemaDef,
     ensureSchemaApplied,
     preferArtifactOverGoldenSnapshot,
+    mysqlForce,
   });
 
   logger.info(

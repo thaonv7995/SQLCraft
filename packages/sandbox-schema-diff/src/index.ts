@@ -1,62 +1,42 @@
-import { Pool } from 'pg';
+import { fetchPostgresSandboxSchemaSnapshot } from './fetch-postgres';
+import { fetchSqlServerSandboxSchemaSnapshot } from './fetch-sqlserver';
+import { buildPostgresSandboxConnectionString } from './connection-strings';
+import {
+  fetchSandboxSchemaSnapshotForEngine,
+  UnsupportedSchemaDiffEngineError,
+} from './snapshot-fetch';
+import type {
+  QuerySchemaDiffSnapshot,
+  SandboxSchemaDiff,
+  SandboxSchemaDiffSection,
+  SandboxSchemaFunction,
+  SandboxSchemaIndex,
+  SandboxSchemaMaterializedView,
+  SandboxSchemaPartition,
+  SandboxSchemaSnapshot,
+  SandboxSchemaView,
+} from './types';
 
-export interface SandboxSchemaIndex {
-  name: string;
-  tableName: string;
-  definition: string;
-}
+export type {
+  QuerySchemaDiffSnapshot,
+  SandboxSchemaDiff,
+  SandboxSchemaDiffSection,
+  SandboxSchemaFunction,
+  SandboxSchemaIndex,
+  SandboxSchemaMaterializedView,
+  SandboxSchemaPartition,
+  SandboxSchemaSnapshot,
+  SandboxSchemaView,
+};
 
-export interface SandboxSchemaView {
-  name: string;
-  definition: string;
-}
+export { buildPostgresSandboxConnectionString };
+export { fetchPostgresSandboxSchemaSnapshot };
+export { fetchSqlServerSandboxSchemaSnapshot };
+export { fetchSandboxSchemaSnapshotForEngine, UnsupportedSchemaDiffEngineError };
 
-export interface SandboxSchemaMaterializedView {
-  name: string;
-  definition: string;
-}
-
-export interface SandboxSchemaFunction {
-  name: string;
-  signature: string;
-  language: string | null;
-  definition: string;
-}
-
-export interface SandboxSchemaPartition {
-  name: string;
-  parentTable: string;
-  strategy: string | null;
-  definition: string | null;
-}
-
-export interface SandboxSchemaSnapshot {
-  indexes: SandboxSchemaIndex[];
-  views: SandboxSchemaView[];
-  materializedViews: SandboxSchemaMaterializedView[];
-  functions: SandboxSchemaFunction[];
-  partitions: SandboxSchemaPartition[];
-}
-
-export interface SandboxSchemaDiffSection<T> {
-  base: T[];
-  current: T[];
-  added: T[];
-  removed: T[];
-  changed: Array<{ base: T; current: T }>;
-}
-
-export interface SandboxSchemaDiff {
-  hasChanges: boolean;
-  indexes: SandboxSchemaDiffSection<SandboxSchemaIndex>;
-  views: SandboxSchemaDiffSection<SandboxSchemaView>;
-  materializedViews: SandboxSchemaDiffSection<SandboxSchemaMaterializedView>;
-  functions: SandboxSchemaDiffSection<SandboxSchemaFunction>;
-  partitions: SandboxSchemaDiffSection<SandboxSchemaPartition>;
-}
-
-interface RuntimeRow {
-  [key: string]: unknown;
+/** @deprecated Prefer {@link fetchSandboxSchemaSnapshotForEngine} with explicit engine. */
+export async function fetchSandboxSchemaSnapshot(connectionString: string): Promise<SandboxSchemaSnapshot> {
+  return fetchPostgresSandboxSchemaSnapshot(connectionString);
 }
 
 interface SchemaDefinitionColumn {
@@ -164,12 +144,13 @@ function mergeIndexes(
   const merged = new Map<string, SandboxSchemaIndex>();
 
   for (const index of explicitIndexes) {
-    merged.set(index.name, index);
+    merged.set(`${index.tableName}::${index.name}`, index);
   }
 
   for (const index of inferredIndexes) {
-    if (!merged.has(index.name)) {
-      merged.set(index.name, index);
+    const k = `${index.tableName}::${index.name}`;
+    if (!merged.has(k)) {
+      merged.set(k, index);
     }
   }
 
@@ -253,6 +234,7 @@ function parseFunctionDefinitions(definition: unknown): SandboxSchemaFunction[] 
     const signature = normalizeString(item.signature ?? item.arguments);
     const language = normalizeOptionalString(item.language);
     const sqlDefinition = normalizeString(item.definition);
+    const objectType = normalizeOptionalString(item.objectType);
 
     if (!name) {
       return null;
@@ -263,6 +245,7 @@ function parseFunctionDefinitions(definition: unknown): SandboxSchemaFunction[] 
       signature,
       language,
       definition: sqlDefinition,
+      ...(objectType != null ? { objectType } : {}),
     };
   });
 }
@@ -304,154 +287,6 @@ export function parseBaseSchemaSnapshot(definition: unknown): SandboxSchemaSnaps
   };
 }
 
-/** Build a postgres connection string for sandbox introspection (PostgreSQL only). */
-export function buildPostgresSandboxConnectionString(params: {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-}): string {
-  const user = encodeURIComponent(params.user);
-  const password = encodeURIComponent(params.password);
-  return `postgresql://${user}:${password}@${params.host}:${params.port}/${params.database}`;
-}
-
-function normalizeIndexes(rows: RuntimeRow[]): SandboxSchemaIndex[] {
-  return rows.map((row) => ({
-    name: normalizeString(row.name),
-    tableName: normalizeString(row.tableName),
-    definition: normalizeString(row.definition),
-  }));
-}
-
-function normalizeViews(rows: RuntimeRow[]): SandboxSchemaView[] {
-  return rows.map((row) => ({
-    name: normalizeString(row.name),
-    definition: normalizeString(row.definition),
-  }));
-}
-
-function normalizeMaterializedViews(rows: RuntimeRow[]): SandboxSchemaMaterializedView[] {
-  return rows.map((row) => ({
-    name: normalizeString(row.name),
-    definition: normalizeString(row.definition),
-  }));
-}
-
-function normalizeFunctions(rows: RuntimeRow[]): SandboxSchemaFunction[] {
-  return rows.map((row) => ({
-    name: normalizeString(row.name),
-    signature: normalizeString(row.signature),
-    language: normalizeOptionalString(row.language),
-    definition: normalizeString(row.definition),
-  }));
-}
-
-function normalizePartitions(rows: RuntimeRow[]): SandboxSchemaPartition[] {
-  return rows.map((row) => ({
-    name: normalizeString(row.name),
-    parentTable: normalizeString(row.parentTable),
-    strategy: normalizeOptionalString(row.strategy),
-    definition: normalizeOptionalString(row.definition),
-  }));
-}
-
-export async function fetchSandboxSchemaSnapshot(connectionString: string): Promise<SandboxSchemaSnapshot> {
-  const pool = new Pool({
-    connectionString,
-    max: 1,
-  });
-
-  try {
-    const indexesPromise = pool.query<RuntimeRow>(
-      `
-        SELECT
-          tablename AS "tableName",
-          indexname AS name,
-          indexdef AS definition
-        FROM pg_indexes
-        WHERE schemaname = 'public'
-          AND indexname !~ '_pkey$'
-        ORDER BY tablename, indexname
-      `,
-    );
-    const viewsPromise = pool.query<RuntimeRow>(
-      `
-        SELECT
-          viewname AS name,
-          definition
-        FROM pg_views
-        WHERE schemaname = 'public'
-        ORDER BY viewname
-      `,
-    );
-    const materializedViewsPromise = pool.query<RuntimeRow>(
-      `
-        SELECT
-          matviewname AS name,
-          definition
-        FROM pg_matviews
-        WHERE schemaname = 'public'
-        ORDER BY matviewname
-      `,
-    );
-    const functionsPromise = pool.query<RuntimeRow>(
-      `
-        SELECT
-          p.proname AS name,
-          pg_get_function_identity_arguments(p.oid) AS signature,
-          l.lanname AS language,
-          pg_get_functiondef(p.oid) AS definition
-        FROM pg_proc p
-        INNER JOIN pg_namespace n ON n.oid = p.pronamespace
-        INNER JOIN pg_language l ON l.oid = p.prolang
-        WHERE n.nspname = 'public'
-        ORDER BY p.proname, pg_get_function_identity_arguments(p.oid)
-      `,
-    );
-    const partitionsPromise = pool.query<RuntimeRow>(
-      `
-        SELECT
-          child.relname AS name,
-          parent.relname AS "parentTable",
-          CASE part.partstrat
-            WHEN 'r' THEN 'range'
-            WHEN 'l' THEN 'list'
-            WHEN 'h' THEN 'hash'
-            ELSE NULL
-          END AS strategy,
-          pg_get_expr(child.relpartbound, child.oid) AS definition
-        FROM pg_inherits inh
-        INNER JOIN pg_class child ON child.oid = inh.inhrelid
-        INNER JOIN pg_class parent ON parent.oid = inh.inhparent
-        INNER JOIN pg_namespace child_ns ON child_ns.oid = child.relnamespace
-        LEFT JOIN pg_partitioned_table part ON part.partrelid = parent.oid
-        WHERE child_ns.nspname = 'public'
-        ORDER BY parent.relname, child.relname
-      `,
-    );
-
-    const [indexes, views, materializedViews, functions, partitions] = await Promise.all([
-      indexesPromise,
-      viewsPromise,
-      materializedViewsPromise,
-      functionsPromise,
-      partitionsPromise,
-    ]);
-
-    return {
-      indexes: normalizeIndexes(indexes.rows),
-      views: normalizeViews(views.rows),
-      materializedViews: normalizeMaterializedViews(materializedViews.rows),
-      functions: normalizeFunctions(functions.rows),
-      partitions: normalizePartitions(partitions.rows),
-    };
-  } finally {
-    await pool.end();
-  }
-}
-
 function buildDiffSection<T>(
   baseItems: T[],
   currentItems: T[],
@@ -482,13 +317,23 @@ function buildDiffSection<T>(
   };
 }
 
+function indexDiffKey(item: SandboxSchemaIndex): string {
+  return `${item.tableName}::${item.name}`;
+}
+
 function sameIndex(left: SandboxSchemaIndex, right: SandboxSchemaIndex): boolean {
   const normalizeIndexDefinition = (definition: string): string =>
     collapseWhitespace(definition)
       .toLowerCase()
+      .replace(/`/g, '')
       .replace(/"([^"]+)"/g, '$1')
       .replace(/\bpublic\./g, '')
+      .replace(/\bdbo\./g, '')
       .replace(/\s+using\s+btree\s+/g, ' ')
+      .replace(/\s+include\s+/gi, ' include ')
+      .replace(/\s+where\s+/gi, ' where ')
+      .replace(/\[\s*/g, '[')
+      .replace(/\s*\]/g, ']')
       .replace(/\(\s+/g, '(')
       .replace(/\s+\)/g, ')')
       .replace(/\s*,\s*/g, ', ');
@@ -513,6 +358,7 @@ function sameMaterializedView(
 function sameFunction(left: SandboxSchemaFunction, right: SandboxSchemaFunction): boolean {
   return (
     left.language === right.language &&
+    (left.objectType ?? null) === (right.objectType ?? null) &&
     collapseWhitespace(left.definition) === collapseWhitespace(right.definition)
   );
 }
@@ -525,11 +371,13 @@ function samePartition(left: SandboxSchemaPartition, right: SandboxSchemaPartiti
   );
 }
 
-export function diffSandboxSchema(
-  base: SandboxSchemaSnapshot,
-  current: SandboxSchemaSnapshot,
-): SandboxSchemaDiff {
-  const indexes = buildDiffSection(base.indexes, current.indexes, (item) => item.name, sameIndex);
+export function diffSandboxSchema(base: SandboxSchemaSnapshot, current: SandboxSchemaSnapshot): SandboxSchemaDiff {
+  const indexes = buildDiffSection(
+    base.indexes,
+    current.indexes,
+    indexDiffKey,
+    sameIndex,
+  );
   const views = buildDiffSection(base.views, current.views, (item) => item.name, sameView);
   const materializedViews = buildDiffSection(
     base.materializedViews,
@@ -605,14 +453,6 @@ function briefSandboxSchemaDiff(diff: SandboxSchemaDiff): string {
   push('fn', diff.functions);
   push('part', diff.partitions);
   return parts.join(' · ');
-}
-
-/** Compact snapshot stored on query execution rows (PostgreSQL sandboxes). */
-export interface QuerySchemaDiffSnapshot {
-  schemaTemplateId: string;
-  hasChanges: boolean;
-  totalChanges: number;
-  brief: string;
 }
 
 export function summarizeSandboxSchemaDiff(

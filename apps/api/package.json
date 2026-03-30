@@ -34,6 +34,8 @@
     "fastify-plugin": "^4.5.1",
     "ioredis": "^5.3.2",
     "minio": "^8.0.7",
+    "mssql": "^11.0.1",
+    "mysql2": "^3.11.0",
     "pg": "^8.11.5",
     "pino": "^9.1.0",
     "pino-pretty": "^11.0.0",
@@ -43,6 +45,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@types/bcryptjs": "^2.4.6",
+    "@types/mssql": "^9.1.11",
     "@types/node": "^20.0.0",
     "@types/pg": "^8.11.5",
     "@types/unzipper": "^0.10.11",

@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { Readable } from 'node:stream';
+import { createReadStream } from 'node:fs';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { createHash } from 'node:crypto';
 import { createGunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import type { SchemaSqlEngine } from '@sqlcraft/types';
@@ -608,6 +610,60 @@ export async function runPgRestoreInSandboxContainer(params: {
   );
 }
 
+/**
+ * Streaming variant of runPgRestoreInSandboxContainer.
+ * pg_restore custom/tar format supports reading from stdin when no filename argument is given,
+ * allowing direct piping from S3 or any Readable without buffering the full dump in worker memory.
+ */
+export async function runPgRestoreInSandboxContainerStreaming(params: {
+  containerRef: string;
+  dbUser: string;
+  dbName: string;
+  source: Readable;
+}): Promise<void> {
+  const { containerRef, dbUser, dbName, source } = params;
+  const child = spawn(
+    'docker',
+    [
+      'exec',
+      '-i',
+      containerRef,
+      'pg_restore',
+      '--no-owner',
+      '--no-privileges',
+      '--clean',
+      '--if-exists',
+      '-U',
+      dbUser,
+      '-d',
+      dbName,
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
+  });
+
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  try {
+    await pipeline(source, child.stdin);
+  } catch (err) {
+    child.kill('SIGKILL');
+    await closePromise.catch(() => {});
+    throw err;
+  }
+
+  const code = await closePromise;
+  if (code !== 0) {
+    const detail = stderr.trim().slice(0, 2000);
+    throw new Error(`pg_restore failed (exit ${code}): ${detail || '(no stderr)'}`);
+  }
+}
+
 /** Run mysql/mariadb CLI in container (MySQL / MariaDB sandboxes). Uses MYSQL_PWD to avoid shell quoting issues. */
 export async function runMysqlInSandboxContainer(params: {
   engine: 'mysql' | 'mariadb';
@@ -783,8 +839,9 @@ export async function runMysqlInSandboxContainerStreaming(params: {
   dbName: string;
   source: Readable;
   gzip?: boolean;
+  force?: boolean;
 }): Promise<void> {
-  const { engine, containerRef, dbUser, dbPassword, dbName, source, gzip } = params;
+  const { engine, containerRef, dbUser, dbPassword, dbName, source, gzip, force } = params;
   const clientBin = sandboxMysqlFamilyClientBin(engine);
   const args = [
     'exec',
@@ -793,6 +850,7 @@ export async function runMysqlInSandboxContainerStreaming(params: {
     `MYSQL_PWD=${dbPassword}`,
     containerRef,
     clientBin,
+    ...(force ? ['-f'] : []),
     '--default-character-set=utf8mb4',
     `-u${dbUser}`,
     dbName,
@@ -816,9 +874,9 @@ export async function runMysqlInSandboxContainerStreaming(params: {
   try {
     await pipelinePromise;
   } catch (err) {
-    const detail = stderr.trim().slice(0, 2000);
     child.kill('SIGKILL');
     await closePromise.catch(() => {});
+    const detail = stderr.trim().slice(0, 2000);
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(
       detail
@@ -872,6 +930,60 @@ export async function uploadBufferToS3ViaMinio(params: {
     `mc pipe ${shQuote(`local/${params.bucket}/${params.objectKey}`)}`,
   ].join(' && ');
   await runDockerWithInput(['exec', '-i', storageDockerContainer, 'sh', '-lc', script], params.body);
+}
+
+/**
+ * Stream a local file to MinIO/S3 via `mc pipe` without loading it into worker memory.
+ * Computes SHA256 checksum and byte count in a single streaming pass.
+ */
+export async function uploadFileToS3ViaMinioStreaming(params: {
+  bucket: string;
+  objectKey: string;
+  filePath: string;
+}): Promise<{ checksumSha256: string; byteCount: number }> {
+  const { bucket, objectKey, filePath } = params;
+  const script = [
+    `mc alias set local http://localhost:9000 ${shQuote(storageAccessKey)} ${shQuote(storageSecretKey)} >/dev/null`,
+    `mc pipe ${shQuote(`local/${bucket}/${objectKey}`)}`,
+  ].join(' && ');
+
+  const child = spawn('docker', ['exec', '-i', storageDockerContainer, 'sh', '-lc', script], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const hash = createHash('sha256');
+  let byteCount = 0;
+  const hashTransform = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      hash.update(chunk);
+      byteCount += chunk.length;
+      cb(null, chunk);
+    },
+  });
+
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+
+  try {
+    await pipeline(createReadStream(filePath), hashTransform, child.stdin);
+  } catch (err) {
+    child.kill('SIGKILL');
+    await closePromise.catch(() => {});
+    throw err;
+  }
+
+  const code = await closePromise;
+  if (code !== 0) {
+    const detail = stderr.trim().slice(0, 2000);
+    throw new Error(`mc pipe upload failed (exit ${code}): ${detail || '(no stderr)'}`);
+  }
+
+  return { checksumSha256: hash.digest('hex'), byteCount };
 }
 
 /**

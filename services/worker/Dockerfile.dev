@@ -18,6 +18,7 @@ COPY packages ./packages
 COPY services/worker ./services/worker
 
 # Worker imports `@sqlcraft/mysql-explain` and `@sqlcraft/sandbox-schema-diff` (built `dist/`).
+RUN pnpm --filter @sqlcraft/types build
 RUN pnpm --filter @sqlcraft/mysql-explain build
 RUN pnpm --filter @sqlcraft/sandbox-schema-diff build
 

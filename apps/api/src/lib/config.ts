@@ -34,8 +34,14 @@ const EnvSchema = z.object({
   // ── Sandbox ──────────────────────────────────────────────────────────────
   SANDBOX_DB_HOST:     z.string(),
   SANDBOX_DB_PORT:     z.coerce.number().int().positive().default(5432),
+  /** Used when the API connects to a MySQL/MariaDB sandbox without a Docker containerRef (host mode). */
+  SANDBOX_MYSQL_PORT:  z.coerce.number().int().positive().default(3306),
+  /** Used when the API connects to SQL Server sandbox without a Docker containerRef (host mode). */
+  SANDBOX_MSSQL_PORT:  z.coerce.number().int().positive().default(1433),
   SANDBOX_DB_USER:     z.string(),
   SANDBOX_DB_PASSWORD: z.string(),
+  /** SQL Server `sa` password for API schema diff/revert when not using container port mapping quirks. Falls back to SANDBOX_DB_PASSWORD. */
+  SANDBOX_MSSQL_SA_PASSWORD: z.string().optional(),
   SANDBOX_MAX_QUERY_TIME_MS: z.coerce.number().int().positive().default(30_000),
   SANDBOX_MAX_ROWS_PREVIEW:  z.coerce.number().int().positive().default(500),
 

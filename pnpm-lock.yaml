@@ -83,6 +83,12 @@ importers:
       minio:
         specifier: ^8.0.7
         version: 8.0.7
+      mssql:
+        specifier: ^11.0.1
+        version: 11.0.1(@azure/core-client@1.10.1)
+      mysql2:
+        specifier: ^3.11.0
+        version: 3.20.0(@types/node@20.19.37)
       pg:
         specifier: ^8.11.5
         version: 8.20.0
@@ -105,6 +111,9 @@ importers:
       '@types/bcryptjs':
         specifier: ^2.4.6
         version: 2.4.6
+      '@types/mssql':
+        specifier: ^9.1.11
+        version: 9.1.11(@azure/core-client@1.10.1)
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.37
@@ -267,10 +276,22 @@ importers:
 
   packages/sandbox-schema-diff:
     dependencies:
+      '@sqlcraft/types':
+        specifier: workspace:*
+        version: link:../types
+      mssql:
+        specifier: ^11.0.1
+        version: 11.0.1(@azure/core-client@1.10.1)
+      mysql2:
+        specifier: ^3.11.0
+        version: 3.20.0(@types/node@20.19.37)
       pg:
         specifier: ^8.11.5
         version: 8.20.0
     devDependencies:
+      '@types/mssql':
+        specifier: ^9.1.11
+        version: 9.1.11(@azure/core-client@1.10.1)
       '@types/pg':
         specifier: ^8.11.5
         version: 8.20.0

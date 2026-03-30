@@ -1,8 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -17,7 +17,7 @@ import {
   resolveStorageBucket,
   sandboxContainerName,
   sandboxMysqlFamilyDumpBin,
-  uploadBufferToS3ViaMinio,
+  uploadFileToS3ViaMinioStreaming,
   waitForSandboxEngine,
 } from './docker';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
@@ -81,9 +81,10 @@ async function pgDumpCustomFormatToFile(params: {
   child.stderr.on('data', (c: Buffer | string) => {
     stderrChunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
   });
+  const closePromise = once(child, 'close');
   const out = createWriteStream(destPath);
   await pipeline(child.stdout, out);
-  const [code] = await once(child, 'close');
+  const [code] = await closePromise;
   if (code !== 0) {
     throw new Error(`pg_dump failed (exit ${code}): ${Buffer.concat(stderrChunks).toString('utf8')}`);
   }
@@ -118,10 +119,11 @@ async function mysqlFamilyDumpGzToFile(params: {
   child.stderr.on('data', (c: Buffer | string) => {
     stderrChunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
   });
+  const closePromise = once(child, 'close');
   const gzip = createGzip();
   const out = createWriteStream(params.destPath);
   await pipeline(child.stdout, gzip, out);
-  const [code] = await once(child, 'close');
+  const [code] = await closePromise;
   if (code !== 0) {
     throw new Error(
       `${dumpBin} failed (exit ${code}): ${Buffer.concat(stderrChunks).toString('utf8')}`,
@@ -220,6 +222,7 @@ export async function runGoldenBakeSnapshotPipeline(params: {
         sandboxPassword,
         mssqlSaPassword,
         preferArtifactOverGoldenSnapshot: true,
+        mysqlForce: true,
       }),
       GOLDEN_BAKE_RESTORE_TIMEOUT_MS,
       'golden-bake applySchemaAndDataset',
@@ -252,22 +255,25 @@ export async function runGoldenBakeSnapshotPipeline(params: {
       ext = 'sql.gz';
     }
 
-    const buf = await readFile(filePath);
-    const checksum = createHash('sha256').update(buf).digest('hex');
     const bucket = resolveStorageBucket();
     const key = `golden-snapshots/${datasetTemplateId}/dataset.${ext}`;
-    await uploadBufferToS3ViaMinio({ bucket, objectKey: key, body: buf });
     const snapshotUrl = `s3://${bucket}/${key}`;
 
+    const { checksumSha256, byteCount } = await uploadFileToS3ViaMinioStreaming({
+      bucket,
+      objectKey: key,
+      filePath,
+    });
+
     logger.info(
-      { datasetTemplateId, snapshotUrl, bytes: buf.length, engine: spec.engine },
+      { datasetTemplateId, snapshotUrl, bytes: byteCount, engine: spec.engine },
       'Golden snapshot uploaded',
     );
 
     return {
       snapshotUrl,
-      snapshotBytes: buf.length,
-      snapshotChecksumSha256: checksum,
+      snapshotBytes: byteCount,
+      snapshotChecksumSha256: checksumSha256,
     };
   } finally {
     if (tmpDir) {

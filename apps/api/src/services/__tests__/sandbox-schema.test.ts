@@ -6,6 +6,8 @@ vi.mock('../../lib/config', () => ({
     SANDBOX_DB_PASSWORD: 'sandbox_password',
     SANDBOX_DB_HOST: 'localhost',
     SANDBOX_DB_PORT: 5432,
+    SANDBOX_MYSQL_PORT: 3306,
+    SANDBOX_MSSQL_PORT: 1433,
   },
 }));
 

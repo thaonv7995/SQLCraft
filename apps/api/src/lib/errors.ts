@@ -89,3 +89,9 @@ export class QueryExecutionFailedError extends AppError {
     super(422, ApiCode.QUERY_EXECUTION_FAILED, message, details);
   }
 }
+
+export class ServiceUnavailableError extends AppError {
+  constructor(message = 'Service temporarily unavailable', details?: unknown) {
+    super(503, ApiCode.SERVICE_UNAVAILABLE, message, details);
+  }
+}
