@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { autocompletion } from '@codemirror/autocomplete';
 import { schemaCompletionSource, sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
@@ -8,6 +8,7 @@ import { syntaxTree } from '@codemirror/language';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { Prec, type EditorState, type Text } from '@codemirror/state';
+import { getSqlStatementAtCursor } from '@/lib/sql-statement-at-cursor';
 import { cn } from '@/lib/utils';
 
 // ─── Design System Theme ──────────────────────────────────────────────────────
@@ -669,10 +670,16 @@ function buildSqlSchemaCompletionSource(schema?: SQLNamespace) {
   };
 }
 
+export interface SqlEditorHandle {
+  /** Trimmed SQL statement containing the caret (split on `;` outside strings/comments). */
+  getStatementAtCursor: () => string;
+}
+
 export interface SqlEditorProps {
   value: string;
   onChange: (value: string) => void;
-  onExecute?: () => void;
+  /** Run / Ctrl+Enter executes this statement only, not the whole buffer. */
+  onExecute?: (statementSql: string) => void;
   onFormat?: () => void;
   onCopy?: () => void;
   onClear?: () => void;
@@ -687,26 +694,51 @@ export interface SqlEditorProps {
   schema?: readonly SqlEditorSchemaTable[];
 }
 
-export function SqlEditor({
-  value,
-  onChange,
-  onExecute,
-  onFormat,
-  onCopy,
-  onClear,
-  notice = null,
-  noticeMessage = null,
-  onDismissErrorNotice,
-  placeholder = '-- Write your SQL query here...',
-  readOnly = false,
-  className,
-  testId,
-  schema,
-}: SqlEditorProps) {
+export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function SqlEditor(
+  {
+    value,
+    onChange,
+    onExecute,
+    onFormat,
+    onCopy,
+    onClear,
+    notice = null,
+    noticeMessage = null,
+    onDismissErrorNotice,
+    placeholder = '-- Write your SQL query here...',
+    readOnly = false,
+    className,
+    testId,
+    schema,
+  },
+  ref,
+) {
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const errorPanelRef = useRef<HTMLDivElement>(null);
   const [errorDetailOpen, setErrorDetailOpen] = useState(false);
   const completionSchema = buildCompletionSchema(schema);
+
+  const readStatementAtCursor = useCallback(() => {
+    const view = editorRef.current?.view;
+    const doc = view?.state.doc.toString() ?? value;
+    const head = view?.state.selection.main.head ?? doc.length;
+    return getSqlStatementAtCursor(doc, head);
+  }, [value]);
+
+  const runAtCursor = useCallback(() => {
+    const stmt = readStatementAtCursor();
+    if (stmt.trim() && onExecute) {
+      onExecute(stmt);
+    }
+  }, [onExecute, readStatementAtCursor]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getStatementAtCursor: () => readStatementAtCursor(),
+    }),
+    [readStatementAtCursor],
+  );
 
   useEffect(() => {
     if (!errorDetailOpen) {
@@ -769,7 +801,7 @@ export function SqlEditor({
               key: 'Ctrl-Enter',
               mac: 'Cmd-Enter',
               run: () => {
-                onExecute();
+                runAtCursor();
                 return true;
               },
             },
@@ -779,7 +811,7 @@ export function SqlEditor({
     }
 
     return exts;
-  }, [completionSchema, onExecute]);
+  }, [completionSchema, onExecute, runAtCursor]);
 
   const hasActions = onFormat || onCopy || onClear;
 
@@ -938,7 +970,7 @@ export function SqlEditor({
       )}
     </div>
   );
-}
+});
 
 export const __private__ = {
   buildCompletionSchema,

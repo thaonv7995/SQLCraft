@@ -8,6 +8,10 @@ import { useLabStore } from '@/stores/lab';
 import { createDefaultLabEditorState } from '@/lib/lab-editor-tabs';
 import type { LearningSession } from '@/lib/api';
 
+const sqlEditorStub = vi.hoisted(() => ({
+  getStatementAtCursorImpl: (): string => '',
+}));
+
 const mocks = vi.hoisted(() => ({
   executeQuery: vi.fn(),
   explainQuery: vi.fn(),
@@ -70,11 +74,20 @@ vi.mock('@/hooks/use-query-execution', () => ({
   }),
 }));
 
-vi.mock('@/components/ui/sql-editor', () => ({
-  SqlEditor: ({ testId = 'lab-sql-editor' }: { testId?: string }) => (
-    <div data-testid={testId}>sql editor stub</div>
-  ),
-}));
+vi.mock('@/components/ui/sql-editor', () => {
+  const React = require('react') as typeof import('react');
+  return {
+    SqlEditor: React.forwardRef(function SqlEditorMock(
+      { testId = 'lab-sql-editor' }: { testId?: string },
+      ref: React.Ref<{ getStatementAtCursor: () => string }>,
+    ) {
+      React.useImperativeHandle(ref, () => ({
+        getStatementAtCursor: () => sqlEditorStub.getStatementAtCursorImpl(),
+      }));
+      return <div data-testid={testId}>sql editor stub</div>;
+    }),
+  };
+});
 
 vi.mock('@/components/lab/execution-plan-tree', () => ({
   ExecutionPlanTree: () => <div data-testid="execution-plan-tree" />,
@@ -155,6 +168,7 @@ describe('LabPage provisioning state', () => {
       createdAt: '2026-03-26T03:00:00.000Z',
     } as LearningSession;
     resetLabStore();
+    sqlEditorStub.getStatementAtCursorImpl = () => useLabStore.getState().currentQuery;
   });
 
   afterEach(() => {

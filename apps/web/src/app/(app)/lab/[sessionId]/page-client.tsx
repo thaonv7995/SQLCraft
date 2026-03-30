@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
 import toast from 'react-hot-toast';
@@ -50,7 +50,7 @@ import {
   type SessionSchemaTable,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
-import { SqlEditor } from '@/components/ui/sql-editor';
+import { SqlEditor, type SqlEditorHandle } from '@/components/ui/sql-editor';
 import { ChallengeAttemptCriteriaChecks } from '@/components/lab/challenge-attempt-criteria-checks';
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
@@ -361,23 +361,21 @@ function EditorTabsBar() {
   );
 }
 
-function SqlEditorPanel({
-  sessionId,
-  schemaTables,
-  onFormat,
-  onCopy,
-  onClear,
-  notice,
-  onDismissErrorNotice,
-}: {
-  sessionId: string;
-  schemaTables?: SessionSchemaTable[];
-  onFormat: () => void;
-  onCopy: () => void;
-  onClear: () => void;
-  notice: 'success' | 'error' | 'info' | null;
-  onDismissErrorNotice: () => void;
-}) {
+const SqlEditorPanel = forwardRef<
+  SqlEditorHandle,
+  {
+    sessionId: string;
+    schemaTables?: SessionSchemaTable[];
+    onFormat: () => void;
+    onCopy: () => void;
+    onClear: () => void;
+    notice: 'success' | 'error' | 'info' | null;
+    onDismissErrorNotice: () => void;
+  }
+>(function SqlEditorPanel(
+  { sessionId, schemaTables, onFormat, onCopy, onClear, notice, onDismissErrorNotice },
+  ref,
+) {
   const currentQuery = useLabStore((state) => state.currentQuery);
   const setQuery = useLabStore((state) => state.setQuery);
   const error = useLabStore((state) => state.error);
@@ -389,14 +387,18 @@ function SqlEditorPanel({
       ? (error ?? lastExecution?.errorMessage ?? 'Query failed')
       : null;
 
-  const handleExecute = useCallback(() => {
-    if (currentQuery.trim()) {
-      executeQuery({ sessionId, sql: currentQuery });
-    }
-  }, [currentQuery, executeQuery, sessionId]);
+  const handleExecute = useCallback(
+    (statementSql: string) => {
+      if (statementSql.trim()) {
+        executeQuery({ sessionId, sql: statementSql });
+      }
+    },
+    [executeQuery, sessionId],
+  );
 
   return (
     <SqlEditor
+      ref={ref}
       value={currentQuery}
       onChange={setQuery}
       onExecute={handleExecute}
@@ -407,11 +409,11 @@ function SqlEditorPanel({
       noticeMessage={noticeMessage}
       onDismissErrorNotice={onDismissErrorNotice}
       schema={schemaTables}
-      placeholder="-- Write your SQL query here...&#10;-- Press Ctrl+Enter to execute"
+      placeholder="-- Statements separated by ;&#10;-- Ctrl+Enter runs the statement at the cursor"
       testId="lab-sql-editor"
     />
   );
-}
+});
 
 // ─── Results Panel ────────────────────────────────────────────────────────────
 
@@ -454,7 +456,7 @@ function ResultsPanel() {
             Run a query to see results here
           </p>
           <p className="text-xs text-outline">
-            Press <kbd className="bg-surface-container-high px-1.5 py-0.5 rounded text-on-surface-variant font-mono">Ctrl+Enter</kbd> to execute
+            Press <kbd className="bg-surface-container-high px-1.5 py-0.5 rounded text-on-surface-variant font-mono">Ctrl+Enter</kbd> to run the statement at the cursor
           </p>
         </div>
       </div>
@@ -2615,6 +2617,7 @@ function LabSessionError({
 export default function LabPage({ params }: ClientPageProps) {
   const router = useRouter();
   const sessionId = params.sessionId ?? '';
+  const sqlEditorRef = useRef<SqlEditorHandle>(null);
   const {
     activeTab,
     setActiveTab,
@@ -3016,20 +3019,36 @@ export default function LabPage({ params }: ClientPageProps) {
     markLabBootstrapConsumed(sessionId);
   }, [hasPersistedEditorTabs, sessionId, setQuery]);
 
-  // Global keyboard shortcut: Ctrl+Enter to execute (must run before any conditional return — Rules of Hooks)
+  const runStatementAtCursor = useCallback(() => {
+    const sql = sqlEditorRef.current?.getStatementAtCursor().trim() ?? '';
+    if (!sql) {
+      return;
+    }
+    executeQuery({ sessionId, sql });
+  }, [executeQuery, sessionId]);
+
+  const explainStatementAtCursor = useCallback(() => {
+    const sql = sqlEditorRef.current?.getStatementAtCursor().trim() ?? '';
+    if (!sql) {
+      return;
+    }
+    explainQuery({ sessionId, sql });
+  }, [explainQuery, sessionId]);
+
+  // Global keyboard shortcut: Ctrl+Enter = run statement at caret (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
     if (!sessionId || !isSessionReady) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         if (!isExecuting && currentQuery.trim()) {
-          executeQuery({ sessionId, sql: currentQuery });
+          runStatementAtCursor();
         }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isSessionReady, sessionId, currentQuery, isExecuting, executeQuery]);
+  }, [isSessionReady, sessionId, currentQuery, isExecuting, runStatementAtCursor]);
 
   const [leftWidth, setLeftWidth] = useState(55); // percent
   const resizing = useRef(false);
@@ -3206,7 +3225,8 @@ export default function LabPage({ params }: ClientPageProps) {
                     resetSandboxMutation.isPending ||
                     !isSessionReady
                   }
-                  onClick={() => executeQuery({ sessionId, sql: currentQuery })}
+                  onClick={runStatementAtCursor}
+                  title="Run the SQL statement at the cursor (split on ; outside strings/comments)"
                   leftIcon={
                     <span className="material-symbols-outlined shrink-0 text-[18px] leading-none" style={{ fontVariationSettings: "'FILL' 1" }}>
                       play_arrow
@@ -3247,11 +3267,11 @@ export default function LabPage({ params }: ClientPageProps) {
                     resetSandboxMutation.isPending ||
                     !isSessionReady
                   }
-                  onClick={() => explainQuery({ sessionId, sql: currentQuery })}
+                  onClick={explainStatementAtCursor}
                   title={
                     !explainPlanMode && currentQuery.trim()
                       ? 'Execution plan is available for SELECT/INSERT/UPDATE/DELETE statements'
-                      : 'Generate an execution plan for the current query'
+                      : 'Generate an execution plan for the statement at the cursor'
                   }
                   leftIcon={
                     <span className="material-symbols-outlined shrink-0 text-[18px] leading-none">account_tree</span>
@@ -3510,6 +3530,7 @@ export default function LabPage({ params }: ClientPageProps) {
             </div>
           </div>
           <SqlEditorPanel
+            ref={sqlEditorRef}
             sessionId={sessionId}
             schemaTables={sessionSchema?.tables}
             onFormat={handleFormatSql}
