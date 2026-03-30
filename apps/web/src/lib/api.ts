@@ -895,6 +895,8 @@ export interface SessionSchemaColumn {
 
 export interface SessionSchemaTable {
   name: string;
+  /** Target rows per table from dataset template row_counts (when API provides it). */
+  rowCount?: number;
   columns: SessionSchemaColumn[];
 }
 

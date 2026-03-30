@@ -56,6 +56,8 @@ export interface SessionSchemaColumn {
 
 export interface SessionSchemaTable {
   name: string;
+  /** Target rows for this table from the bound dataset template (`row_counts`), when available. */
+  rowCount?: number;
   columns: SessionSchemaColumn[];
 }
 
@@ -237,6 +239,25 @@ function normalizeRowCounts(rowCounts: unknown): Record<string, number> | null {
   }
 
   return Object.fromEntries(entries);
+}
+
+/** Match dataset `row_counts` key to template table name (exact, then case-insensitive). */
+function rowCountForTableName(
+  rowCounts: Record<string, number> | null,
+  tableName: string,
+): number | undefined {
+  if (!rowCounts) return undefined;
+  const direct = rowCounts[tableName];
+  if (typeof direct === 'number' && Number.isFinite(direct)) {
+    return direct;
+  }
+  const lower = tableName.toLowerCase();
+  for (const [k, v] of Object.entries(rowCounts)) {
+    if (k.toLowerCase() === lower && typeof v === 'number' && Number.isFinite(v)) {
+      return v;
+    }
+  }
+  return undefined;
 }
 
 function buildDatasetSummary(
@@ -607,15 +628,25 @@ export async function getSessionSchema(
   const schemaTemplate = await resolveSchemaTemplateForSession(session, sandbox);
   if (!schemaTemplate) throw new NotFoundError('No schema template linked to this session');
 
+  let rowCountsMap: Record<string, number> | null = null;
+  if (sandbox?.datasetTemplateId) {
+    const datasetTemplate = await sessionsRepository.findDatasetTemplateById(sandbox.datasetTemplateId);
+    rowCountsMap = normalizeRowCounts(datasetTemplate?.rowCounts);
+  }
+
   const rawTables = parseRawSchema(schemaTemplate.definition);
   return {
     schemaTemplateId: schemaTemplate.id,
-    tables: rawTables.map((t) => ({
-      name: t.name,
-      columns: t.columns
-        .filter((c): c is RawColumn => typeof c.name === 'string' && typeof c.type === 'string')
-        .map(normalizeColumn),
-    })),
+    tables: rawTables.map((t) => {
+      const rowCount = rowCountForTableName(rowCountsMap, t.name);
+      return {
+        name: t.name,
+        ...(rowCount != null ? { rowCount } : {}),
+        columns: t.columns
+          .filter((c): c is RawColumn => typeof c.name === 'string' && typeof c.type === 'string')
+          .map(normalizeColumn),
+      };
+    }),
   };
 }
 

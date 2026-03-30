@@ -46,11 +46,6 @@ function DatabaseCard({ db, onClick }: { db: Database; onClick: () => void }) {
       onClick={onClick}
       className="group bg-surface-container-low rounded-xl p-6 cursor-pointer hover:bg-surface-container transition-all duration-200 border border-transparent hover:border-outline-variant/20 relative overflow-hidden"
     >
-      {/* Hover open icon */}
-      <span className="material-symbols-outlined absolute top-4 right-4 text-outline text-base opacity-0 group-hover:opacity-100 transition-opacity">
-        open_in_new
-      </span>
-
       {/* Top row: domain icon + difficulty badge */}
       <div className="flex items-start justify-between mb-4">
         <div className="w-12 h-12 rounded-lg bg-surface-container-highest flex items-center justify-center">

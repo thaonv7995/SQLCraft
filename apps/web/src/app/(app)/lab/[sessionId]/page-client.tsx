@@ -900,48 +900,77 @@ function SchemaPanel({ sessionId }: { sessionId: string }) {
                   -part:{removedPartitionNames.length}
                 </button>
               ) : null}
-              <span className="text-xs text-outline ml-auto">{table.columns.length} cols</span>
+              {table.rowCount != null && Number.isFinite(table.rowCount) ? (
+                <span
+                  className="ml-auto shrink-0 inline-flex items-center rounded-md border border-outline-variant/15 bg-surface-container-highest px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-on-surface-variant/75"
+                  title="Target rows (dataset template)"
+                >
+                  {formatRows(table.rowCount)}
+                </span>
+              ) : null}
             </button>
             {isExpanded && (
               <div className="ml-8 space-y-0.5 pb-2">
-                {table.columns.map((col) => (
-                  <div
-                    key={col.name}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded hover:bg-surface-container transition-colors"
-                  >
-                    <span
-                      className={cn(
-                        'material-symbols-outlined text-sm shrink-0',
-                        col.isPrimary ? 'text-primary' : col.isForeign ? 'text-secondary' : 'text-outline'
-                      )}
-                      style={{ fontVariationSettings: "'FILL' 1" }}
+                {table.columns.map((col) => {
+                  const idxBadge = addedIndexedFieldSet.has(col.name) ? (
+                    <span className="inline-flex h-4 items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-blue-200">
+                      idx
+                    </span>
+                  ) : removedIndexedFieldSet.has(col.name) ? (
+                    <span className="inline-flex h-4 items-center rounded-[10px] border border-error/35 bg-error/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-error">
+                      -idx
+                    </span>
+                  ) : indexedFieldSet.has(col.name) ? (
+                    <span className="inline-flex h-4 items-center rounded-[10px] border border-outline-variant/10 bg-surface-container-high px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-on-surface-variant">
+                      idx
+                    </span>
+                  ) : null;
+                  const colTooltip = [
+                    `${col.name}: ${col.type}`,
+                    col.isPrimary ? 'PRIMARY KEY' : null,
+                    col.isForeign ? 'FOREIGN KEY' : null,
+                    col.references ? `→ ${col.references}` : null,
+                    indexedFieldSet.has(col.name) || addedIndexedFieldSet.has(col.name)
+                      ? 'Indexed'
+                      : removedIndexedFieldSet.has(col.name)
+                        ? 'Index removed (diff)'
+                        : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <div
+                      key={col.name}
+                      className="rounded px-3 py-1.5 hover:bg-surface-container transition-colors"
+                      title={colTooltip}
                     >
-                      {col.isPrimary ? 'key' : col.isForeign ? 'link' : 'circle'}
-                    </span>
-                    <span className="text-xs font-mono text-on-surface-variant flex-1">
-                      {col.name}
-                    </span>
-                    {addedIndexedFieldSet.has(col.name) ? (
-                      <span className="inline-flex h-4 items-center rounded-[10px] border border-blue-400/45 bg-blue-500/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-blue-200">
-                        idx
-                      </span>
-                    ) : removedIndexedFieldSet.has(col.name) ? (
-                      <span className="inline-flex h-4 items-center rounded-[10px] border border-error/35 bg-error/20 px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-error">
-                        -idx
-                      </span>
-                    ) : indexedFieldSet.has(col.name) ? (
-                      <span className="inline-flex h-4 items-center rounded-[10px] border border-outline-variant/10 bg-surface-container-high px-1 py-0 text-[9px] font-semibold uppercase tracking-[0.04em] text-on-surface-variant">
-                        idx
-                      </span>
-                    ) : null}
-                    {col.references && (
-                      <span className="text-[10px] text-outline font-mono truncate max-w-[80px]" title={col.references}>
-                        → {col.references}
-                      </span>
-                    )}
-                    <span className="text-xs font-mono text-outline shrink-0">{col.type}</span>
-                  </div>
-                ))}
+                      <div className="flex items-start gap-2">
+                        <span
+                          className={cn(
+                            'material-symbols-outlined text-sm shrink-0 mt-0.5',
+                            col.isPrimary ? 'text-primary' : col.isForeign ? 'text-secondary' : 'text-outline'
+                          )}
+                          style={{ fontVariationSettings: "'FILL' 1" }}
+                          aria-hidden
+                        >
+                          {col.isPrimary ? 'key' : col.isForeign ? 'link' : 'circle'}
+                        </span>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="text-xs font-mono text-on-surface-variant break-all">{col.name}</span>
+                            {idxBadge}
+                            <span className="text-xs font-mono text-outline shrink-0 ml-auto">{col.type}</span>
+                          </div>
+                          {col.references ? (
+                            <p className="text-[10px] font-mono text-secondary/90 leading-snug break-all pl-0.5">
+                              <span className="text-outline/80">FK →</span> {col.references}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
                 {partitionNames.length > 0 ||
                 addedPartitionNames.length > 0 ||
                 removedPartitionNames.length > 0 ? (
