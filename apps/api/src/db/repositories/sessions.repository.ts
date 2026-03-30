@@ -12,7 +12,7 @@ export type InsertSandbox = InferInsertModel<typeof schema.sandboxInstances>;
 export type ChallengeVersionRow = InferSelectModel<typeof schema.challengeVersions>;
 export type ChallengeVersionWithDatabaseRow = ChallengeVersionRow & {
   databaseId: string;
-  datasetScale: 'tiny' | 'small' | 'medium' | 'large';
+  datasetScale: 'tiny' | 'small' | 'medium' | 'large' | 'extra_large';
   challengeVisibility: 'public' | 'private';
   challengeCreatedBy: string | null;
 };

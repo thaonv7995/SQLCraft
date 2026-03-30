@@ -46,6 +46,7 @@ import {
   type QueryResultColumn,
   type SessionProvisioningEstimate,
   type SessionSchemaDiffResponse,
+  type SessionSchemaDiffSection,
   type SessionSchemaTable,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth';
@@ -60,6 +61,7 @@ import {
   type LabEditorTab,
 } from '@/lib/lab-editor-tabs';
 import type { ClientPageProps } from '@/lib/page-props';
+import { DATASET_SCALE_DISPLAY_META } from '@/lib/database-catalog';
 
 /** API appends ` OK: [type] …` per criterion after the main verdict; cards already show those lines. */
 function extractPrimaryChallengeFeedback(text: string | undefined): string {
@@ -145,13 +147,6 @@ function formatProvisioningRemaining(seconds: number): string {
 
 // ─── Dataset Scale Selector ───────────────────────────────────────────────────
 
-const DATASET_SCALE_META: Record<DatasetScale, { label: string; desc: string }> = {
-  tiny: { label: 'Tiny', desc: '100 rows' },
-  small: { label: 'Small', desc: '10K rows' },
-  medium: { label: 'Medium', desc: '1M-5M rows' },
-  large: { label: 'Large', desc: '10M+ rows' },
-};
-
 function formatSandboxDialect(dialect: string | null | undefined): string {
   if (dialect == null || !String(dialect).trim()) return 'N/A';
   const key = String(dialect).toLowerCase().trim();
@@ -180,7 +175,7 @@ function DatasetScaleSelector({
   databaseName?: string | null;
   dialect?: string | null;
 }) {
-  const sourceScaleLabel = sourceScale ? DATASET_SCALE_META[sourceScale].label : null;
+  const sourceScaleLabel = sourceScale ? DATASET_SCALE_DISPLAY_META[sourceScale].label : null;
   const sourceSummary =
     typeof sourceRowCount === 'number'
       ? `${formatRows(sourceRowCount)} rows`
@@ -189,7 +184,7 @@ function DatasetScaleSelector({
   const dialectLabel = formatSandboxDialect(dialect);
   const hintText = `DB ${databaseName ?? 'N/A'} · Dialect ${dialectLabel} · Source ${sourceSummary}${
     sourceScaleLabel && typeof sourceRowCount === 'number' ? ` (${sourceScaleLabel})` : ''
-  }${selectedScale ? ` · Scale ${DATASET_SCALE_META[selectedScale].label}` : ''}`;
+  }${selectedScale ? ` · Scale ${DATASET_SCALE_DISPLAY_META[selectedScale].label}` : ''}`;
 
   return (
     <div
@@ -209,7 +204,7 @@ function DatasetScaleSelector({
       <span className="text-outline">•</span>
       <span className="text-[10px] uppercase tracking-[0.14em] text-outline">Scale</span>
       <span className="rounded-md bg-surface-container-high px-2 py-1 text-xs font-medium text-on-surface">
-        {selectedScale ? DATASET_SCALE_META[selectedScale].label : 'N/A'}
+        {selectedScale ? DATASET_SCALE_DISPLAY_META[selectedScale].label : 'N/A'}
       </span>
     </div>
   );
@@ -1071,10 +1066,7 @@ function countSessionSchemaDiffChanges(diff: SessionSchemaDiffResponse): number 
 
 function formatSessionSchemaDiffBrief(diff: SessionSchemaDiffResponse): string {
   const parts: string[] = [];
-  const push = (
-    label: string,
-    section: SessionSchemaDiffResponse['indexes'],
-  ) => {
+  const push = (label: string, section: SessionSchemaDiffSection<unknown>) => {
     const n = section.added.length + section.removed.length + section.changed.length;
     if (n > 0) {
       parts.push(`${label} ${n}`);

@@ -1,11 +1,12 @@
 import type { DatasetSize } from '@sqlcraft/types';
 
-export const DATASET_SCALE_ORDER: DatasetSize[] = ['tiny', 'small', 'medium', 'large'];
+export const DATASET_SCALE_ORDER: DatasetSize[] = ['tiny', 'small', 'medium', 'large', 'extra_large'];
 export const DATASET_SCALE_TARGET_TOTAL_ROWS: Record<DatasetSize, number> = {
-  tiny: 100,
-  small: 10_000,
-  medium: 1_000_000,
-  large: 10_000_000,
+  tiny: 50_000,
+  small: 1_000_000,
+  medium: 10_000_000,
+  large: 100_000_000,
+  extra_large: 1_000_000_000,
 };
 
 const DATASET_SCALE_RANK: Record<DatasetSize, number> = {
@@ -13,6 +14,7 @@ const DATASET_SCALE_RANK: Record<DatasetSize, number> = {
   small: 1,
   medium: 2,
   large: 3,
+  extra_large: 4,
 };
 
 export function compareDatasetScales(a: DatasetSize, b: DatasetSize): number {
@@ -72,6 +74,10 @@ export function sumDatasetRowCounts(rowCounts: unknown): number {
  * dumps, not “everything below 10K”. Without a middle step, 5.1K rows was mislabeled as `tiny`.
  */
 export function classifyDatasetScaleFromTotalRows(totalRows: number): DatasetSize {
+  if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.extra_large) {
+    return 'extra_large';
+  }
+
   if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.large) {
     return 'large';
   }
@@ -81,10 +87,6 @@ export function classifyDatasetScaleFromTotalRows(totalRows: number): DatasetSiz
   }
 
   if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.small) {
-    return 'small';
-  }
-
-  if (totalRows > DATASET_SCALE_TARGET_TOTAL_ROWS.tiny) {
     return 'small';
   }
 

@@ -310,7 +310,7 @@ export interface RegisterRequest {
 }
 
 // Dataset types
-export type DatasetSize = 'tiny' | 'small' | 'medium' | 'large';
+export type DatasetSize = 'tiny' | 'small' | 'medium' | 'large' | 'extra_large';
 
 export interface DatasetTemplate {
   id: string;

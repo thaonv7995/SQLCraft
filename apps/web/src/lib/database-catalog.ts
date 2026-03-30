@@ -1,4 +1,4 @@
-import type { DatabaseDomain, DatabaseScale, SandboxGoldenStatus } from './api';
+import type { DatabaseDomain, DatabaseScale, DatasetScale, SandboxGoldenStatus } from './api';
 
 export const DATABASE_DOMAIN_LABELS: Record<DatabaseDomain, string> = {
   ecommerce: 'E-Commerce',
@@ -11,10 +11,40 @@ export const DATABASE_DOMAIN_LABELS: Record<DatabaseDomain, string> = {
 };
 
 export const DATABASE_SCALE_LABELS: Record<DatabaseScale, string> = {
-  tiny: '100 rows',
-  small: '10K rows',
-  medium: '1M-5M rows',
-  large: '10M+ rows',
+  tiny: '< 50K rows',
+  small: '50K - 1M rows',
+  medium: '1M - 10M rows',
+  large: '10M - 100M rows',
+  extra_large: '100M+ rows',
+};
+
+/** Short tier name (matches catalog filter rows below "Any Scale"). */
+export const DATASET_SCALE_SHORT_LABELS: Record<DatabaseScale, string> = {
+  tiny: 'Tiny',
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
+  extra_large: 'Extra Large',
+};
+
+/** Challenge / admin forms: tier name plus row-range hint. */
+export const DATASET_SCALE_FORM_OPTIONS: { value: DatasetScale; label: string }[] = (
+  ['tiny', 'small', 'medium', 'large', 'extra_large'] as const
+).map((value) => ({
+  value,
+  label: `${DATASET_SCALE_SHORT_LABELS[value]} (${DATABASE_SCALE_LABELS[value]})`,
+}));
+
+/** Detail / lab UI: short tier name + row-range line (challenge page, sandbox toolbar). */
+export const DATASET_SCALE_DISPLAY_META: Record<DatasetScale, { label: string; desc: string }> = {
+  tiny: { label: DATASET_SCALE_SHORT_LABELS.tiny, desc: DATABASE_SCALE_LABELS.tiny },
+  small: { label: DATASET_SCALE_SHORT_LABELS.small, desc: DATABASE_SCALE_LABELS.small },
+  medium: { label: DATASET_SCALE_SHORT_LABELS.medium, desc: DATABASE_SCALE_LABELS.medium },
+  large: { label: DATASET_SCALE_SHORT_LABELS.large, desc: DATABASE_SCALE_LABELS.large },
+  extra_large: {
+    label: DATASET_SCALE_SHORT_LABELS.extra_large,
+    desc: DATABASE_SCALE_LABELS.extra_large,
+  },
 };
 
 /**
@@ -26,10 +56,11 @@ export function inferDatasetScaleFromRowCount(rowCount: number): DatabaseScale {
   if (!Number.isFinite(rowCount) || rowCount <= 0) {
     return 'tiny';
   }
-  if (rowCount <= 1_000) return 'tiny';
-  if (rowCount <= 200_000) return 'small';
-  if (rowCount <= 5_000_000) return 'medium';
-  return 'large';
+  if (rowCount < 50_000) return 'tiny';
+  if (rowCount < 1_000_000) return 'small';
+  if (rowCount < 10_000_000) return 'medium';
+  if (rowCount < 100_000_000) return 'large';
+  return 'extra_large';
 }
 
 export function databaseScaleDisplayLabelFromRowCount(rowCount: number): string {
@@ -48,11 +79,17 @@ export const DATABASE_DOMAIN_OPTIONS = [
 
 export const DATABASE_SCALE_OPTIONS = [
   { value: 'all', label: 'Any Scale' },
-  { value: 'tiny', label: 'Tiny' },
-  { value: 'small', label: 'Small' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'large', label: 'Large' },
+  ...(['tiny', 'small', 'medium', 'large', 'extra_large'] as const).map((value) => ({
+    value,
+    label: DATASET_SCALE_SHORT_LABELS[value],
+  })),
 ];
+
+/** Import panels and tier-only pickers (no "Any Scale" row). */
+export const DATASET_SCALE_TIER_OPTIONS = DATABASE_SCALE_OPTIONS.slice(1) as Array<{
+  value: DatasetScale;
+  label: string;
+}>;
 
 /** Shown when logged in on Explorer to separate catalog+shared vs your uploads. */
 export const DATABASE_ACCESS_FILTER_OPTIONS = [

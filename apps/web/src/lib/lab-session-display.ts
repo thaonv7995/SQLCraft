@@ -1,11 +1,5 @@
 import type { DatasetScale } from '@/lib/api';
-
-const DATASET_SCALE_LABELS: Record<DatasetScale, string> = {
-  tiny: 'Tiny',
-  small: 'Small',
-  medium: 'Medium',
-  large: 'Large',
-};
+import { DATASET_SCALE_SHORT_LABELS } from '@/lib/database-catalog';
 
 /** Human-readable SQL engine label for lab sandboxes (matches SQL Lab toolbar). */
 export function formatSandboxDialect(dialect: string | null | undefined): string {
@@ -26,5 +20,5 @@ export function formatSandboxDialect(dialect: string | null | undefined): string
 /** Short label for the loaded dataset scale (selected sandbox scale). */
 export function formatDatasetScaleShort(scale: DatasetScale | null | undefined): string {
   if (scale == null) return '—';
-  return DATASET_SCALE_LABELS[scale] ?? String(scale);
+  return DATASET_SCALE_SHORT_LABELS[scale] ?? String(scale);
 }

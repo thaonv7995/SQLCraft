@@ -30,19 +30,13 @@ import toast from 'react-hot-toast';
 import type { ClientPageProps } from '@/lib/page-props';
 import { useAuthStore } from '@/stores/auth';
 import { parseUuidList } from '@/lib/uuid-list';
+import { DATASET_SCALE_FORM_OPTIONS } from '@/lib/database-catalog';
 
 const DIFFICULTY_OPTIONS = [
   { value: 'beginner', label: 'Beginner' },
   { value: 'intermediate', label: 'Intermediate' },
   { value: 'advanced', label: 'Advanced' },
 ] as const;
-
-const DATASET_SCALE_OPTIONS: { value: DatasetScale; label: string }[] = [
-  { value: 'tiny', label: 'Tiny (~100 rows)' },
-  { value: 'small', label: 'Small (~10K rows)' },
-  { value: 'medium', label: 'Medium (~1M–5M rows)' },
-  { value: 'large', label: 'Large (10M+ rows)' },
-];
 
 const VISIBILITY_OPTIONS = [
   {
@@ -345,7 +339,7 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
               label="Dataset scale"
               value={datasetScale}
               onChange={(e) => setDatasetScale(e.target.value as DatasetScale)}
-              options={DATASET_SCALE_OPTIONS}
+              options={DATASET_SCALE_FORM_OPTIONS}
               hint="Sandbox data volume for every submission on this challenge."
             />
 

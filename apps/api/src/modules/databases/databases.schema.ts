@@ -17,7 +17,7 @@ const listDialectSchema = z.preprocess((val) => {
 
 export const ListDatabasesQuerySchema = z.object({
   domain: z.enum(['ecommerce', 'fintech', 'health', 'iot', 'social', 'analytics', 'other']).optional(),
-  scale: z.enum(['tiny', 'small', 'medium', 'large']).optional(),
+  scale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional(),
   difficulty: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
   dialect: listDialectSchema,
   /** Case-insensitive substring match on name, slug, description, engine label, and tags. */
@@ -55,7 +55,7 @@ export const GetDatabaseQuerySchema = z.object({
 
 export const CreateDatabaseSessionBodySchema = z.object({
   databaseId: z.string().min(1),
-  scale: z.enum(['tiny', 'small', 'medium', 'large']).optional(),
+  scale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional(),
 });
 
 export type ListDatabasesQuery = z.infer<typeof ListDatabasesQuerySchema>;

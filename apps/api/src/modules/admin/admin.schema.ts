@@ -49,7 +49,7 @@ export const CreateChallengeSchema = z
     difficulty: z.enum(['beginner', 'intermediate', 'advanced']).default('beginner'),
     sortOrder: z.number().int().default(0),
     points: z.number().int().min(10).max(1000).default(100),
-    datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).default('small'),
+    datasetScale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).default('small'),
     visibility: z.enum(['public', 'private']).default('public'),
     invitedUserIds: z.array(z.string().uuid()).max(100).optional().default([]),
     problemStatement: z.string().min(1),
@@ -167,7 +167,7 @@ export const SqlDumpScanImportSchema = z
     scanId: z.string().uuid(),
     schemaName: z.string().min(1).max(100),
     domain: AdminDatabaseDomainSchema,
-    datasetScale: z.enum(['tiny', 'small', 'medium', 'large']).optional().nullable(),
+    datasetScale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional().nullable(),
     description: z.string().optional().nullable(),
     tags: z.array(z.string().min(1).max(50)).max(20).optional(),
     /** When set, overrides {@link SqlDumpScanResult.inferredDialect} from the scan step. */

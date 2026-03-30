@@ -18,6 +18,7 @@ import {
   type PassCriterionDraft,
 } from '@/lib/challenge-pass-criteria';
 import { adminApi, databasesApi, type AdminCreateChallengePayload, type DatasetScale } from '@/lib/api';
+import { DATASET_SCALE_FORM_OPTIONS } from '@/lib/database-catalog';
 import { CHALLENGE_SLUG_PATTERN, slugifyChallengeTitle } from '@/lib/slugify-challenge';
 import toast from 'react-hot-toast';
 import type { ClientPageProps } from '@/lib/page-props';
@@ -27,13 +28,6 @@ const DIFFICULTY_OPTIONS = [
   { value: 'intermediate', label: 'Intermediate' },
   { value: 'advanced', label: 'Advanced' },
 ] as const;
-
-const DATASET_SCALE_OPTIONS: { value: DatasetScale; label: string }[] = [
-  { value: 'tiny', label: 'Tiny (~100 rows)' },
-  { value: 'small', label: 'Small (~10K rows)' },
-  { value: 'medium', label: 'Medium (~1M–5M rows)' },
-  { value: 'large', label: 'Large (10M+ rows)' },
-];
 
 export default function AdminNewChallengePage(_props: ClientPageProps) {
   const router = useRouter();
@@ -197,7 +191,7 @@ export default function AdminNewChallengePage(_props: ClientPageProps) {
               label="Dataset scale"
               value={datasetScale}
               onChange={(e) => setDatasetScale(e.target.value as DatasetScale)}
-              options={DATASET_SCALE_OPTIONS}
+              options={DATASET_SCALE_FORM_OPTIONS}
               hint="Sandbox data volume for every submission on this challenge."
             />
 

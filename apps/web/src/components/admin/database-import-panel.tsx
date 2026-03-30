@@ -21,6 +21,7 @@ import {
   SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES,
   SQL_DUMP_FULL_PARSE_MAX_MB,
 } from '@/lib/sql-dump-limits';
+import { DATASET_SCALE_TIER_OPTIONS } from '@/lib/database-catalog';
 
 interface DatabaseImportPanelProps {
   /** Admin: publish to catalog. User: import with visibility / invites (enforced server-side). */
@@ -63,13 +64,6 @@ const DOMAIN_OPTIONS: Array<{ value: DatabaseDomain; label: string }> = [
   { value: 'social', label: 'Social' },
   { value: 'analytics', label: 'Analytics' },
   { value: 'other', label: 'General' },
-];
-
-const DATASET_SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
-  { value: 'tiny', label: 'Tiny' },
-  { value: 'small', label: 'Small' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'large', label: 'Large' },
 ];
 
 const DIALECT_OPTIONS: Array<{ value: SchemaSqlDialect; label: string }> = [
@@ -540,7 +534,7 @@ export function DatabaseImportPanel({
               onChange={(event) => setDatasetScale(event.target.value as DatasetScale | '')}
               options={[
                 { value: '', label: 'Use inferred scale' },
-                ...DATASET_SCALE_OPTIONS,
+                ...DATASET_SCALE_TIER_OPTIONS,
               ]}
             />
 

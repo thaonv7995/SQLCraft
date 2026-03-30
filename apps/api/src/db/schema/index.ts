@@ -47,7 +47,7 @@ export const queryStatusEnum = pgEnum('query_status', [
 ]);
 export const attemptStatusEnum = pgEnum('attempt_status', ['pending', 'passed', 'failed', 'error']);
 export const planModeEnum = pgEnum('plan_mode', ['explain', 'explain_analyze']);
-export const datasetSizeEnum = pgEnum('dataset_size', ['tiny', 'small', 'medium', 'large']);
+export const datasetSizeEnum = pgEnum('dataset_size', ['tiny', 'small', 'medium', 'large', 'extra_large']);
 export const reviewStatusEnum = pgEnum('review_status', [
   'pending',
   'approved',

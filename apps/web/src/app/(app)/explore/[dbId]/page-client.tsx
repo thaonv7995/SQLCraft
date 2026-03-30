@@ -25,6 +25,7 @@ const SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
   { value: 'small', label: DATABASE_SCALE_LABELS.small },
   { value: 'medium', label: DATABASE_SCALE_LABELS.medium },
   { value: 'large', label: DATABASE_SCALE_LABELS.large },
+  { value: 'extra_large', label: DATABASE_SCALE_LABELS.extra_large },
 ];
 
 const SCALE_RANK: Record<DatasetScale, number> = {
@@ -32,6 +33,7 @@ const SCALE_RANK: Record<DatasetScale, number> = {
   small: 1,
   medium: 2,
   large: 3,
+  extra_large: 4,
 };
 
 const ROLE_STYLES = {

@@ -44,7 +44,7 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
             },
             scale: {
               type: 'string',
-              enum: ['tiny', 'small', 'medium', 'large'],
+              enum: ['tiny', 'small', 'medium', 'large', 'extra_large'],
             },
             difficulty: {
               type: 'string',
@@ -147,7 +147,7 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
             databaseId: { type: 'string' },
             scale: {
               type: 'string',
-              enum: ['tiny', 'small', 'medium', 'large'],
+              enum: ['tiny', 'small', 'medium', 'large', 'extra_large'],
             },
           },
         },
@@ -181,7 +181,7 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
               items: { type: 'string', format: 'uuid' },
               description: 'Only when visibility is private',
             },
-            datasetScale: { type: 'string', enum: ['tiny', 'small', 'medium', 'large'] },
+            datasetScale: { type: 'string', enum: ['tiny', 'small', 'medium', 'large', 'extra_large'] },
             description: { type: 'string' },
             tags: { type: 'array', items: { type: 'string' } },
             dialect: { type: 'string' },

@@ -77,7 +77,7 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
             datasetScale: {
               type: 'string',
-              enum: ['tiny', 'small', 'medium', 'large'],
+              enum: ['tiny', 'small', 'medium', 'large', 'extra_large'],
               default: 'small',
             },
             problemStatement: { type: 'string' },
@@ -117,7 +117,7 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
             points: { type: 'integer', minimum: 10, maximum: 1000, default: 100 },
             datasetScale: {
               type: 'string',
-              enum: ['tiny', 'small', 'medium', 'large'],
+              enum: ['tiny', 'small', 'medium', 'large', 'extra_large'],
               default: 'small',
             },
             problemStatement: { type: 'string' },
@@ -642,7 +642,7 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
                 },
                 datasetScale: {
                   type: 'string',
-                  enum: ['tiny', 'small', 'medium', 'large'],
+                  enum: ['tiny', 'small', 'medium', 'large', 'extra_large'],
                 },
                 description: { type: 'string' },
                 tags: {

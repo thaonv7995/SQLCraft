@@ -4,7 +4,7 @@ import type { DatabaseDomain } from '../../lib/infer-database-domain';
 export type { DatabaseDomain } from '../../lib/infer-database-domain';
 export type { SchemaSqlDialect } from '@sqlcraft/types';
 
-export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
+export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large' | 'extra_large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 /** How a row appears when public + your private / invited DBs are merged (e.g. Explorer, challenge pickers). */

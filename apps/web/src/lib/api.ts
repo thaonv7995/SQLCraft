@@ -275,7 +275,7 @@ export interface ChallengeLeaderboardEntry {
   lastSubmittedAt: string;
 }
 
-const DATASET_SCALE_ORDER = ['tiny', 'small', 'medium', 'large'] as const;
+const DATASET_SCALE_ORDER = ['tiny', 'small', 'medium', 'large', 'extra_large'] as const;
 export type DatasetScale = (typeof DATASET_SCALE_ORDER)[number];
 const DATASET_SCALE_RANK = Object.fromEntries(
   DATASET_SCALE_ORDER.map((scale, index) => [scale, index]),
@@ -968,7 +968,7 @@ export interface RevertSessionSchemaChangePayload {
 // ─── Databases ────────────────────────────────────────────────────────────────
 
 export type DatabaseDomain = 'ecommerce' | 'fintech' | 'health' | 'iot' | 'social' | 'analytics' | 'other';
-export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large';
+export type DatabaseScale = 'tiny' | 'small' | 'medium' | 'large' | 'extra_large';
 export type DatabaseDifficulty = 'beginner' | 'intermediate' | 'advanced';
 
 export type DatabaseCatalogKind =

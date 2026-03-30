@@ -9,9 +9,9 @@ export const SandboxResetParamsSchema = z.object({
 });
 
 export const SandboxResetBodySchema = z.object({
-  datasetSize: z.enum(['tiny', 'small', 'medium', 'large']).optional(),
-  scale: z.enum(['tiny', 'small', 'medium', 'large']).optional(),
-  selectedScale: z.enum(['tiny', 'small', 'medium', 'large']).optional(),
+  datasetSize: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional(),
+  scale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional(),
+  selectedScale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional(),
 });
 
 export type SandboxParams = z.infer<typeof SandboxParamsSchema>;

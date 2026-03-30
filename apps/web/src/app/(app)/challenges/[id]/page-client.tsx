@@ -13,16 +13,7 @@ import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import { useAuthStore } from '@/stores/auth';
 import { formatRelativeTime } from '@/lib/utils';
 import type { ClientPageProps } from '@/lib/page-props';
-
-const DATASET_SCALE_META: Record<
-  ChallengeCatalogItem['datasetScale'],
-  { label: string; desc: string }
-> = {
-  tiny: { label: 'Tiny', desc: '100 rows' },
-  small: { label: 'Small', desc: '10K rows' },
-  medium: { label: 'Medium', desc: '1M-5M rows' },
-  large: { label: 'Large', desc: '10M+ rows' },
-};
+import { DATASET_SCALE_DISPLAY_META } from '@/lib/database-catalog';
 
 export default function ChallengeDetailPage({ params }: ClientPageProps) {
   const router = useRouter();
@@ -270,11 +261,11 @@ export default function ChallengeDetailPage({ params }: ClientPageProps) {
               <span className="uppercase tracking-[0.18em] text-outline">Dataset scale</span>
               :{' '}
               <span className="font-medium text-on-surface">
-                {DATASET_SCALE_META[challenge.datasetScale].label}
+                {DATASET_SCALE_DISPLAY_META[challenge.datasetScale].label}
               </span>
               <span className="text-on-surface-variant">
                 {' '}
-                — {DATASET_SCALE_META[challenge.datasetScale].desc}
+                — {DATASET_SCALE_DISPLAY_META[challenge.datasetScale].desc}
               </span>
             </p>
             {!hasPublishedPlay ? (
