@@ -642,6 +642,9 @@ export async function runPgRestoreInSandboxContainerStreaming(params: {
     { stdio: ['pipe', 'pipe', 'pipe'] },
   );
 
+  // Drain stdout — if not consumed, the internal buffer fills up and blocks pg_restore.
+  child.stdout.resume();
+
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
@@ -1073,6 +1076,9 @@ export async function runPsqlInSandboxContainerStreaming(params: {
   const child = spawn('docker', args, {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+
+  // Drain stdout — if not consumed, the internal buffer fills up and blocks psql from writing output.
+  child.stdout.resume();
 
   let stderr = '';
   child.stderr.setEncoding('utf8');

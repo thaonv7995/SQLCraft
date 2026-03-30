@@ -18,6 +18,7 @@ RUN pnpm install --frozen-lockfile
 COPY packages ./packages
 COPY apps/api ./apps/api
 
+RUN pnpm --filter @sqlcraft/types build
 RUN pnpm --filter @sqlcraft/sandbox-schema-diff build
 
 WORKDIR /app/apps/api
