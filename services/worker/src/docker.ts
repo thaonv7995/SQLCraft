@@ -611,6 +611,78 @@ export async function runPgRestoreInSandboxContainer(params: {
   );
 }
 
+const MSSQL_BAK_CONTAINER_PATH = '/tmp/golden.bak';
+
+/**
+ * Run `BACKUP DATABASE` inside a SQL Server container and copy the resulting .bak file to
+ * destPath on the host via `docker cp`.
+ */
+export async function backupSqlServerDatabaseToFile(params: {
+  containerRef: string;
+  saPassword: string;
+  dbName: string;
+  destPath: string;
+}): Promise<void> {
+  const { containerRef, saPassword, dbName, destPath } = params;
+
+  // BACKUP DATABASE to a fixed path inside the container
+  await runSqlcmdInSandboxContainer({
+    containerRef,
+    saPassword,
+    dbName,
+    sql: `BACKUP DATABASE [${dbName}] TO DISK = N'${MSSQL_BAK_CONTAINER_PATH}' WITH FORMAT, INIT, COMPRESSION;`,
+  });
+
+  // docker cp container:/tmp/golden.bak destPath
+  await runDocker(['cp', `${containerRef}:${MSSQL_BAK_CONTAINER_PATH}`, destPath]);
+}
+
+/**
+ * Copy a .bak file from hostPath into the SQL Server container and run `RESTORE DATABASE`.
+ */
+export async function restoreSqlServerDatabaseFromFile(params: {
+  containerRef: string;
+  saPassword: string;
+  dbName: string;
+  sourcePath: string;
+}): Promise<void> {
+  const { containerRef, saPassword, dbName, sourcePath } = params;
+
+  // docker cp sourcePath container:/tmp/golden.bak
+  await runDocker(['cp', sourcePath, `${containerRef}:${MSSQL_BAK_CONTAINER_PATH}`]);
+
+  // Get logical file names from the backup so we can relocate data/log files
+  const logicalNamesOutput = await runDocker([
+    'exec',
+    '-e', `SQLCMDPASSWORD=${saPassword}`,
+    containerRef,
+    '/bin/sh', '-c',
+    `/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -Q "RESTORE FILELISTONLY FROM DISK = N'${MSSQL_BAK_CONTAINER_PATH}'" -h -1 -W 2>/dev/null || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -Q "RESTORE FILELISTONLY FROM DISK = N'${MSSQL_BAK_CONTAINER_PATH}'" -h -1 -W`,
+  ]);
+
+  // Parse logical names — each line: LogicalName  PhysicalName  Type ...
+  const relocate: string[] = [];
+  for (const line of logicalNamesOutput.split('\n')) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 3) continue;
+    const logicalName = cols[0]!;
+    const fileType = cols[2]!.toUpperCase(); // D = data, L = log
+    if (fileType === 'D') {
+      relocate.push(`MOVE N'${logicalName}' TO N'/var/opt/mssql/data/${dbName}.mdf'`);
+    } else if (fileType === 'L') {
+      relocate.push(`MOVE N'${logicalName}' TO N'/var/opt/mssql/data/${dbName}_log.ldf'`);
+    }
+  }
+
+  const moveClause = relocate.length > 0 ? `, ${relocate.join(', ')}` : '';
+  await runSqlcmdInSandboxContainer({
+    containerRef,
+    saPassword,
+    dbName: 'master',
+    sql: `RESTORE DATABASE [${dbName}] FROM DISK = N'${MSSQL_BAK_CONTAINER_PATH}' WITH REPLACE, RECOVERY${moveClause};`,
+  });
+}
+
 /**
  * Streaming variant of runPgRestoreInSandboxContainer.
  * pg_restore custom/tar format supports reading from stdin when no filename argument is given,

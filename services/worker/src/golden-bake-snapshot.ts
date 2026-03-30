@@ -13,6 +13,7 @@ import { fetchSandboxSchemaSnapshotForEngine } from '@sqlcraft/sandbox-schema-di
 
 import { fetchDatasetTemplate, fetchSchemaTemplateSandboxMeta } from './db';
 import {
+  backupSqlServerDatabaseToFile,
   createSandboxEngineContainer,
   ensureSandboxContainerRemoved,
   initSqlServerDatabase,
@@ -177,18 +178,7 @@ export async function runGoldenBakeSnapshotPipeline(params: {
     };
   }
 
-  if (spec.engine === 'sqlserver') {
-    logger.info(
-      { datasetTemplateId },
-      'Golden snapshot not implemented for SQL Server; fingerprint-only bake',
-    );
-    return {
-      snapshotUrl: null,
-      snapshotBytes: null,
-      snapshotChecksumSha256: null,
-      schemaSnapshotUrl: null,
-    };
-  }
+  // SQL Server is handled below alongside PostgreSQL/MySQL — no early return.
 
   const bakeInstanceId = randomUUID();
   const dbName = sandboxDbNameFromInstanceId(bakeInstanceId);
@@ -244,30 +234,28 @@ export async function runGoldenBakeSnapshotPipeline(params: {
     );
 
     let schemaSnapshotUrl: string | null = null;
-    if (spec.engine === 'postgresql' || spec.engine === 'mysql' || spec.engine === 'mariadb') {
-      try {
-        const snap = await fetchSandboxSchemaSnapshotForEngine(spec.engine, {
-          host: containerRef,
-          port: spec.internalPort,
-          user: sandboxUser,
-          password: sandboxPassword,
-          database: dbName,
-        });
-        const bucket = resolveStorageBucket();
-        const schemaKey = `golden-snapshots/${datasetTemplateId}/schema-snapshot.json`;
-        await uploadBufferToS3ViaMinio({
-          bucket,
-          objectKey: schemaKey,
-          body: Buffer.from(JSON.stringify(snap), 'utf8'),
-        });
-        schemaSnapshotUrl = `s3://${bucket}/${schemaKey}`;
-        logger.info({ datasetTemplateId, schemaSnapshotUrl }, 'Golden schema snapshot uploaded');
-      } catch (err) {
-        logger.warn(
-          { err, datasetTemplateId },
-          'Golden schema snapshot failed; schema diff will fall back to template definition',
-        );
-      }
+    try {
+      const snap = await fetchSandboxSchemaSnapshotForEngine(spec.engine, {
+        host: containerRef,
+        port: spec.internalPort,
+        user: spec.engine === 'sqlserver' ? 'sa' : sandboxUser,
+        password: spec.engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
+        database: dbName,
+      });
+      const bucket = resolveStorageBucket();
+      const schemaKey = `golden-snapshots/${datasetTemplateId}/schema-snapshot.json`;
+      await uploadBufferToS3ViaMinio({
+        bucket,
+        objectKey: schemaKey,
+        body: Buffer.from(JSON.stringify(snap), 'utf8'),
+      });
+      schemaSnapshotUrl = `s3://${bucket}/${schemaKey}`;
+      logger.info({ datasetTemplateId, schemaSnapshotUrl }, 'Golden schema snapshot uploaded');
+    } catch (err) {
+      logger.warn(
+        { err, datasetTemplateId },
+        'Golden schema snapshot failed; schema diff will fall back to template definition',
+      );
     }
 
     tmpDir = await mkdtemp(join(tmpdir(), 'golden-snap-'));
@@ -284,6 +272,15 @@ export async function runGoldenBakeSnapshotPipeline(params: {
         destPath: filePath,
       });
       ext = 'dump';
+    } else if (spec.engine === 'sqlserver') {
+      filePath = join(tmpDir, 'snap.bak');
+      await backupSqlServerDatabaseToFile({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+        destPath: filePath,
+      });
+      ext = 'bak';
     } else {
       filePath = join(tmpDir, 'snap.sql.gz');
       await mysqlFamilyDumpGzToFile({

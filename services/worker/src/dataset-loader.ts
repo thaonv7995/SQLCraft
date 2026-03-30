@@ -19,6 +19,7 @@ import {
   runSqlcmdInSandboxContainer,
   runSqlcmdInSandboxContainerStreaming,
   runMysqlInSandboxContainerStreaming,
+  restoreSqlServerDatabaseFromFile,
 } from './docker';
 import { sanitizePostgresDumpForPsql, createPostgresSanitizeTransform } from './postgres-dump-sanitize';
 import { sanitizeSqlServerDumpPayload, createSqlServerSanitizeTransform } from './sqlserver-dump-sanitize';
@@ -1197,6 +1198,36 @@ async function restoreFromArtifact(params: {
       });
 
       logger.info({ artifactRef, streaming: true }, `Dataset restored from ${extension} artifact (streaming)`);
+      return true;
+    }
+
+    // ── SQL Server .bak golden snapshot restore ────────────────────────
+    if (extension === '.bak') {
+      if (engine !== 'sqlserver') {
+        logger.warn({ artifactRef, engine }, '.bak artifacts require SQL Server sandbox');
+        return false;
+      }
+      const { mkdtemp, rm } = await import('node:fs/promises');
+      const { tmpdir } = await import('node:os');
+      const { join } = await import('node:path');
+      const { createWriteStream } = await import('node:fs');
+      const { pipeline } = await import('node:stream/promises');
+      const tmpDir = await mkdtemp(join(tmpdir(), 'mssql-bak-'));
+      try {
+        const localBak = join(tmpDir, 'restore.bak');
+        const source = await createArtifactReadStream(artifactRef);
+        const out = createWriteStream(localBak);
+        await pipeline(source, out);
+        await restoreSqlServerDatabaseFromFile({
+          containerRef,
+          saPassword: mssqlSaPassword,
+          dbName,
+          sourcePath: localBak,
+        });
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
+      logger.info({ artifactRef }, 'Dataset restored from .bak golden snapshot');
       return true;
     }
 
