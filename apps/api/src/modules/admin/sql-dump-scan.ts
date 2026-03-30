@@ -203,6 +203,36 @@ function normalizeSql(input: string): string {
     .join('\n');
 }
 
+/** Skip expensive DDL parsing on huge INSERT/COPY statements (scan first bytes only). */
+const CREATE_TABLE_KEYWORD_WINDOW = 384 * 1024;
+const ALTER_TABLE_KEYWORD_WINDOW = 96 * 1024;
+/** Rare dumps prefix many `--` lines before INSERT; keep window generous but bounded. */
+const INSERT_KEYWORD_WINDOW = 256 * 1024;
+
+function mightBeCreateTableStatement(statement: string): boolean {
+  if (statement.length < 12) {
+    return false;
+  }
+  const n = Math.min(statement.length, CREATE_TABLE_KEYWORD_WINDOW);
+  return /\bcreate\s+table\b/i.test(statement.slice(0, n));
+}
+
+function mightBeAlterTableStatement(statement: string): boolean {
+  if (statement.length < 11) {
+    return false;
+  }
+  const n = Math.min(statement.length, ALTER_TABLE_KEYWORD_WINDOW);
+  return /\balter\s+table\b/i.test(statement.slice(0, n));
+}
+
+function mightBeInsertForRowCount(statement: string): boolean {
+  if (statement.length < 6) {
+    return false;
+  }
+  const n = Math.min(statement.length, INSERT_KEYWORD_WINDOW);
+  return /\binsert\s+/i.test(statement.slice(0, n));
+}
+
 function unquoteIdentifier(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -928,6 +958,10 @@ function detectSchemaName(tables: ParsedTable[]): string | null {
 }
 
 function parseCreateTable(statement: string): ParsedTable | null {
+  if (!mightBeCreateTableStatement(statement)) {
+    return null;
+  }
+
   const cleaned = stripLeadingSqlJunkForDdlStatement(statement);
   const match = cleaned.match(/^create\s+table\s+(?:if\s+not\s+exists\s+)?(.+?)\s*\(/is);
   if (!match) {
@@ -1084,14 +1118,17 @@ function parseCreateTable(statement: string): ParsedTable | null {
   };
 }
 
-function applyAlterTableConstraints(statement: string, tables: ParsedTable[]): void {
+function applyAlterTableConstraints(
+  statement: string,
+  tableByName: Map<string, ParsedTable>,
+): void {
   const tableMatch = statement.match(/^alter\s+table(?:\s+only)?\s+([^\s]+)\s+(.*)$/is);
   if (!tableMatch) {
     return;
   }
 
   const tableName = parseQualifiedIdentifier(tableMatch[1]).name;
-  const table = tables.find((candidate) => candidate.name === tableName);
+  const table = tableByName.get(tableName);
   if (!table) {
     return;
   }
@@ -1202,10 +1239,12 @@ export function parseSqlDumpBuffer(
     throw new ValidationError('No CREATE TABLE statements were detected in the SQL dump');
   }
 
+  const tableByName = new Map(tables.map((table) => [table.name, table]));
   for (const statement of statements) {
-    if (/^alter\s+table\b/i.test(statement)) {
-      applyAlterTableConstraints(statement, tables);
+    if (!mightBeAlterTableStatement(statement)) {
+      continue;
     }
+    applyAlterTableConstraints(statement, tableByName);
   }
 
   const rowCounts = tables.reduce<Record<string, number>>((acc, table) => {
@@ -1214,6 +1253,9 @@ export function parseSqlDumpBuffer(
   }, {});
 
   for (const statement of statements) {
+    if (!mightBeInsertForRowCount(statement)) {
+      continue;
+    }
     const cleanedInsert = stripLeadingSqlJunkForDdlStatement(statement);
     // T-SQL / SSMS samples (e.g. InstPubs) use `INSERT authors` without `INTO`; PostgreSQL/MySQL use `INSERT INTO`.
     const insertMatch = cleanedInsert.match(/^insert\s+(?:into\s+)?([^\s(]+)/i);
