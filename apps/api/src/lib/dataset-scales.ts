@@ -68,23 +68,29 @@ export function sumDatasetRowCounts(rowCounts: unknown): number {
 }
 
 /**
- * Map observed total row count to a catalog scale label using tier thresholds from
- * `DATASET_SCALE_TARGET_TOTAL_ROWS` (e.g. below `small` → `tiny`).
+ * Lower bounds for **classifying** observed total rows (SQL scan, imports).
+ * Tiers: tiny &lt; 50K, small 50K–1M, medium 1M–10M, large 10M–100M, extra_large ≥ 100M.
+ * (Separate from `DATASET_SCALE_TARGET_TOTAL_ROWS`, which drives derived-tier row targets.)
  */
+const CLASSIFY_MIN_ROWS_SMALL = 50_000;
+const CLASSIFY_MIN_ROWS_MEDIUM = 1_000_000;
+const CLASSIFY_MIN_ROWS_LARGE = 10_000_000;
+const CLASSIFY_MIN_ROWS_EXTRA_LARGE = 100_000_000;
+
 export function classifyDatasetScaleFromTotalRows(totalRows: number): DatasetSize {
-  if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.extra_large) {
+  if (totalRows >= CLASSIFY_MIN_ROWS_EXTRA_LARGE) {
     return 'extra_large';
   }
 
-  if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.large) {
+  if (totalRows >= CLASSIFY_MIN_ROWS_LARGE) {
     return 'large';
   }
 
-  if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.medium) {
+  if (totalRows >= CLASSIFY_MIN_ROWS_MEDIUM) {
     return 'medium';
   }
 
-  if (totalRows >= DATASET_SCALE_TARGET_TOTAL_ROWS.small) {
+  if (totalRows >= CLASSIFY_MIN_ROWS_SMALL) {
     return 'small';
   }
 

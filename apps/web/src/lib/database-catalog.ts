@@ -15,11 +15,11 @@ export const DATABASE_DOMAIN_LABELS: Record<DatabaseDomain, string> = {
  * in `apps/api/src/lib/dataset-scales.ts` (scan + catalog inferred scale).
  */
 export const DATABASE_SCALE_LABELS: Record<DatabaseScale, string> = {
-  tiny: '< 1M rows',
-  small: '1M - 10M rows',
-  medium: '10M - 100M rows',
-  large: '100M - 1B rows',
-  extra_large: '1B+ rows',
+  tiny: '< 50K rows',
+  small: '50K - 1M rows',
+  medium: '1M - 10M rows',
+  large: '10M - 100M rows',
+  extra_large: '100M+ rows',
 };
 
 /** Short tier name (matches catalog filter rows below "Any Scale"). */
@@ -59,16 +59,16 @@ export function inferDatasetScaleFromRowCount(rowCount: number): DatabaseScale {
   if (!Number.isFinite(rowCount) || rowCount <= 0) {
     return 'tiny';
   }
-  if (rowCount >= 1_000_000_000) {
+  if (rowCount >= 100_000_000) {
     return 'extra_large';
   }
-  if (rowCount >= 100_000_000) {
+  if (rowCount >= 10_000_000) {
     return 'large';
   }
-  if (rowCount >= 10_000_000) {
+  if (rowCount >= 1_000_000) {
     return 'medium';
   }
-  if (rowCount >= 1_000_000) {
+  if (rowCount >= 50_000) {
     return 'small';
   }
   return 'tiny';

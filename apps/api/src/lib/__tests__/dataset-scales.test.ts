@@ -29,15 +29,21 @@ describe('ensurePositiveDatasetRowCounts', () => {
 });
 
 describe('classifyDatasetScaleFromTotalRows', () => {
-  it('labels totals below the small tier threshold as tiny', () => {
+  it('labels totals below 50K as tiny', () => {
     expect(classifyDatasetScaleFromTotalRows(50)).toBe('tiny');
-    expect(classifyDatasetScaleFromTotalRows(999_999)).toBe('tiny');
+    expect(classifyDatasetScaleFromTotalRows(49_999)).toBe('tiny');
   });
 
-  it('labels totals at small / medium / large / extra_large thresholds', () => {
-    expect(classifyDatasetScaleFromTotalRows(1_000_000)).toBe('small');
-    expect(classifyDatasetScaleFromTotalRows(10_000_000)).toBe('medium');
-    expect(classifyDatasetScaleFromTotalRows(100_000_000)).toBe('large');
+  it('labels 50K ..< 1M as small', () => {
+    expect(classifyDatasetScaleFromTotalRows(50_000)).toBe('small');
+    expect(classifyDatasetScaleFromTotalRows(999_999)).toBe('small');
+  });
+
+  it('labels 1M ..< 10M as medium, 10M ..< 100M as large, ≥ 100M as extra_large', () => {
+    expect(classifyDatasetScaleFromTotalRows(1_000_000)).toBe('medium');
+    expect(classifyDatasetScaleFromTotalRows(1_700_000)).toBe('medium');
+    expect(classifyDatasetScaleFromTotalRows(10_000_000)).toBe('large');
+    expect(classifyDatasetScaleFromTotalRows(100_000_000)).toBe('extra_large');
     expect(classifyDatasetScaleFromTotalRows(1_000_000_000)).toBe('extra_large');
   });
 });
