@@ -55,6 +55,7 @@ import { ChallengeAttemptCriteriaChecks } from '@/components/lab/challenge-attem
 import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
 import {
+  clearLabEditorState,
   createDefaultLabEditorState,
   readLabEditorState,
   writeLabEditorState,
@@ -2875,6 +2876,7 @@ export default function LabPage({ params }: ClientPageProps) {
   const endSessionMutation = useMutation({
     mutationFn: async () => sessionsApi.end(sessionId),
     onSuccess: () => {
+      clearLabEditorState(sessionId);
       setIsEndSessionModalOpen(false);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.invalidateQueries({ queryKey: ['session-status', sessionId] });

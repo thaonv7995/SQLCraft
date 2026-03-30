@@ -12,6 +12,96 @@ export interface PersistedLabEditorState {
 
 const LAB_EDITOR_TABS_PREFIX = 'sqlcraft-lab-editor:';
 
+/** Default: keep at most this many lab editor snapshots across sessions. */
+export const LAB_EDITOR_STORAGE_MAX_ENTRIES_DEFAULT = 30;
+
+/** Default: drop snapshots whose latest tab activity is older than this (ms). */
+export const LAB_EDITOR_STORAGE_MAX_AGE_MS_DEFAULT = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function collectLabEditorStorageKeys(): string[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+  const keys: string[] = [];
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const k = window.localStorage.key(i);
+    if (k?.startsWith(LAB_EDITOR_TABS_PREFIX)) {
+      keys.push(k);
+    }
+  }
+  return keys;
+}
+
+function getLastTabUpdatedAtFromRaw(raw: string): number | null {
+  try {
+    const parsed = JSON.parse(raw) as { tabs?: Array<{ updatedAt?: unknown }> };
+    if (!Array.isArray(parsed.tabs) || parsed.tabs.length === 0) {
+      return null;
+    }
+    let max = 0;
+    for (const tab of parsed.tabs) {
+      if (
+        tab &&
+        typeof tab === 'object' &&
+        typeof tab.updatedAt === 'number' &&
+        Number.isFinite(tab.updatedAt)
+      ) {
+        max = Math.max(max, tab.updatedAt);
+      }
+    }
+    return max > 0 ? max : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes stale or excess `sqlcraft-lab-editor:*` entries from localStorage.
+ * - Drops corrupt / empty payloads.
+ * - Drops entries whose newest `tab.updatedAt` is older than `maxAgeMs`.
+ * - Keeps only the `maxEntries` most recently touched sessions (by max tab `updatedAt`).
+ */
+export function pruneLabEditorLocalStorage(options?: {
+  maxEntries?: number;
+  maxAgeMs?: number;
+}): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const maxEntries = options?.maxEntries ?? LAB_EDITOR_STORAGE_MAX_ENTRIES_DEFAULT;
+  const maxAgeMs = options?.maxAgeMs ?? LAB_EDITOR_STORAGE_MAX_AGE_MS_DEFAULT;
+  const now = Date.now();
+  const cutoff = now - maxAgeMs;
+
+  const keys = collectLabEditorStorageKeys();
+  const survivors: { key: string; lastUpdated: number }[] = [];
+
+  for (const key of keys) {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      continue;
+    }
+    const lastUpdated = getLastTabUpdatedAtFromRaw(raw);
+    if (lastUpdated === null) {
+      window.localStorage.removeItem(key);
+      continue;
+    }
+    if (lastUpdated < cutoff) {
+      window.localStorage.removeItem(key);
+      continue;
+    }
+    survivors.push({ key, lastUpdated });
+  }
+
+  survivors.sort((a, b) => b.lastUpdated - a.lastUpdated);
+  if (survivors.length > maxEntries) {
+    for (let i = maxEntries; i < survivors.length; i += 1) {
+      window.localStorage.removeItem(survivors[i].key);
+    }
+  }
+}
+
 /** Dialect-neutral probe: valid on PostgreSQL, MySQL/MariaDB, SQL Server (no LIMIT/TOP, no real table). */
 export const DEFAULT_LAB_QUERY =
   '-- Welcome to SQLCraft!\n-- Write your SQL below. This line is a harmless probe on any supported engine.\n\nSELECT 1 AS ok;';
@@ -112,8 +202,20 @@ export function readLabEditorState(sessionId: string): PersistedLabEditorState |
   }
 }
 
+/** Remove persisted editor tabs for a session (e.g. session ended). */
+export function clearLabEditorState(sessionId: string): void {
+  if (typeof window === 'undefined' || !sessionId) {
+    return;
+  }
+  window.localStorage.removeItem(getStorageKey(sessionId));
+}
+
 export function writeLabEditorState(sessionId: string, state: PersistedLabEditorState): void {
-  if (typeof window === 'undefined' || !sessionId || state.tabs.length === 0) {
+  if (typeof window === 'undefined' || !sessionId) {
+    return;
+  }
+  if (state.tabs.length === 0) {
+    clearLabEditorState(sessionId);
     return;
   }
 

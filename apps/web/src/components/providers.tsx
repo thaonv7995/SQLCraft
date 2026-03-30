@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { pruneLabEditorLocalStorage } from '@/lib/lab-editor-tabs';
 import type { AxiosError } from 'axios';
 
 function makeQueryClient() {
@@ -44,6 +45,10 @@ interface ProvidersProps {
 
 export function Providers({ children }: ProvidersProps) {
   const [queryClient] = useState(() => getQueryClient());
+
+  useEffect(() => {
+    pruneLabEditorLocalStorage();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
