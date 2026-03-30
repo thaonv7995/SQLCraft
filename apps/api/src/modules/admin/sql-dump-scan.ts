@@ -118,6 +118,12 @@ interface ParsedTable {
     name: string;
     columns: string[];
   }>;
+  /** Table- and column-level FKs; composite keys use multiple `localColumns` / `referencedColumns`. */
+  foreignKeyConstraints?: Array<{
+    localColumns: string[];
+    referencedTable: string;
+    referencedColumns: string[];
+  }>;
 }
 
 const MAX_SCAN_CACHE_ITEMS = 100;
@@ -841,6 +847,8 @@ function parseCreateTable(statement: string): ParsedTable | null {
   const columns: ParsedColumn[] = [];
   const primaryKeyColumns = new Set<string>();
   const foreignKeyConstraints = new Map<string, string>();
+  const foreignKeyConstraintsList: NonNullable<ParsedTable['foreignKeyConstraints']> = [];
+  const compositeLocalColumns = new Set<string>();
   const uniqueIndexes: ParsedTable['uniqueIndexes'] = [];
 
   for (const part of splitTopLevelList(tableBody)) {
@@ -877,10 +885,21 @@ function parseCreateTable(statement: string): ParsedTable | null {
         unquoteIdentifier(stripTsqlColumnSortSuffix(value)),
       );
 
-      localColumns.forEach((localColumn, index) => {
-        const targetColumn = targetColumns[index] ?? targetColumns[0];
-        foreignKeyConstraints.set(localColumn, `${targetTable}(${targetColumn})`);
+      foreignKeyConstraintsList.push({
+        localColumns,
+        referencedTable: targetTable,
+        referencedColumns: targetColumns,
       });
+      if (localColumns.length === 1) {
+        foreignKeyConstraints.set(
+          localColumns[0]!,
+          `${targetTable}(${targetColumns[0] ?? 'id'})`,
+        );
+      } else {
+        for (const localColumn of localColumns) {
+          compositeLocalColumns.add(localColumn);
+        }
+      }
       continue;
     }
 
@@ -940,7 +959,10 @@ function parseCreateTable(statement: string): ParsedTable | null {
       ...column,
       nullable: isPrimary ? false : column.nullable,
       isPrimary,
-      isForeign: column.isForeign || !!foreignReference,
+      isForeign:
+        column.isForeign ||
+        !!foreignReference ||
+        compositeLocalColumns.has(column.name),
       references: foreignReference ?? column.references,
     };
   });
@@ -950,6 +972,7 @@ function parseCreateTable(statement: string): ParsedTable | null {
     schemaName: identifier.schemaName,
     columns: normalizedColumns,
     uniqueIndexes,
+    foreignKeyConstraints: foreignKeyConstraintsList.length > 0 ? foreignKeyConstraintsList : undefined,
   };
 }
 
@@ -990,19 +1013,38 @@ function applyAlterTableConstraints(statement: string, tables: ParsedTable[]): v
     const targetTable = parseQualifiedIdentifier(foreignKeyMatch[2]).name;
     const targetColumns = splitTopLevelList(foreignKeyMatch[3]).map((value) => unquoteIdentifier(value));
 
-    table.columns = table.columns.map((column) => {
-      const localIndex = localColumns.findIndex((localColumn) => localColumn === column.name);
-      if (localIndex < 0) {
-        return column;
-      }
-
-      const targetColumn = targetColumns[localIndex] ?? targetColumns[0];
-      return {
-        ...column,
-        isForeign: true,
-        references: `${targetTable}(${targetColumn})`,
-      };
+    if (!table.foreignKeyConstraints) {
+      table.foreignKeyConstraints = [];
+    }
+    table.foreignKeyConstraints.push({
+      localColumns,
+      referencedTable: targetTable,
+      referencedColumns: targetColumns,
     });
+
+    if (localColumns.length === 1) {
+      const lc = localColumns[0]!;
+      const tc = targetColumns[0] ?? 'id';
+      table.columns = table.columns.map((column) =>
+        column.name === lc
+          ? {
+              ...column,
+              isForeign: true,
+              references: `${targetTable}(${tc})`,
+            }
+          : column,
+      );
+    } else {
+      const localSet = new Set(localColumns);
+      table.columns = table.columns.map((column) =>
+        localSet.has(column.name)
+          ? {
+              ...column,
+              isForeign: true,
+            }
+          : column,
+      );
+    }
   }
 
   const uniqueConstraint = extractUniqueConstraint(details);
@@ -1130,6 +1172,9 @@ export function parseSqlDumpBuffer(
           name: column.name,
           type: formatDefinitionType(column),
         })),
+        ...(table.foreignKeyConstraints?.length
+          ? { foreignKeyConstraints: table.foreignKeyConstraints }
+          : {}),
       })),
       indexes: collectDefinitionIndexes(tables),
       metadata: {

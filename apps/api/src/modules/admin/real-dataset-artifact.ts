@@ -14,6 +14,11 @@ interface SchemaDefinition {
       name: string;
       type: string;
     }>;
+    foreignKeyConstraints?: Array<{
+      localColumns: string[];
+      referencedTable: string;
+      referencedColumns: string[];
+    }>;
   }>;
 }
 
@@ -21,10 +26,10 @@ interface SchemaTable {
   name: string;
   columns: string[];
   primaryKeyColumns: string[];
-  foreignKeys: Array<{
-    columnName: string;
+  foreignKeyConstraints: Array<{
+    localColumns: string[];
     referencedTable: string;
-    referencedColumn: string;
+    referencedColumns: string[];
   }>;
 }
 
@@ -284,22 +289,58 @@ function quoteSqlIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
 
+function parseReferencesFromColumnType(
+  type: string,
+): { referencedTable: string; referencedColumns: string[] } | null {
+  const match = type.match(/references\s+([^\s(]+)\s*\(([^)]+)\)/i);
+  if (!match) {
+    return null;
+  }
+  const referencedTable = parseQualifiedIdentifier(match[1]).name;
+  const referencedColumns = splitTopLevelList(match[2]).map((value) => unquoteIdentifier(value.trim()));
+  if (referencedColumns.length === 0) {
+    return null;
+  }
+  return { referencedTable, referencedColumns };
+}
+
 function parseSchemaTables(definition: SchemaDefinition): SchemaTable[] {
   return (definition.tables ?? []).map((table) => {
-    const foreignKeys = (table.columns ?? [])
+    const fromColumns = (table.columns ?? [])
       .map((column) => {
-        const match = column.type.match(/references\s+([^\s(]+)\s*\(([^)]+)\)/i);
-        if (!match) {
+        const parsed = parseReferencesFromColumnType(column.type);
+        if (!parsed) {
           return null;
         }
-
         return {
-          columnName: column.name,
-          referencedTable: parseQualifiedIdentifier(match[1]).name,
-          referencedColumn: unquoteIdentifier(match[2]),
+          localColumns: [column.name],
+          referencedTable: parsed.referencedTable,
+          referencedColumns: parsed.referencedColumns,
         };
       })
       .filter((value): value is NonNullable<typeof value> => value !== null);
+
+    const explicit = table.foreignKeyConstraints ?? [];
+    const coveredLocals = new Set<string>();
+    for (const fk of explicit) {
+      for (const localColumn of fk.localColumns) {
+        coveredLocals.add(localColumn);
+      }
+    }
+
+    const merged = [...explicit];
+    for (const fk of fromColumns) {
+      const only = fk.localColumns[0];
+      if (only && !coveredLocals.has(only)) {
+        merged.push(fk);
+      }
+    }
+
+    const foreignKeyConstraints = merged.map((fk) => ({
+      localColumns: [...fk.localColumns],
+      referencedTable: parseQualifiedIdentifier(fk.referencedTable).name,
+      referencedColumns: fk.referencedColumns.map((column) => unquoteIdentifier(column)),
+    }));
 
     return {
       name: table.name,
@@ -307,9 +348,45 @@ function parseSchemaTables(definition: SchemaDefinition): SchemaTable[] {
       primaryKeyColumns: (table.columns ?? [])
         .filter((column) => /\bprimary\s+key\b/i.test(column.type))
         .map((column) => column.name),
-      foreignKeys,
+      foreignKeyConstraints,
     };
   });
+}
+
+function compositeForeignKeyIndexKey(fk: {
+  referencedTable: string;
+  referencedColumns: string[];
+}): string {
+  return `${fk.referencedTable}::${fk.referencedColumns.join(',')}`;
+}
+
+function registerCompositeTuplesForParentRow(
+  parentTable: string,
+  row: ParsedDumpRow,
+  schemaTables: SchemaTable[],
+  selectedCompositeTuples: Map<string, Set<string>>,
+): void {
+  for (const t of schemaTables) {
+    for (const fk of t.foreignKeyConstraints) {
+      if (fk.referencedTable !== parentTable || fk.referencedColumns.length <= 1) {
+        continue;
+      }
+      if (fk.localColumns.length !== fk.referencedColumns.length) {
+        continue;
+      }
+      const tuple = fk.referencedColumns.map((col) => row.valuesByColumn.get(col) ?? null);
+      if (tuple.some((value) => value === null)) {
+        continue;
+      }
+      const key = compositeForeignKeyIndexKey(fk);
+      let set = selectedCompositeTuples.get(key);
+      if (!set) {
+        set = new Set();
+        selectedCompositeTuples.set(key, set);
+      }
+      set.add(JSON.stringify(tuple));
+    }
+  }
 }
 
 function splitCopyFields(rawLine: string): string[] {
@@ -716,10 +793,12 @@ function buildTrackedColumns(schemaTables: SchemaTable[]): Map<string, Set<strin
   const tracked = new Map<string, Set<string>>();
 
   for (const table of schemaTables) {
-    for (const foreignKey of table.foreignKeys) {
-      const tableTracked = tracked.get(foreignKey.referencedTable) ?? new Set<string>();
-      tableTracked.add(foreignKey.referencedColumn);
-      tracked.set(foreignKey.referencedTable, tableTracked);
+    for (const fk of table.foreignKeyConstraints) {
+      const tableTracked = tracked.get(fk.referencedTable) ?? new Set<string>();
+      for (const referencedColumn of fk.referencedColumns) {
+        tableTracked.add(referencedColumn);
+      }
+      tracked.set(fk.referencedTable, tableTracked);
     }
   }
 
@@ -743,8 +822,8 @@ function buildSelectionOrder(schemaTables: SchemaTable[]): SelectionOrderResult 
 
   for (const table of schemaTables) {
     const dependencies = new Set(
-      table.foreignKeys
-        .map((foreignKey) => foreignKey.referencedTable)
+      table.foreignKeyConstraints
+        .map((fk) => fk.referencedTable)
         .filter((dependency) => dependency !== table.name && incoming.has(dependency)),
     );
 
@@ -792,9 +871,9 @@ function createSelectedValueIndex(
     schemaTables.map((table) => {
       const columns = new Set([
         ...(trackedColumns.get(table.name) ?? []),
-        ...table.foreignKeys
-          .filter((foreignKey) => foreignKey.referencedTable === table.name)
-          .map((foreignKey) => foreignKey.referencedColumn),
+        ...table.foreignKeyConstraints
+          .filter((fk) => fk.referencedTable === table.name)
+          .flatMap((fk) => fk.referencedColumns),
       ]);
 
       return [table.name, new Map(Array.from(columns).map((column) => [column, new Set<string>()]))];
@@ -806,22 +885,43 @@ function rowSatisfiesForeignKeys(
   row: ParsedDumpRow,
   schemaTable: SchemaTable,
   selectedValues: Map<string, Map<string, Set<string>>>,
+  selectedCompositeTuples: Map<string, Set<string>>,
   cycleTables: Set<string>,
 ): boolean {
-  for (const foreignKey of schemaTable.foreignKeys) {
-    if (cycleTables.has(foreignKey.referencedTable) || cycleTables.has(schemaTable.name)) {
+  for (const fk of schemaTable.foreignKeyConstraints) {
+    if (cycleTables.has(fk.referencedTable) || cycleTables.has(schemaTable.name)) {
       continue;
     }
 
-    const value = row.valuesByColumn.get(foreignKey.columnName) ?? null;
-    if (value === null) {
+    if (fk.localColumns.length !== fk.referencedColumns.length) {
       continue;
     }
 
-    const tableValues = selectedValues.get(foreignKey.referencedTable);
-    const referencedValues = tableValues?.get(foreignKey.referencedColumn);
-    if (!referencedValues?.has(value)) {
-      return false;
+    const localValues = fk.localColumns.map((col) => row.valuesByColumn.get(col) ?? null);
+    if (localValues.every((value) => value === null)) {
+      continue;
+    }
+    if (localValues.some((value) => value === null)) {
+      continue;
+    }
+
+    if (fk.referencedColumns.length === 1) {
+      const value = localValues[0];
+      if (value === null) {
+        continue;
+      }
+      const tableValues = selectedValues.get(fk.referencedTable);
+      const referencedValues = tableValues?.get(fk.referencedColumns[0]!);
+      if (!referencedValues?.has(value)) {
+        return false;
+      }
+    } else {
+      const key = compositeForeignKeyIndexKey(fk);
+      const tupleSet = selectedCompositeTuples.get(key);
+      const serialized = JSON.stringify(localValues);
+      if (!tupleSet?.has(serialized)) {
+        return false;
+      }
     }
   }
 
@@ -839,6 +939,7 @@ function selectRowsForTargets(params: {
   const { ordered: selectionOrder, cycleTables } = buildSelectionOrder(schemaTables);
   const schemaByName = new Map(schemaTables.map((table) => [table.name, table]));
   const selectedRowIds = new Set<string>();
+  const selectedCompositeTuples = new Map<string, Set<string>>();
   const actualRowCounts = Object.fromEntries(
     schemaTables.map((table) => [table.name, 0]),
   ) as Record<string, number>;
@@ -859,7 +960,7 @@ function selectRowsForTargets(params: {
         break;
       }
 
-      if (!rowSatisfiesForeignKeys(row, tableSchema, selectedValues, cycleTables)) {
+      if (!rowSatisfiesForeignKeys(row, tableSchema, selectedValues, selectedCompositeTuples, cycleTables)) {
         continue;
       }
 
@@ -874,6 +975,8 @@ function selectRowsForTargets(params: {
         }
         selectedValues.get(tableName)?.get(columnName)?.add(value);
       }
+
+      registerCompositeTuplesForParentRow(tableName, row, schemaTables, selectedCompositeTuples);
     }
   }
 

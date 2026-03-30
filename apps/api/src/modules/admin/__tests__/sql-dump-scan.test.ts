@@ -89,6 +89,72 @@ describe('parseSqlDumpBuffer()', () => {
     ]);
   });
 
+  it('stores composite FOREIGN KEY (multi-column) in definition.foreignKeyConstraints', () => {
+    const sql = `
+      CREATE TABLE public.pair_parent (
+        a integer NOT NULL,
+        b integer NOT NULL,
+        PRIMARY KEY (a, b)
+      );
+
+      CREATE TABLE public.pair_child (
+        x integer NOT NULL,
+        y integer NOT NULL,
+        FOREIGN KEY (x, y) REFERENCES public.pair_parent (a, b)
+      );
+
+      INSERT INTO public.pair_parent (a, b) VALUES (1, 10), (2, 20);
+      INSERT INTO public.pair_child (x, y) VALUES (1, 10), (2, 20);
+    `;
+
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'pair.sql',
+      '44444444-4444-4444-8444-444444444444',
+    );
+
+    const child = result.definition.tables.find((t) => t.name === 'pair_child');
+    expect(child?.foreignKeyConstraints).toEqual([
+      {
+        localColumns: ['x', 'y'],
+        referencedTable: 'pair_parent',
+        referencedColumns: ['a', 'b'],
+      },
+    ]);
+    expect(result.detectedForeignKeys).toBe(2);
+  });
+
+  it('parses ALTER TABLE ADD CONSTRAINT … FOREIGN KEY for composite keys', () => {
+    const sql = `
+      CREATE TABLE public.p (
+        a integer NOT NULL,
+        b integer NOT NULL,
+        PRIMARY KEY (a, b)
+      );
+      CREATE TABLE public.c (
+        x integer NOT NULL,
+        y integer NOT NULL
+      );
+      ALTER TABLE ONLY public.c
+        ADD CONSTRAINT c_pair_fkey FOREIGN KEY (x, y) REFERENCES public.p (a, b);
+    `;
+
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'alter_fk.sql',
+      '55555555-5555-4555-8555-555555555555',
+    );
+
+    const c = result.definition.tables.find((t) => t.name === 'c');
+    expect(c?.foreignKeyConstraints).toEqual([
+      {
+        localColumns: ['x', 'y'],
+        referencedTable: 'p',
+        referencedColumns: ['a', 'b'],
+      },
+    ]);
+  });
+
   it('preserves unique constraints in the stored schema definition', () => {
     const sql = `
       CREATE TABLE public.customers (

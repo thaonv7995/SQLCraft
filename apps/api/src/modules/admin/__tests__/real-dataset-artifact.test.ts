@@ -99,6 +99,78 @@ describe('materializeDerivedSqlDumpArtifacts()', () => {
     expect(dump).not.toContain("('item-3', 'order-3', 'sku-3')");
   });
 
+  it('enforces composite foreign keys when selecting derived rows', () => {
+    const sql = [
+      'CREATE TABLE public.pair_parent (',
+      '  a integer NOT NULL,',
+      '  b integer NOT NULL',
+      ');',
+      '',
+      'CREATE TABLE public.pair_child (',
+      '  x integer NOT NULL,',
+      '  y integer NOT NULL',
+      ');',
+      '',
+      'INSERT INTO public.pair_parent (a, b) VALUES',
+      '  (1, 10),',
+      '  (2, 20),',
+      '  (3, 30);',
+      '',
+      'INSERT INTO public.pair_child (x, y) VALUES',
+      '  (1, 10),',
+      '  (2, 20),',
+      '  (3, 99);',
+      '',
+    ].join('\n');
+
+    const [artifact] = materializeDerivedSqlDumpArtifacts({
+      sourceSql: Buffer.from(sql, 'utf8'),
+      definition: {
+        tables: [
+          {
+            name: 'pair_parent',
+            columns: [
+              { name: 'a', type: 'integer NOT NULL' },
+              { name: 'b', type: 'integer NOT NULL' },
+            ],
+          },
+          {
+            name: 'pair_child',
+            columns: [
+              { name: 'x', type: 'integer NOT NULL' },
+              { name: 'y', type: 'integer NOT NULL' },
+            ],
+            foreignKeyConstraints: [
+              {
+                localColumns: ['x', 'y'],
+                referencedTable: 'pair_parent',
+                referencedColumns: ['a', 'b'],
+              },
+            ],
+          },
+        ],
+      },
+      derivedDatasets: [
+        {
+          size: 'tiny',
+          rowCounts: {
+            pair_parent: 3,
+            pair_child: 3,
+          },
+        },
+      ],
+    });
+
+    expect(artifact.rowCounts.pair_parent).toBe(3);
+    expect(artifact.rowCounts.pair_child).toBe(2);
+
+    const dump = gunzipSync(artifact.buffer).toString('utf8');
+    // (3, 99) references no parent row (3, 30); composite FK excludes it.
+    expect(dump).not.toMatch(/\(3,\s*99\)/);
+    expect(dump).toMatch(/\(1,\s*10\)/);
+    expect(dump).toMatch(/\(2,\s*20\)/);
+  });
+
   it('returns no artifacts when schema definition has no tables', () => {
     const out = materializeDerivedSqlDumpArtifacts({
       sourceSql: Buffer.from('SELECT 1;', 'utf8'),

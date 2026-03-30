@@ -89,7 +89,7 @@
 |-------|--------|-----------------|
 | Schema definition **without** inline `references …` on columns | Empty `foreignKeys` → selection hits numeric targets **without closure** → orphans | (1) Extend parser: `ALTER TABLE … FOREIGN KEY` → merge into FK list. (2) Warn when FK metadata may be incomplete. (3) Optional: `strictFkMetadata` fails derived import. |
 | **Cyclic FKs** (`cycleTables`) | FK checks skipped between tables in the cycle → possible skew | Document clearly; later improvements (multi-pass, etc.) — separate phase. |
-| **Composite FKs** / detached `ALTER TABLE` constraints | Not tracked | Extend model to tuple FKs + incremental parser; integration tests. |
+| **Composite FKs** / detached `ALTER TABLE` constraints | Was not tracked | **Done (partial):** `definition.tables[].foreignKeyConstraints` (multi-column); `real-dataset-artifact` validates tuples; `sql-dump-scan` records CREATE/ALTER `FOREIGN KEY (…) REFERENCES …`. |
 | **Requested vs actual** | UI/metadata use old targets → looks “full” but file has fewer rows | Phase 0: **actual** is the display source; optional admin dashboard for requested→actual diff. |
 
 ---
@@ -126,7 +126,8 @@
 |-----------|------|
 | Tier thresholds, `scaleDatasetRowCounts`, `buildDerivedDatasetRowCounts` | `apps/api/src/lib/dataset-scales.ts` |
 | Admin import & derived materialization | `apps/api/src/modules/admin/admin.service.ts` |
-| Column schema + inline FK parsing, row selection + FK checks | `apps/api/src/modules/admin/real-dataset-artifact.ts` |
+| Column schema + FK parsing (inline + stored constraints), row selection + single- and composite-FK checks | `apps/api/src/modules/admin/real-dataset-artifact.ts` |
+| SQL dump `CREATE TABLE` / `ALTER TABLE` FK extraction | `apps/api/src/modules/admin/sql-dump-scan.ts` |
 | FK closure tests | `apps/api/src/modules/admin/__tests__/real-dataset-artifact.test.ts` |
 
 ---
