@@ -451,12 +451,17 @@ export async function getQueryHistory(
     throw new ForbiddenError('Access denied to this session');
   }
 
+  const total = await queriesRepository.countBySession(sessionId);
   const rows = await queriesRepository.listBySession(sessionId, query.page, query.limit);
   const items = rows.map((r) => toListItem({ ...r, learningSessionId: sessionId }));
+  const totalPages = Math.max(1, Math.ceil(total / query.limit));
 
   return {
     items,
-    meta: { page: query.page, limit: query.limit },
+    total,
+    page: query.page,
+    limit: query.limit,
+    totalPages,
   };
 }
 

@@ -37,8 +37,8 @@ describe('queries router HTTP contracts', () => {
       items: [],
       total: 0,
       page: 2,
-      pageSize: 5,
-      totalPages: 0,
+      limit: 5,
+      totalPages: 1,
     });
     queryServiceMocks.getGlobalQueryHistory.mockResolvedValue({
       items: [],
@@ -216,8 +216,8 @@ describe('queries router HTTP contracts', () => {
         items: [],
         total: 0,
         page: 2,
-        pageSize: 5,
-        totalPages: 0,
+        limit: 5,
+        totalPages: 1,
       },
     });
   });

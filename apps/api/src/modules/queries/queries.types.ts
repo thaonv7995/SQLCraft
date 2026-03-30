@@ -59,10 +59,10 @@ export interface QueryHistoryItem {
 
 export interface QueryHistoryResult {
   items: QueryHistoryItem[];
-  meta: {
-    page: number;
-    limit: number;
-  };
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 export interface GlobalQueryHistoryResult {

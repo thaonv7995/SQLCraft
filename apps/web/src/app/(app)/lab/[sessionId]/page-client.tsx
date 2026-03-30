@@ -613,13 +613,16 @@ function ExecutionPlanPanel() {
 
 function QueryHistoryPanel({ sessionId }: { sessionId: string }) {
   const setQuery = useLabStore((s) => s.setQuery);
+  const { liveMainLine, liveSubLine, hasLiveChanges, liveDiffReady } = useSessionSchemaDriftSummary(sessionId);
+  const [sqlModal, setSqlModal] = useState<{ sql: string; heading: string } | null>(null);
+  const [driftModal, setDriftModal] = useState<QueryExecution | null>(null);
   const [page, setPage] = useState(1);
   const [sessionSnapshot, setSessionSnapshot] = useState(sessionId);
   if (sessionId !== sessionSnapshot) {
     setSessionSnapshot(sessionId);
     setPage(1);
   }
-  const limit = 20;
+  const limit = 10;
   const historyQuery = useQueryHistory(sessionId, page, limit);
   const historyItems = historyQuery.data?.items ?? [];
   const totalPages = Math.max(1, historyQuery.data?.totalPages ?? 1);
@@ -659,33 +662,71 @@ function QueryHistoryPanel({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="flex-1 overflow-y-auto flex flex-col">
-      {historyItems.map((q) => (
-        <div
-          key={q.id}
-          className="px-4 py-3 hover:bg-surface-container transition-colors cursor-pointer group"
-          onClick={() => setQuery(q.sql)}
-        >
-          <div className="flex items-center gap-2 mb-1.5">
-            <StatusBadge status={q.status} />
-            {q.durationMs !== undefined && (
-              <span className="text-xs text-on-surface-variant font-mono">
-                {formatDuration(q.durationMs)}
-              </span>
-            )}
-            {q.rowCount !== undefined && (
-              <span className="text-xs text-on-surface-variant">
-                {formatRows(q.rowCount)} rows
-              </span>
-            )}
-            <span className="text-xs text-outline ml-auto">
-              {formatRelativeTime(q.createdAt)}
-            </span>
+      {historyItems.map((q) => {
+        const showDiffIcon = historyRowHasSchemaDiff(q, hasLiveChanges, liveDiffReady);
+
+        return (
+          <div
+            key={q.id}
+            className="group border-b border-outline-variant/10 px-4 py-3 transition-colors last:border-b-0 hover:bg-surface-container"
+          >
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="min-w-0 flex-1 cursor-pointer text-left"
+                onClick={() => setQuery(q.sql)}
+              >
+                <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <StatusBadge status={q.status} />
+                  {q.durationMs !== undefined && (
+                    <span className="font-mono text-xs text-on-surface-variant">
+                      {formatDuration(q.durationMs)}
+                    </span>
+                  )}
+                  {q.rowCount !== undefined && (
+                    <span className="text-xs text-on-surface-variant">{formatRows(q.rowCount)} rows</span>
+                  )}
+                  <span className="ml-auto text-xs text-outline">{formatRelativeTime(q.createdAt)}</span>
+                </div>
+                <code className="block truncate font-mono text-xs text-on-surface-variant transition-colors group-hover:text-on-surface">
+                  {truncateSql(q.sql, 70)}
+                </code>
+              </button>
+              <div className="mt-0.5 flex shrink-0 items-start gap-0.5">
+                {showDiffIcon ? (
+                  <button
+                    type="button"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded text-on-surface-variant/85 transition-colors hover:bg-surface-container-high/80 hover:text-on-surface"
+                    title="Schema drift vs catalog"
+                    aria-label="View schema drift"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDriftModal(q);
+                    }}
+                  >
+                    <span className="material-symbols-outlined text-[14px] leading-none">difference</span>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-on-surface-variant/85 transition-colors hover:bg-surface-container-high/80 hover:text-on-surface"
+                  title="View full SQL"
+                  aria-label="View full SQL"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSqlModal({
+                      sql: q.sql,
+                      heading: `History · ${formatRelativeTime(q.createdAt)}`,
+                    });
+                  }}
+                >
+                  <span className="material-symbols-outlined text-[14px] leading-none">code</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <code className="text-xs font-mono text-on-surface-variant block truncate group-hover:text-on-surface transition-colors">
-            {truncateSql(q.sql, 70)}
-          </code>
-        </div>
-      ))}
+        );
+      })}
       <div className="mt-auto flex items-center justify-between border-t border-outline-variant/10 px-4 py-2">
         <Button
           variant="ghost"
@@ -707,6 +748,21 @@ function QueryHistoryPanel({ sessionId }: { sessionId: string }) {
           Next
         </Button>
       </div>
+      <CompareSqlModal
+        open={sqlModal !== null}
+        label=""
+        heading={sqlModal?.heading}
+        sql={sqlModal?.sql ?? ''}
+        onClose={() => setSqlModal(null)}
+      />
+      <HistorySchemaDriftModal
+        open={driftModal !== null}
+        execution={driftModal}
+        liveMainLine={liveMainLine}
+        liveSubLine={liveSubLine}
+        relativeLabel={driftModal ? formatRelativeTime(driftModal.createdAt) : ''}
+        onClose={() => setDriftModal(null)}
+      />
     </div>
   );
 }
@@ -1115,7 +1171,7 @@ function formatSessionSchemaDiffBrief(diff: SessionSchemaDiffResponse): string {
   return parts.join(' · ');
 }
 
-function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; sessionId: string }) {
+function useSessionSchemaDriftSummary(sessionId: string) {
   const { data: liveDiff, isLoading, isError } = useSessionSchemaDiff(sessionId);
 
   const liveMainLine = useMemo(() => {
@@ -1139,6 +1195,124 @@ function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; s
     return formatSessionSchemaDiffBrief(liveDiff);
   }, [liveDiff]);
 
+  const liveDiffReady = !isLoading && !isError;
+  const hasLiveChanges = Boolean(liveDiff?.hasChanges);
+
+  return { liveMainLine, liveSubLine, hasLiveChanges, liveDiffReady };
+}
+
+/** Per-run snapshot when present; otherwise same live catalog drift as Compare “Schema vs base”. */
+function schemaDriftLinesForExecution(
+  execution: QueryExecution,
+  liveMainLine: string,
+  liveSubLine: string | null,
+): { main: string; sub: string | null; hasSnapshot: boolean } {
+  const snap = execution.schemaDiffSnapshot;
+  if (snap) {
+    return {
+      main: snap.hasChanges
+        ? `${snap.totalChanges} change${snap.totalChanges === 1 ? '' : 's'}`
+        : 'No drift',
+      sub: snap.hasChanges && snap.brief ? snap.brief : null,
+      hasSnapshot: true,
+    };
+  }
+  return { main: liveMainLine, sub: liveSubLine, hasSnapshot: false };
+}
+
+function historyRowHasSchemaDiff(
+  execution: QueryExecution,
+  hasLiveChanges: boolean,
+  liveDiffReady: boolean,
+): boolean {
+  const snap = execution.schemaDiffSnapshot;
+  if (snap) {
+    return snap.hasChanges;
+  }
+  return hasLiveChanges && liveDiffReady;
+}
+
+function HistorySchemaDriftModal({
+  open,
+  execution,
+  liveMainLine,
+  liveSubLine,
+  relativeLabel,
+  onClose,
+}: {
+  open: boolean;
+  execution: QueryExecution | null;
+  liveMainLine: string;
+  liveSubLine: string | null;
+  relativeLabel: string;
+  onClose: () => void;
+}) {
+  const drift = execution
+    ? schemaDriftLinesForExecution(execution, liveMainLine, liveSubLine)
+    : null;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, open]);
+
+  if (!open || !execution || !drift) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-drift-title"
+        className="w-full max-w-lg rounded-xl border border-outline-variant/15 bg-surface-container-low shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-outline-variant/10 px-4 py-3">
+          <div className="min-w-0">
+            <h2 id="history-drift-title" className="text-sm font-semibold text-on-surface">
+              Schema vs catalog
+            </h2>
+            <p className="mt-0.5 text-[11px] text-outline">{relativeLabel}</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        <div className="space-y-3 px-4 py-4">
+          <p className="font-mono text-sm tabular-nums text-green-300/95">{drift.main}</p>
+          {drift.sub ? (
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-on-surface-variant">
+              {drift.sub}
+            </p>
+          ) : null}
+          <p className="text-[10px] leading-snug text-outline">
+            {drift.hasSnapshot
+              ? 'Snapshot at the moment this query finished (PostgreSQL), compared to the catalog template.'
+              : 'No per-run snapshot for this row; drift shown is the current session vs catalog (same fallback as Compare when snapshot is missing).'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; sessionId: string }) {
+  const { liveMainLine, liveSubLine } = useSessionSchemaDriftSummary(sessionId);
+
   const hasAnySnapshot = items.some((i) => i.execution.schemaDiffSnapshot);
 
   return (
@@ -1146,17 +1320,11 @@ function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; s
       <TableRow>
         <TableCell className="align-top text-xs font-medium text-on-surface">Schema vs base</TableCell>
         {items.map((item) => {
-          const snap = item.execution.schemaDiffSnapshot;
-          const mainLine = snap
-            ? snap.hasChanges
-              ? `${snap.totalChanges} change${snap.totalChanges === 1 ? '' : 's'}`
-              : 'No drift'
-            : liveMainLine;
-          const subLine = snap
-            ? snap.hasChanges && snap.brief
-              ? snap.brief
-              : null
-            : liveSubLine;
+          const { main, sub, hasSnapshot } = schemaDriftLinesForExecution(
+            item.execution,
+            liveMainLine,
+            liveSubLine,
+          );
 
           return (
             <TableCell
@@ -1164,13 +1332,13 @@ function CompareSchemaVsBaseRows({ items, sessionId }: { items: CompareSlot[]; s
               className="align-top font-mono text-xs tabular-nums text-on-surface"
             >
               <div className="flex flex-col gap-0.5">
-                <span>{mainLine}</span>
-                {subLine ? (
+                <span>{main}</span>
+                {sub ? (
                   <span className="whitespace-normal break-words font-sans text-[10px] font-normal leading-snug text-on-surface-variant">
-                    {subLine}
+                    {sub}
                   </span>
                 ) : null}
-                {!snap ? (
+                {!hasSnapshot ? (
                   <span className="font-sans text-[10px] italic text-outline">
                     Current session (no snapshot for this run)
                   </span>
@@ -1450,11 +1618,14 @@ function CompareSqlModal({
   label,
   sql,
   onClose,
+  heading,
 }: {
   open: boolean;
   label: string;
   sql: string;
   onClose: () => void;
+  /** When set, replaces the default “Query SQL · Slot …” title. */
+  heading?: string;
 }) {
   const displaySql = useMemo(() => {
     try {
@@ -1496,7 +1667,7 @@ function CompareSqlModal({
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-outline-variant/10 px-4 py-3">
           <h2 id="compare-sql-title" className="text-sm font-semibold text-on-surface">
-            Query SQL · Slot {label}
+            {heading ?? `Query SQL · Slot ${label}`}
           </h2>
           <div className="flex items-center gap-2">
             <Button

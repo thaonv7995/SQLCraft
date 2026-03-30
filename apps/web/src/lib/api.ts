@@ -737,14 +737,28 @@ export function normalizeQueryExecutionItem(item: Record<string, unknown>): Quer
 }
 
 function normalizeQueryHistoryPage(
-  data: PaginatedResponse<QueryExecution>
+  data: PaginatedResponse<QueryExecution> & {
+    meta?: { page: number; limit: number };
+  },
 ): PaginatedResponse<QueryExecution> {
   const items = Array.isArray(data.items) ? data.items : [];
+  const page = typeof data.page === 'number' ? data.page : (data.meta?.page ?? 1);
+  const limit = typeof data.limit === 'number' ? data.limit : (data.meta?.limit ?? 20);
+  const total = typeof data.total === 'number' ? data.total : items.length;
+  const totalPages =
+    typeof data.totalPages === 'number'
+      ? data.totalPages
+      : Math.max(1, Math.ceil(total / Math.max(1, limit)));
+
   return {
     ...data,
     items: items.map((row) =>
       normalizeQueryExecutionItem(row as unknown as Record<string, unknown>)
     ),
+    page,
+    limit,
+    total,
+    totalPages,
   };
 }
 

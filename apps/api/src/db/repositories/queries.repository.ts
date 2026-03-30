@@ -111,6 +111,14 @@ export class QueriesRepository {
       .offset(offset);
   }
 
+  async countBySession(sessionId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ count: count() })
+      .from(schema.queryExecutions)
+      .where(eq(schema.queryExecutions.learningSessionId, sessionId));
+    return Number(row?.count ?? 0);
+  }
+
   async countByUser(userId: string): Promise<number> {
     const [row] = await this.db
       .select({ count: count() })
