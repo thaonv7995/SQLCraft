@@ -204,6 +204,13 @@ export async function runGoldenBakeSnapshotPipeline(params: {
       dbPassword: sandboxPassword,
       mssqlSaPassword,
     });
+    if (spec.engine === 'sqlserver') {
+      await initSqlServerDatabase({
+        containerRef,
+        saPassword: mssqlSaPassword,
+        dbName,
+      });
+    }
     await waitForSandboxDbReady({
       engine: spec.engine,
       containerRef,
