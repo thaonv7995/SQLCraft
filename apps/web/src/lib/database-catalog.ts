@@ -10,12 +10,16 @@ export const DATABASE_DOMAIN_LABELS: Record<DatabaseDomain, string> = {
   other: 'General',
 };
 
+/**
+ * Row-count bands for display — keep in sync with `classifyDatasetScaleFromTotalRows`
+ * in `apps/api/src/lib/dataset-scales.ts` (scan + catalog inferred scale).
+ */
 export const DATABASE_SCALE_LABELS: Record<DatabaseScale, string> = {
-  tiny: '< 50K rows',
-  small: '50K - 1M rows',
-  medium: '1M - 10M rows',
-  large: '10M - 100M rows',
-  extra_large: '100M+ rows',
+  tiny: '< 1M rows',
+  small: '1M - 10M rows',
+  medium: '10M - 100M rows',
+  large: '100M - 1B rows',
+  extra_large: '1B+ rows',
 };
 
 /** Short tier name (matches catalog filter rows below "Any Scale"). */
@@ -48,19 +52,26 @@ export const DATASET_SCALE_DISPLAY_META: Record<DatasetScale, { label: string; d
 };
 
 /**
- * Maps total row count to a scale bucket for human-readable labels.
- * Use this for subtitles and stats so copy matches `rowCount` (catalog `scale` is the
- * largest published template tier and can read "10M+" while data is still ~1.3M).
+ * Maps total row count to a scale bucket — same thresholds as
+ * `classifyDatasetScaleFromTotalRows` on the API (SQL dump scan, imports).
  */
 export function inferDatasetScaleFromRowCount(rowCount: number): DatabaseScale {
   if (!Number.isFinite(rowCount) || rowCount <= 0) {
     return 'tiny';
   }
-  if (rowCount < 50_000) return 'tiny';
-  if (rowCount < 1_000_000) return 'small';
-  if (rowCount < 10_000_000) return 'medium';
-  if (rowCount < 100_000_000) return 'large';
-  return 'extra_large';
+  if (rowCount >= 1_000_000_000) {
+    return 'extra_large';
+  }
+  if (rowCount >= 100_000_000) {
+    return 'large';
+  }
+  if (rowCount >= 10_000_000) {
+    return 'medium';
+  }
+  if (rowCount >= 1_000_000) {
+    return 'small';
+  }
+  return 'tiny';
 }
 
 export function databaseScaleDisplayLabelFromRowCount(rowCount: number): string {
