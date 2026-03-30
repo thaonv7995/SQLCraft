@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import { autocompletion } from '@codemirror/autocomplete';
 import { schemaCompletionSource, sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
 import { syntaxTree } from '@codemirror/language';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
-import { Prec, type EditorState } from '@codemirror/state';
+import { Prec, type EditorState, type Text } from '@codemirror/state';
 import { cn } from '@/lib/utils';
 
 // ─── Design System Theme ──────────────────────────────────────────────────────
@@ -59,12 +60,17 @@ const sqlForgeTheme = EditorView.theme(
       overflowX: 'auto',
     },
     // SQL syntax highlighting using design system colors
-    '.tok-keyword': { color: '#ececec', fontWeight: '600' },
+    '.tok-keyword': {
+      color: '#ececec',
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      fontVariantLigatures: 'none',
+    },
     '.tok-string': { color: '#a3a3a3' },
     '.tok-number': { color: '#9ca3af' },
     '.tok-comment': { color: '#6b7280', fontStyle: 'italic' },
     '.tok-name': { color: '#ececec' },
-    '.tok-typeName': { color: '#c4c4c4' },
+    '.tok-typeName': { color: '#c4c4c4', textTransform: 'uppercase', fontVariantLigatures: 'none' },
     '.tok-variableName': { color: '#9ca3af' },
     '.tok-operator': { color: '#9ca3af' },
     '.tok-punctuation': { color: '#6b7280' },
@@ -73,6 +79,9 @@ const sqlForgeTheme = EditorView.theme(
     '.cm-placeholder': {
       color: '#6b7280',
       fontStyle: 'italic',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+      maxHeight: 'min(50vh, 280px)',
     },
   },
   { dark: true }
@@ -237,7 +246,14 @@ function postgresKeywordCompletion(label: string, type: string) {
     boost = 92;
   }
 
-  return { label, type, boost, section };
+  return {
+    label,
+    type,
+    boost,
+    section,
+    /** Prefer clause keywords when typing partial word (e.g. `sel` → SELECT). */
+    sortText: type === 'keyword' ? lower : label,
+  };
 }
 
 /** Snippet row shape (mirrors @codemirror/autocomplete Completion fields we use). */
@@ -494,6 +510,14 @@ function getSqlCompletionContext(value: string, cursor = value.length): SqlCompl
     return 'field';
   }
 
+  if (/\breturning\s*$/i.test(trimmedContext)) {
+    return 'field';
+  }
+
+  if (/\bupdate\s+[\w.]+\s+set\s*$/i.test(trimmedContext)) {
+    return 'field';
+  }
+
   // FROM a, | FROM a ,  → next token is a table
   if (/\bfrom\b/i.test(trimmedContext) && /,\s*$/i.test(trimmedContext)) {
     return 'table';
@@ -558,6 +582,59 @@ function filterCompletionResultForContext(
   };
 }
 
+/**
+ * True when the cursor is still inside the first token of the current statement
+ * (statement = line segment after the last `;` on this line).
+ * Used to avoid fuzzy-matching column/table names against DDL/DML prefixes like `create`.
+ */
+function isFirstTokenOfStatement(doc: Text, pos: number): boolean {
+  const line = doc.lineAt(pos);
+  const beforeCursor = doc.sliceString(line.from, pos);
+  const lastSemi = beforeCursor.lastIndexOf(';');
+  const afterStmt = lastSemi >= 0 ? beforeCursor.slice(lastSemi + 1) : beforeCursor;
+  const trimmed = afterStmt.trimStart();
+  if (!trimmed) {
+    return true;
+  }
+  return !/\s/.test(trimmed);
+}
+
+/**
+ * At the first token, CodeMirror’s default fuzzy matcher surfaces irrelevant columns (e.g. `discharge_date`
+ * for input `create`). Require case-insensitive prefix match for schema table/column options.
+ */
+function strictPrefixSchemaAtStatementStart(
+  result: SqlCompletionResult | null,
+  doc: Text,
+  pos: number,
+): SqlCompletionResult | null {
+  if (!result || !isFirstTokenOfStatement(doc, pos)) {
+    return result;
+  }
+
+  const from = result.from;
+  const prefix = doc.sliceString(from, pos).toLowerCase();
+
+  const options = result.options.filter((opt) => {
+    const t = opt.type;
+    if (t !== 'property' && t !== 'table') {
+      return true;
+    }
+    if (!prefix.length) {
+      return t === 'table';
+    }
+    return opt.label.toLowerCase().startsWith(prefix);
+  });
+
+  if (options.length === 0) {
+    return null;
+  }
+  if (options.length === result.options.length) {
+    return result;
+  }
+  return { ...result, options };
+}
+
 function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return !!value && typeof value === 'object' && 'then' in value && typeof value.then === 'function';
 }
@@ -572,22 +649,23 @@ function buildSqlSchemaCompletionSource(schema?: SQLNamespace) {
     schema,
   });
 
-  return (context: {
-    state: {
-      doc: {
-        toString(): string;
-      };
-    };
-    pos: number;
-  }) => {
-    const completionContext = getSqlCompletionContext(context.state.doc.toString(), context.pos);
+  return (context: { state: EditorState; pos: number }) => {
+    const doc = context.state.doc;
+    const completionContext = getSqlCompletionContext(doc.toString(), context.pos);
     const result = source(context as never);
 
+    const pipe = (resolved: SqlCompletionResult | null) =>
+      strictPrefixSchemaAtStatementStart(
+        filterCompletionResultForContext(resolved, completionContext),
+        doc,
+        context.pos,
+      );
+
     if (isPromiseLike<SqlCompletionResult | null>(result)) {
-      return result.then((resolved) => filterCompletionResultForContext(resolved, completionContext));
+      return result.then(pipe);
     }
 
-    return filterCompletionResultForContext(result as SqlCompletionResult | null, completionContext);
+    return pipe(result as SqlCompletionResult | null);
   };
 }
 
@@ -658,6 +736,14 @@ export function SqlEditor({
       sql({
         dialect: PostgreSQL,
         keywordCompletion: postgresKeywordCompletion,
+        /** Inserted keyword completions use UPPERCASE (library passes uppercase labels when true). */
+        upperCaseKeywords: true,
+      }),
+      autocompletion({
+        activateOnTyping: true,
+        activateOnTypingDelay: 80,
+        maxRenderedOptions: 56,
+        selectOnOpen: true,
       }),
       PostgreSQL.language.data.of({
         autocomplete: sqlSnippetCompletionSource,
@@ -860,4 +946,6 @@ export const __private__ = {
   filterCompletionOptionsForContext,
   getSqlCompletionContext,
   isNamespaceTag,
+  isFirstTokenOfStatement,
+  strictPrefixSchemaAtStatementStart,
 };

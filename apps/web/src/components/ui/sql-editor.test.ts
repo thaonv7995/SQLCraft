@@ -1,3 +1,4 @@
+import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { __private__, type SqlEditorSchemaTable } from './sql-editor';
 
@@ -131,6 +132,36 @@ describe('buildSqlSchemaCompletionSource', () => {
   it('detects field-only completion contexts after a qualified table prefix', () => {
     expect(__private__.getSqlCompletionContext('SELECT countries.')).toBe('field');
     expect(__private__.getSqlCompletionContext('SELECT countries.c')).toBe('field');
+  });
+
+  it('detects field context after RETURNING and UPDATE … SET', () => {
+    expect(__private__.getSqlCompletionContext('INSERT INTO t VALUES (1) RETURNING ')).toBe('field');
+    expect(__private__.getSqlCompletionContext('UPDATE users SET ')).toBe('field');
+  });
+
+  it('treats first token after ; as start of a new statement', () => {
+    const doc = 'SELECT 1; create';
+    const s = EditorState.create({ doc });
+    expect(__private__.isFirstTokenOfStatement(s.doc, doc.length)).toBe(true);
+  });
+
+  it('is not first token when earlier tokens exist on the line', () => {
+    const doc = 'SELECT * FROM t';
+    const s = EditorState.create({ doc });
+    expect(__private__.isFirstTokenOfStatement(s.doc, doc.length)).toBe(false);
+  });
+
+  it('at first token, keeps only schema options whose label prefix-matches the typed word', () => {
+    const doc = EditorState.create({ doc: 'create' }).doc;
+    const result = {
+      from: 0,
+      options: [
+        { label: 'discharge_date', type: 'property' as const },
+        { label: 'countries', type: 'table' as const },
+      ],
+    };
+    const filtered = __private__.strictPrefixSchemaAtStatementStart(result, doc, 6);
+    expect(filtered).toBeNull();
   });
 
   it('filters mixed completion options down to tables in table contexts', () => {
