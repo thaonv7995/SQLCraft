@@ -1096,7 +1096,14 @@ export async function runPsqlInSandboxContainerStreaming(params: {
     await pipelinePromise;
   } catch (err) {
     child.kill('SIGKILL');
-    throw err;
+    await closePromise.catch(() => {});
+    const detail = stderr.trim().slice(0, 2000);
+    const base = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      detail
+        ? `psql restore stream failed (${base}). psql stderr: ${detail}`
+        : `psql restore stream failed (${base})`,
+    );
   }
 
   const code = await closePromise;
