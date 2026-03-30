@@ -15,11 +15,13 @@ declare module 'axios' {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   interface AxiosRequestConfig<D = any> {
     skipAuthRedirect?: boolean;
+    skipAuthRefresh?: boolean;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   interface InternalAxiosRequestConfig<D = any> {
     skipAuthRedirect?: boolean;
+    skipAuthRefresh?: boolean;
   }
 }
 
@@ -1500,6 +1502,68 @@ const api: AxiosInstance = axios.create({
   },
 });
 
+let refreshInFlight: Promise<AuthTokens> | null = null;
+
+function readStoredTokens(): AuthTokens | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('sqlcraft-auth');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { state?: { tokens?: AuthTokens | null } };
+    return parsed?.state?.tokens ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredTokens(tokens: AuthTokens) {
+  // Keep existing persisted shape (state/user/etc) but replace only tokens.
+  const raw = localStorage.getItem('sqlcraft-auth');
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const state = (parsed.state ?? {}) as Record<string, unknown>;
+    state.tokens = tokens;
+    parsed.state = state;
+    localStorage.setItem('sqlcraft-auth', JSON.stringify(parsed));
+  } catch {
+    // If something is malformed, do nothing; subsequent requests will fail gracefully.
+  }
+}
+
+async function refreshAccessToken(): Promise<AuthTokens> {
+  if (refreshInFlight) return refreshInFlight;
+
+  const storedTokens = readStoredTokens();
+  const refreshToken = storedTokens?.refreshToken;
+
+  if (!refreshToken) {
+    localStorage.removeItem('sqlcraft-auth');
+    window.location.assign('/login');
+    throw new Error('Missing refresh token');
+  }
+
+  refreshInFlight = (async () => {
+    try {
+      const r = await api.post<AuthTokens>(
+        '/auth/refresh',
+        { refreshToken },
+        { skipAuthRedirect: true, skipAuthRefresh: true },
+      );
+      writeStoredTokens(r.data);
+      return r.data;
+    } catch (e) {
+      localStorage.removeItem('sqlcraft-auth');
+      window.location.assign('/login');
+      throw e;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 // Request interceptor – attach bearer token
 api.interceptors.request.use((config) => {
   const nextConfig = config as ApiInternalRequestConfig;
@@ -1537,10 +1601,37 @@ api.interceptors.response.use(
     if (
       axiosError.response?.status === 401 &&
       typeof window !== 'undefined' &&
-      !requestConfig?.skipAuthRedirect
+      !requestConfig?.skipAuthRedirect &&
+      !requestConfig?.skipAuthRefresh
     ) {
-      localStorage.removeItem('sqlcraft-auth');
-      window.location.assign('/login');
+      const anyConfig = requestConfig as ApiInternalRequestConfig & { _authRefreshRetried?: boolean };
+      if (anyConfig._authRefreshRetried) {
+        localStorage.removeItem('sqlcraft-auth');
+        window.location.assign('/login');
+      } else {
+        anyConfig._authRefreshRetried = true;
+        const storedTokens = readStoredTokens();
+        if (!storedTokens?.refreshToken) {
+          localStorage.removeItem('sqlcraft-auth');
+          window.location.assign('/login');
+        } else {
+          return (async () => {
+            const tokens = await refreshAccessToken();
+            const nextHeaders = {
+              ...(requestConfig?.headers ?? {}),
+              Authorization: `Bearer ${tokens.accessToken}`,
+            };
+
+            // Retry original request with refreshed token. Prevent refresh loops by setting skipAuthRefresh.
+            return api.request({
+              ...requestConfig,
+              headers: nextHeaders,
+              skipAuthRedirect: requestConfig?.skipAuthRedirect,
+              skipAuthRefresh: true,
+            });
+          })();
+        }
+      }
     }
 
     // Extract backend error message if available

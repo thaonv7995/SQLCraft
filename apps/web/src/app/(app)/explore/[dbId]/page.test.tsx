@@ -121,7 +121,7 @@ describe('DatabaseDetailPage launch flow', () => {
     });
 
     expect(screen.getByText(/environment progress/i)).toBeInTheDocument();
-    expect(screen.getByText(/spinning up a 10k rows sandbox on postgresql 15/i)).toBeInTheDocument();
+    expect(screen.getByText(/spinning up a 50k\s*-\s*1m rows sandbox on postgresql 15/i)).toBeInTheDocument();
     expect(mocks.push).not.toHaveBeenCalled();
 
     expect(pendingSession.resolve).toBeDefined();
