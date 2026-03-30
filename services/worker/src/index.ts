@@ -6,6 +6,7 @@ import {
   diffSandboxSchema,
   fetchSandboxSchemaSnapshotForEngine,
   parseBaseSchemaSnapshot,
+  parseStoredSandboxSchemaSnapshot,
   summarizeSandboxSchemaDiff,
   type QuerySchemaDiffSnapshot,
 } from '@sqlcraft/sandbox-schema-diff';
@@ -50,6 +51,7 @@ import {
   sandboxContainerName,
   waitForSandboxEngine,
   initSqlServerDatabase,
+  readS3ArtifactBuffer,
   statS3ObjectSizeViaMinioContainer,
 } from './docker';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
@@ -725,7 +727,21 @@ async function maybeCaptureSchemaDiffSnapshot(
     return null;
   }
   try {
-    const base = parseBaseSchemaSnapshot(definition);
+    let base = parseBaseSchemaSnapshot(definition);
+    const dt =
+      sandbox.datasetTemplateId != null ? await fetchDatasetTemplate(sandbox.datasetTemplateId) : null;
+    if (dt?.sandboxGoldenStatus === 'ready' && dt.sandboxGoldenSchemaSnapshotUrl?.trim()) {
+      try {
+        const buf = await readS3ArtifactBuffer(dt.sandboxGoldenSchemaSnapshotUrl.trim());
+        const parsed: unknown = JSON.parse(buf.toString('utf8'));
+        const golden = parseStoredSandboxSchemaSnapshot(parsed);
+        if (golden) {
+          base = golden;
+        }
+      } catch (err) {
+        logger.warn({ err, sandboxId: sandbox.id }, 'golden schema snapshot load failed; using template base');
+      }
+    }
     const user = engine === 'sqlserver' ? 'sa' : sandboxUser;
     const password = engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword;
     const current = await fetchSandboxSchemaSnapshotForEngine(engine, {

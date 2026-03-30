@@ -141,6 +141,13 @@
       "when": 1774508414000,
       "tag": "0019_reset_grandfathered_golden_to_pending",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1774508415000,
+      "tag": "0020_dataset_templates_golden_schema_snapshot",
+      "breakpoints": true
     }
   ]
 }

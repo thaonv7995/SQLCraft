@@ -35,6 +35,9 @@ export interface DatasetTemplateDefinition {
   artifactUrl: string | null;
   /** When set, sandbox provisioning restores this snapshot (S3) instead of re-streaming `artifact_url`. */
   sandboxGoldenSnapshotUrl: string | null;
+  sandboxGoldenStatus: string;
+  /** Introspected schema JSON URL for schema-diff base (Postgres / MySQL family golden-bake). */
+  sandboxGoldenSchemaSnapshotUrl: string | null;
 }
 
 export async function fetchSchemaTemplate(
@@ -77,6 +80,8 @@ export async function fetchDatasetTemplate(
     rowCounts: unknown;
     artifactUrl: string | null;
     sandboxGoldenSnapshotUrl: string | null;
+    sandboxGoldenStatus: string;
+    sandboxGoldenSchemaSnapshotUrl: string | null;
   }>(
     `SELECT id,
             schema_template_id AS "schemaTemplateId",
@@ -84,7 +89,9 @@ export async function fetchDatasetTemplate(
             size,
             row_counts AS "rowCounts",
             artifact_url AS "artifactUrl",
-            sandbox_golden_snapshot_url AS "sandboxGoldenSnapshotUrl"
+            sandbox_golden_snapshot_url AS "sandboxGoldenSnapshotUrl",
+            sandbox_golden_status AS "sandboxGoldenStatus",
+            sandbox_golden_schema_snapshot_url AS "sandboxGoldenSchemaSnapshotUrl"
        FROM dataset_templates
       WHERE id = $1`,
     [datasetTemplateId],
@@ -104,6 +111,8 @@ export async function fetchDatasetTemplate(
         : {},
     artifactUrl: row.artifactUrl,
     sandboxGoldenSnapshotUrl: row.sandboxGoldenSnapshotUrl,
+    sandboxGoldenStatus: row.sandboxGoldenStatus,
+    sandboxGoldenSchemaSnapshotUrl: row.sandboxGoldenSchemaSnapshotUrl,
   };
 }
 
@@ -116,6 +125,7 @@ export async function updateDatasetGoldenBakeSuccess(
     snapshotUrl: string | null;
     snapshotBytes: number | null;
     snapshotChecksumSha256: string | null;
+    schemaSnapshotUrl: string | null;
   },
 ): Promise<void> {
   await mainDb.query(
@@ -126,7 +136,8 @@ export async function updateDatasetGoldenBakeSuccess(
          sandbox_golden_engine_image = $3,
          sandbox_golden_snapshot_url = $4,
          sandbox_golden_bytes = $5,
-         sandbox_golden_checksum = $6
+         sandbox_golden_checksum = $6,
+         sandbox_golden_schema_snapshot_url = $7
      WHERE id = $1`,
     [
       datasetTemplateId,
@@ -135,6 +146,7 @@ export async function updateDatasetGoldenBakeSuccess(
       params.snapshotUrl,
       params.snapshotBytes,
       params.snapshotChecksumSha256,
+      params.schemaSnapshotUrl,
     ],
   );
 }

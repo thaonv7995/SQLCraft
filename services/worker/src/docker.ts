@@ -1039,6 +1039,16 @@ export function createMcCatObjectReadStream(artifactRef: string): Readable {
   return child.stdout;
 }
 
+/** Read a whole object from MinIO (small objects e.g. golden schema JSON). */
+export async function readS3ArtifactBuffer(artifactRef: string): Promise<Buffer> {
+  const stream = createMcCatObjectReadStream(artifactRef);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function runPsqlInSandboxContainerStreaming(params: {
   containerRef: string;
   dbUser: string;

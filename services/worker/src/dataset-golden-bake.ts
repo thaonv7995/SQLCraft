@@ -104,6 +104,7 @@ export async function runDatasetGoldenBake(datasetTemplateId: string, log: Logge
     snapshotUrl: snapshot.snapshotUrl,
     snapshotBytes: snapshot.snapshotBytes,
     snapshotChecksumSha256: snapshot.snapshotChecksumSha256,
+    schemaSnapshotUrl: snapshot.schemaSnapshotUrl,
   });
 
   log.info(

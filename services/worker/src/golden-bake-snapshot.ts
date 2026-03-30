@@ -9,6 +9,8 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import type { Logger } from 'pino';
 
+import { fetchSandboxSchemaSnapshotForEngine } from '@sqlcraft/sandbox-schema-diff';
+
 import { fetchDatasetTemplate, fetchSchemaTemplateSandboxMeta } from './db';
 import {
   createSandboxEngineContainer,
@@ -17,6 +19,7 @@ import {
   resolveStorageBucket,
   sandboxContainerName,
   sandboxMysqlFamilyDumpBin,
+  uploadBufferToS3ViaMinio,
   uploadFileToS3ViaMinioStreaming,
   waitForSandboxEngine,
 } from './docker';
@@ -135,6 +138,8 @@ export type GoldenBakeSnapshotResult = {
   snapshotUrl: string | null;
   snapshotBytes: number | null;
   snapshotChecksumSha256: string | null;
+  /** Canonical schema for diff base (Postgres / MySQL family). */
+  schemaSnapshotUrl: string | null;
 };
 
 /**
@@ -164,7 +169,12 @@ export async function runGoldenBakeSnapshotPipeline(params: {
 
   if (spec.engine === 'sqlite') {
     logger.info({ datasetTemplateId }, 'Golden snapshot skipped (SQLite)');
-    return { snapshotUrl: null, snapshotBytes: null, snapshotChecksumSha256: null };
+    return {
+      snapshotUrl: null,
+      snapshotBytes: null,
+      snapshotChecksumSha256: null,
+      schemaSnapshotUrl: null,
+    };
   }
 
   if (spec.engine === 'sqlserver') {
@@ -172,7 +182,12 @@ export async function runGoldenBakeSnapshotPipeline(params: {
       { datasetTemplateId },
       'Golden snapshot not implemented for SQL Server; fingerprint-only bake',
     );
-    return { snapshotUrl: null, snapshotBytes: null, snapshotChecksumSha256: null };
+    return {
+      snapshotUrl: null,
+      snapshotBytes: null,
+      snapshotChecksumSha256: null,
+      schemaSnapshotUrl: null,
+    };
   }
 
   const bakeInstanceId = randomUUID();
@@ -228,6 +243,33 @@ export async function runGoldenBakeSnapshotPipeline(params: {
       'golden-bake applySchemaAndDataset',
     );
 
+    let schemaSnapshotUrl: string | null = null;
+    if (spec.engine === 'postgresql' || spec.engine === 'mysql' || spec.engine === 'mariadb') {
+      try {
+        const snap = await fetchSandboxSchemaSnapshotForEngine(spec.engine, {
+          host: containerRef,
+          port: spec.internalPort,
+          user: sandboxUser,
+          password: sandboxPassword,
+          database: dbName,
+        });
+        const bucket = resolveStorageBucket();
+        const schemaKey = `golden-snapshots/${datasetTemplateId}/schema-snapshot.json`;
+        await uploadBufferToS3ViaMinio({
+          bucket,
+          objectKey: schemaKey,
+          body: Buffer.from(JSON.stringify(snap), 'utf8'),
+        });
+        schemaSnapshotUrl = `s3://${bucket}/${schemaKey}`;
+        logger.info({ datasetTemplateId, schemaSnapshotUrl }, 'Golden schema snapshot uploaded');
+      } catch (err) {
+        logger.warn(
+          { err, datasetTemplateId },
+          'Golden schema snapshot failed; schema diff will fall back to template definition',
+        );
+      }
+    }
+
     tmpDir = await mkdtemp(join(tmpdir(), 'golden-snap-'));
     let filePath: string;
     let ext: string;
@@ -274,6 +316,7 @@ export async function runGoldenBakeSnapshotPipeline(params: {
       snapshotUrl,
       snapshotBytes: byteCount,
       snapshotChecksumSha256: checksumSha256,
+      schemaSnapshotUrl,
     };
   } finally {
     if (tmpDir) {

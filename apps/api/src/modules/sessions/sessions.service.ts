@@ -10,7 +10,7 @@ import { LAB_SESSION_TTL_MS, labSessionExpiresAtFromNow } from '../../lib/lab-se
 import {
   diffSandboxSchema,
   fetchSandboxSchemaSnapshot,
-  parseBaseSchemaSnapshot,
+  resolveBaseSchemaSnapshot,
   type SandboxSchemaDiffSection,
   type SandboxSchemaFunction,
   type SandboxSchemaIndex,
@@ -636,7 +636,18 @@ export async function getSessionSchemaDiff(
     throw new ValidationError('Sandbox must be ready before schema diff is available');
   }
 
-  const baseSnapshot = parseBaseSchemaSnapshot(schemaTemplate.definition);
+  const datasetTemplate = sandbox.datasetTemplateId
+    ? await sessionsRepository.findDatasetTemplateById(sandbox.datasetTemplateId)
+    : null;
+  const baseSnapshot = await resolveBaseSchemaSnapshot({
+    schemaTemplateDefinition: schemaTemplate.definition,
+    datasetTemplate: datasetTemplate
+      ? {
+          sandboxGoldenStatus: datasetTemplate.sandboxGoldenStatus,
+          sandboxGoldenSchemaSnapshotUrl: datasetTemplate.sandboxGoldenSchemaSnapshotUrl,
+        }
+      : null,
+  });
   let currentSnapshot;
   try {
     currentSnapshot = await fetchSandboxSchemaSnapshot({
@@ -678,7 +689,18 @@ export async function revertSessionSchemaDiffChange(
 
   const engine = assertSchemaRevertSupported(schemaTemplate.dialect);
 
-  const baseSnapshot = parseBaseSchemaSnapshot(schemaTemplate.definition);
+  const datasetTemplate = sandbox.datasetTemplateId
+    ? await sessionsRepository.findDatasetTemplateById(sandbox.datasetTemplateId)
+    : null;
+  const baseSnapshot = await resolveBaseSchemaSnapshot({
+    schemaTemplateDefinition: schemaTemplate.definition,
+    datasetTemplate: datasetTemplate
+      ? {
+          sandboxGoldenStatus: datasetTemplate.sandboxGoldenStatus,
+          sandboxGoldenSchemaSnapshotUrl: datasetTemplate.sandboxGoldenSchemaSnapshotUrl,
+        }
+      : null,
+  });
   let currentSnapshot;
   try {
     currentSnapshot = await fetchSandboxSchemaSnapshot({

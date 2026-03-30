@@ -285,6 +285,8 @@ export const datasetTemplates = pgTable(
     sandboxGoldenEngineImage: text('sandbox_golden_engine_image'),
     /** Invalidates golden when artifact changes */
     sandboxGoldenArtifactFingerprint: text('sandbox_golden_artifact_fingerprint'),
+    /** Introspected schema JSON (same shape as sandbox-schema-diff snapshot) for diff base */
+    sandboxGoldenSchemaSnapshotUrl: text('sandbox_golden_schema_snapshot_url'),
   },
   (table) => ({
     sandboxGoldenStatusIdx: index('dataset_templates_sandbox_golden_status_idx').on(table.sandboxGoldenStatus),

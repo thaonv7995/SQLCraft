@@ -1,8 +1,10 @@
 import { normalizeSchemaSqlEngine, type SchemaSqlEngine } from '@sqlcraft/types';
 import { config } from '../lib/config';
+import { readFullObject } from '../lib/storage';
 import { ValidationError } from '../lib/errors';
 import {
   parseBaseSchemaSnapshot,
+  parseStoredSandboxSchemaSnapshot,
   fetchSandboxSchemaSnapshotForEngine,
   UnsupportedSchemaDiffEngineError,
   diffSandboxSchema,
@@ -27,7 +29,50 @@ export type {
   SandboxSchemaView,
 };
 
-export { parseBaseSchemaSnapshot, diffSandboxSchema };
+export { parseBaseSchemaSnapshot, parseStoredSandboxSchemaSnapshot, diffSandboxSchema };
+
+function goldenSchemaObjectKeyFromUrl(url: string, expectedBucket: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if (!/^s3:$/i.test(u.protocol)) return null;
+    if (u.hostname !== expectedBucket) return null;
+    const objectName = u.pathname.replace(/^\/+/, '');
+    return objectName || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Prefer introspected schema captured at golden-bake (matches post-restore DB).
+ * Falls back to template JSON + inferred UNIQUE indexes when golden snapshot is missing.
+ */
+export async function resolveBaseSchemaSnapshot(params: {
+  schemaTemplateDefinition: unknown;
+  datasetTemplate: {
+    sandboxGoldenStatus: string;
+    sandboxGoldenSchemaSnapshotUrl: string | null;
+  } | null;
+}): Promise<SandboxSchemaSnapshot> {
+  const { schemaTemplateDefinition, datasetTemplate } = params;
+  const url = datasetTemplate?.sandboxGoldenSchemaSnapshotUrl?.trim();
+  if (datasetTemplate?.sandboxGoldenStatus === 'ready' && url) {
+    try {
+      const key = goldenSchemaObjectKeyFromUrl(url, config.STORAGE_BUCKET);
+      if (key) {
+        const buf = await readFullObject(key);
+        const parsed: unknown = JSON.parse(buf.toString('utf8'));
+        const snap = parseStoredSandboxSchemaSnapshot(parsed);
+        if (snap) {
+          return snap;
+        }
+      }
+    } catch {
+      /* use template */
+    }
+  }
+  return parseBaseSchemaSnapshot(schemaTemplateDefinition);
+}
 
 function resolveSandboxIntrospectionPort(
   engine: SchemaSqlEngine,

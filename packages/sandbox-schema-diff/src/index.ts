@@ -287,6 +287,36 @@ export function parseBaseSchemaSnapshot(definition: unknown): SandboxSchemaSnaps
   };
 }
 
+function isIndexRecord(value: unknown): value is SandboxSchemaIndex {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.name === 'string' &&
+    typeof value.tableName === 'string' &&
+    typeof value.definition === 'string'
+  );
+}
+
+/**
+ * Parse a JSON blob produced by {@link fetchSandboxSchemaSnapshotForEngine} (golden-bake upload).
+ * Returns null if index data is missing or invalid.
+ */
+export function parseStoredSandboxSchemaSnapshot(raw: unknown): SandboxSchemaSnapshot | null {
+  if (!isRecord(raw)) return null;
+  if (!Array.isArray(raw.indexes) || !raw.indexes.every(isIndexRecord)) {
+    return null;
+  }
+
+  return {
+    indexes: raw.indexes,
+    views: Array.isArray(raw.views) ? (raw.views as SandboxSchemaView[]) : [],
+    materializedViews: Array.isArray(raw.materializedViews)
+      ? (raw.materializedViews as SandboxSchemaMaterializedView[])
+      : [],
+    functions: Array.isArray(raw.functions) ? (raw.functions as SandboxSchemaFunction[]) : [],
+    partitions: Array.isArray(raw.partitions) ? (raw.partitions as SandboxSchemaPartition[]) : [],
+  };
+}
+
 function buildDiffSection<T>(
   baseItems: T[],
   currentItems: T[],
