@@ -76,6 +76,7 @@ import {
 } from './sql-dump-upload-format';
 import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
+import { deleteStorageForDatasetTemplates } from './delete-database-storage';
 
 const ADMIN_CONFIG_SCOPE = 'global';
 const STALE_SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -410,6 +411,9 @@ export async function deleteDatabase(id: string): Promise<DeleteDatabaseResult> 
   if (sandboxes.length > 0) {
     await adminRepository.clearSandboxTemplateRefsForLineage(lineageSchemaIds, allDatasetTemplateIds);
   }
+
+  const datasetsToPurge = allDatasetRows.flat();
+  await deleteStorageForDatasetTemplates(datasetsToPurge);
 
   const deletedDatasetCount =
     await adminRepository.deleteDatasetTemplatesForSchemaTemplateIds(lineageSchemaIds);
