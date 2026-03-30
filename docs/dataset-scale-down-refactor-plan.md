@@ -46,6 +46,8 @@
 - **Logging:** when `sum(actual) < sum(requested)` or per-table drift exceeds a threshold → structured logs; may extend/reuse `importWarnings` post-import.
 - **UI:** catalog/admin bind **actual** only; if pre-FK targets are shown, label them **“target (pre-FK)”**.
 
+**Status (partial):** canonical SQL-dump import appends an `importWarnings` entry when derived materialized `rowCounts` differ from apportioned targets (FK-aware selection); DB still stores materialized counts only.
+
 ### Phase 1 — Replace core with largest remainder (A)
 
 1. Compute `r_i = (count_i / totalRows) * target`, keeping current conventions for `target` (e.g. `max(tables with count > 0, floor(targetTotalRows))` if still desired).
@@ -56,20 +58,28 @@
 
 **Feature flag / env:** e.g. gradual rollout of Hamilton vs baseline.
 
+**Status (implemented):** `largestRemainderApportion()` + `scaleDatasetRowCounts()` refactor in `apps/api/src/lib/dataset-scales.ts` (Hamilton, then min-one per table with rows, then rebalance loops as before).
+
 ### Phase 2 — Optional global min-1 removal (B), behind a flag
 
 - `allowEmptyTablesInDerived` (default `false`).
 - Validate `renderDerivedSqlDump` / DDL when a table has zero rows.
 - Safe rules for FKs (parent/child).
 
+**Status (implemented):** Request field `allowEmptyTablesInDerived` (see `DatasetScaleDownOptionsSchema` in `admin.schema.ts`). When true, integer `target` is not forced to `>= table count`, Hamilton may assign zero rows to some tables, and rebalance uses `minFloor = 0`. FK-aware materialization still applies downstream.
+
 ### Phase 3 — Stratification (C)
 
 - Extend table metadata (`role: fact | dimension | …`) — may need admin UI.
 - Heuristics are fallback only; document confidence limits.
 
+**Status (implemented):** `inferTableRoles` + `tableScaleRoles` + `dimensionBudgetFraction` (default `0.15`). Roles may also come from `definition.metadata.tableScaleRoles` (merged with body). `inferTableScaleRoleFromName()` uses conservative name patterns; explicit roles win.
+
 ### Phase 4 — Quadratic optimization (D) — backlog
 
 - Only if metrics justify it; cap table count to avoid slow imports.
+
+**Status (implemented):** `useQuadraticRefinement` runs a bounded pairwise local search on \(\sum_i (a_i - r_i)^2\) after Hamilton + rebalance, respecting per-table source caps.
 
 ---
 

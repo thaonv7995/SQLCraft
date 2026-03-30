@@ -318,6 +318,8 @@ export interface DatasetTemplate {
   name: string;
   size: DatasetSize;
   rowCounts: Record<string, number>;
+  /** Apportionment targets before FK-aware materialization; null when not stored or same as rowCounts. */
+  requestedRowCounts?: Record<string, number> | null;
   status: ContentStatus;
 }
 

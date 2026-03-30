@@ -267,6 +267,7 @@ async function seed() {
         name: `Ecommerce ${ds.size.charAt(0).toUpperCase() + ds.size.slice(1)}`,
         size: ds.size,
         rowCounts: ds.rowCounts,
+        requestedRowCounts: null,
         status: 'published',
       });
       console.log(`  Created ${ds.size} dataset template`);

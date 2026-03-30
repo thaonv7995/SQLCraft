@@ -1089,6 +1089,18 @@ export interface SqlDumpUploadPresignPartResult {
   presignExpiresInSeconds: number;
 }
 
+/** Optional row apportionment for derived dataset tiers (see API `dataset-scales` / admin schema). */
+export interface DatasetScaleDownOptions {
+  allowEmptyTablesInDerived?: boolean;
+  inferTableRoles?: boolean;
+  useQuadraticRefinement?: boolean;
+  /** 0–0.5; used with stratification (default server-side 0.15). */
+  dimensionBudgetFraction?: number;
+  tableScaleRoles?: Record<string, 'fact' | 'dimension'>;
+  /** When true, import fails if materialized derived row counts differ from apportioned targets. */
+  strictFkMetadata?: boolean;
+}
+
 export interface SqlDumpScanResult {
   scanId: string;
   fileName: string;
@@ -1110,7 +1122,7 @@ export interface SqlDumpScanResult {
   artifactOnly?: boolean;
 }
 
-export interface SqlDumpImportPayload {
+export interface SqlDumpImportPayload extends DatasetScaleDownOptions {
   scanId: string;
   schemaName: string;
   domain: DatabaseDomain;
@@ -1126,7 +1138,7 @@ export interface SqlDumpImportPayload {
 }
 
 /** POST /v1/databases/import-from-scan — public awaits admin review; private publishes with optional invites. */
-export interface UserSqlDumpImportPayload {
+export interface UserSqlDumpImportPayload extends DatasetScaleDownOptions {
   scanId: string;
   schemaName: string;
   domain: DatabaseDomain;

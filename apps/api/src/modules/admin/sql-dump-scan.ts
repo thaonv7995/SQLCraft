@@ -982,10 +982,10 @@ function applyAlterTableConstraints(statement: string, tables: ParsedTable[]): v
     );
   }
 
-  const foreignKeyMatch = details.match(
-    /foreign\s+key\s*\(([^)]+)\)\s+references\s+([^\s(]+)\s*\(([^)]+)\)/i,
-  );
-  if (foreignKeyMatch) {
+  // Match every FOREIGN KEY … REFERENCES … (handles ADD CONSTRAINT …, multi-line, multiple clauses).
+  const fkPattern = /foreign\s+key\s*\(([^)]+)\)\s+references\s+([^\s(]+)\s*\(([^)]+)\)/gi;
+  let foreignKeyMatch: RegExpExecArray | null;
+  while ((foreignKeyMatch = fkPattern.exec(statement)) !== null) {
     const localColumns = splitTopLevelList(foreignKeyMatch[1]).map((value) => unquoteIdentifier(value));
     const targetTable = parseQualifiedIdentifier(foreignKeyMatch[2]).name;
     const targetColumns = splitTopLevelList(foreignKeyMatch[3]).map((value) => unquoteIdentifier(value));

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
+import { normalizeSchemaSqlEngine, type DatasetSize } from '@sqlcraft/types';
 import { getDb, schema } from '../../db';
 import {
   adminDeleteChallenge,
@@ -19,6 +19,7 @@ import {
   buildDerivedDatasetRowCounts,
   classifyDatasetScaleFromTotalRows,
   ensurePositiveDatasetRowCounts,
+  mergeScaleDownOptionsFromDefinition,
   normalizeDatasetRowCounts,
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
@@ -601,7 +602,7 @@ export async function listSystemJobs(
   return { items };
 }
 
-function formatDatasetTemplateName(baseName: string, size: 'tiny' | 'small' | 'medium' | 'large'): string {
+function formatDatasetTemplateName(baseName: string, size: DatasetSize): string {
   return `${baseName} ${size.charAt(0).toUpperCase()}${size.slice(1)}`;
 }
 
@@ -691,7 +692,7 @@ async function importCanonicalDatabaseFromSqlDumpScan(
 
   let materializedDerivedDatasets:
     | Array<{
-        size: 'tiny' | 'small' | 'medium' | 'large';
+        size: DatasetSize;
         rowCounts: Record<string, number>;
         artifactUrl: string;
       }>
@@ -700,7 +701,21 @@ async function importCanonicalDatabaseFromSqlDumpScan(
 
   try {
     if (allowDerivedMaterialization) {
-      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(sourceScale, rowCountsForImport);
+      const scaleDownOpts = mergeScaleDownOptionsFromDefinition(
+        {
+          allowEmptyTablesInDerived: body.allowEmptyTablesInDerived,
+          inferTableRoles: body.inferTableRoles,
+          useQuadraticRefinement: body.useQuadraticRefinement,
+          dimensionBudgetFraction: body.dimensionBudgetFraction,
+          tableScaleRoles: body.tableScaleRoles,
+        },
+        storedScan.definition,
+      );
+      const requestedDerivedDatasets = buildDerivedDatasetRowCounts(
+        sourceScale,
+        rowCountsForImport,
+        scaleDownOpts,
+      );
       if (requestedDerivedDatasets.length > 0) {
         const [{ readFile, uploadFile }, { config }] = await Promise.all([
           import('../../lib/storage'),
@@ -712,6 +727,25 @@ async function importCanonicalDatabaseFromSqlDumpScan(
           definition: storedScan.definition,
           derivedDatasets: requestedDerivedDatasets,
         });
+
+        for (const artifact of derivedArtifacts) {
+          const requested = requestedDerivedDatasets.find((d) => d.size === artifact.size)?.rowCounts;
+          if (!requested) continue;
+          const keys = new Set([...Object.keys(requested), ...Object.keys(artifact.rowCounts)]);
+          const samePerTable = [...keys].every(
+            (k) => (requested[k] ?? 0) === (artifact.rowCounts[k] ?? 0),
+          );
+          if (!samePerTable) {
+            if (body.strictFkMetadata) {
+              throw new ValidationError(
+                `strictFkMetadata: derived "${artifact.size}" materialized row counts differ from apportioned targets (FK-aware selection).`,
+              );
+            }
+            importWarnings.push(
+              `Derived dataset "${artifact.size}": materialized row counts differ from apportioned targets (FK-aware selection may reduce rows).`,
+            );
+          }
+        }
 
         materializedDerivedDatasets = (
           await Promise.all(
@@ -793,13 +827,13 @@ function mergeDefinitionMetadata(
   };
 }
 
-function makeDerivedSqlArtifactObjectName(scanId: string, size: 'tiny' | 'small' | 'medium' | 'large'): string {
+function makeDerivedSqlArtifactObjectName(scanId: string, size: DatasetSize): string {
   return `admin/sql-dumps/${scanId}/derived/${size}.sql.gz`;
 }
 
 export type PersistCanonicalDatabaseImportOptions = {
   materializedDerivedDatasets?: Array<{
-    size: 'tiny' | 'small' | 'medium' | 'large';
+    size: DatasetSize;
     rowCounts: Record<string, number>;
     artifactUrl: string;
   }>;
@@ -849,10 +883,37 @@ async function persistCanonicalDatabaseImport(
   const materializedDerivedDatasetsBySize = new Map(
     (options?.materializedDerivedDatasets ?? []).map((dataset) => [dataset.size, dataset]),
   );
+  const scaleDownOpts = mergeScaleDownOptionsFromDefinition(
+    {
+      allowEmptyTablesInDerived: body.allowEmptyTablesInDerived,
+      inferTableRoles: body.inferTableRoles,
+      useQuadraticRefinement: body.useQuadraticRefinement,
+      dimensionBudgetFraction: body.dimensionBudgetFraction,
+      tableScaleRoles: body.tableScaleRoles,
+    },
+    body.definition as { metadata?: Record<string, unknown> } | null | undefined,
+  );
   const derivedSpecs =
     body.generateDerivedDatasets === false
       ? []
-      : buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts);
+      : buildDerivedDatasetRowCounts(sourceScale, normalizedRowCounts, scaleDownOpts);
+
+  if (body.strictFkMetadata && (options?.materializedDerivedDatasets?.length ?? 0) > 0) {
+    const bySize = new Map(
+      (options?.materializedDerivedDatasets ?? []).map((d) => [d.size, d]),
+    );
+    for (const spec of derivedSpecs) {
+      const mat = bySize.get(spec.size);
+      if (!mat) continue;
+      const keys = new Set([...Object.keys(spec.rowCounts), ...Object.keys(mat.rowCounts)]);
+      const ok = [...keys].every((k) => (spec.rowCounts[k] ?? 0) === (mat.rowCounts[k] ?? 0));
+      if (!ok) {
+        throw new ValidationError(
+          `strictFkMetadata: derived "${spec.size}" materialized row counts differ from apportioned targets.`,
+        );
+      }
+    }
+  }
 
   const txResult = await getDb().transaction(async (tx) => {
     const now = new Date();
@@ -904,6 +965,7 @@ async function persistCanonicalDatabaseImport(
         name: body.canonicalDataset.name?.trim() || formatDatasetTemplateName(body.name, sourceScale),
         size: sourceScale,
         rowCounts: normalizedRowCounts,
+        requestedRowCounts: null,
         artifactUrl: body.canonicalDataset.artifactUrl ?? null,
         status: body.status,
         sandboxGoldenStatus: body.status === 'published' ? 'pending' : 'none',
@@ -924,6 +986,7 @@ async function persistCanonicalDatabaseImport(
           name: formatDatasetTemplateName(body.name, dataset.size),
           size: dataset.size,
           rowCounts: materializedDataset?.rowCounts ?? dataset.rowCounts,
+          requestedRowCounts: materializedDataset ? dataset.rowCounts : null,
           artifactUrl: materializedDataset?.artifactUrl ?? null,
           status: body.status,
           sandboxGoldenStatus: body.status === 'published' ? 'pending' : 'none',

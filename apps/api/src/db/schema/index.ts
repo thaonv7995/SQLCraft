@@ -270,6 +270,8 @@ export const datasetTemplates = pgTable(
     name: varchar('name', { length: 100 }).notNull(),
     size: datasetSizeEnum('size').notNull(),
     rowCounts: jsonb('row_counts').notNull(),
+    /** Per-table targets from apportionment before materialize; null when same as row_counts or canonical-only. */
+    requestedRowCounts: jsonb('requested_row_counts').$type<Record<string, number> | null>(),
     artifactUrl: text('artifact_url'),
     status: contentStatusEnum('status').notNull().default('draft'),
     createdAt: timestamp('created_at').notNull().default(sql`now()`),

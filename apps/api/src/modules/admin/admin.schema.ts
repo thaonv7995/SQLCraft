@@ -145,6 +145,17 @@ const ReplaceSchemaTemplateFieldSchema = z.object({
   replaceSchemaTemplateId: z.string().uuid().optional(),
 });
 
+/** Optional derived row apportionment (Phase 2–4); see `ScaleDownOptions` in `dataset-scales.ts`. */
+export const DatasetScaleDownOptionsSchema = z.object({
+  allowEmptyTablesInDerived: z.boolean().optional(),
+  inferTableRoles: z.boolean().optional(),
+  useQuadraticRefinement: z.boolean().optional(),
+  dimensionBudgetFraction: z.coerce.number().min(0).max(0.5).optional(),
+  tableScaleRoles: z.record(z.enum(['fact', 'dimension'])).optional(),
+  /** When true, import fails if materialized derived row counts differ from apportioned targets (FK closure). */
+  strictFkMetadata: z.boolean().optional(),
+});
+
 export const DirectCanonicalDatabaseImportSchema = z
   .object({
     name: z.string().min(1).max(100),
@@ -160,7 +171,8 @@ export const DirectCanonicalDatabaseImportSchema = z
     dialect: SchemaSqlDialectDefaultPostgresqlSchema,
     engineVersion: EngineVersionFieldSchema,
   })
-  .merge(ReplaceSchemaTemplateFieldSchema);
+  .merge(ReplaceSchemaTemplateFieldSchema)
+  .merge(DatasetScaleDownOptionsSchema);
 
 export const SqlDumpScanImportSchema = z
   .object({
@@ -175,7 +187,8 @@ export const SqlDumpScanImportSchema = z
     /** When set, overrides inferred engine version from the dump scan. */
     engineVersion: EngineVersionFieldSchema,
   })
-  .merge(ReplaceSchemaTemplateFieldSchema);
+  .merge(ReplaceSchemaTemplateFieldSchema)
+  .merge(DatasetScaleDownOptionsSchema);
 
 /** End-user SQL dump import (no catalog replace; visibility controls review vs instant private publish). */
 export const UserImportSqlDumpDatabaseSchema = SqlDumpScanImportSchema.omit({
@@ -384,6 +397,7 @@ export type UpdateUserStatusBody = z.infer<typeof UpdateUserStatusSchema>;
 export type UpdateUserRoleBody = z.infer<typeof UpdateUserRoleSchema>;
 export type CreateAdminUserBody = z.infer<typeof CreateAdminUserSchema>;
 export type UpdateAdminUserBody = z.infer<typeof UpdateAdminUserSchema>;
+export type DatasetScaleDownOptions = z.infer<typeof DatasetScaleDownOptionsSchema>;
 export type ImportCanonicalDatabaseBody = z.infer<typeof ImportCanonicalDatabaseSchema>;
 export type DirectCanonicalDatabaseImportBody = z.infer<typeof DirectCanonicalDatabaseImportSchema>;
 export type SqlDumpScanImportBody = z.infer<typeof SqlDumpScanImportSchema>;

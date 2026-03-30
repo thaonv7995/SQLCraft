@@ -52,12 +52,13 @@ const DOMAIN_ICONS: Record<DatabaseDomain, string> = {
   other: 'database',
 };
 
-const SCALE_ORDER: DatabaseScale[] = ['tiny', 'small', 'medium', 'large'];
+const SCALE_ORDER: DatabaseScale[] = ['tiny', 'small', 'medium', 'large', 'extra_large'];
 const SCALE_RANK: Record<DatabaseScale, number> = {
   tiny: 0,
   small: 1,
   medium: 2,
   large: 3,
+  extra_large: 4,
 };
 
 function dialectToEngineLabel(dialect: string, engineVersion: string | null): string {

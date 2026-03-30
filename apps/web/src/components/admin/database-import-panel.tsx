@@ -8,6 +8,7 @@ import { Input, Select, Textarea } from '@/components/ui/input';
 import {
   type DatabaseDomain,
   type DatasetScale,
+  type DatasetScaleDownOptions,
   type SchemaSqlDialect,
   type SqlDumpImportPayload,
   type SqlDumpScanResult,
@@ -15,6 +16,7 @@ import {
   type InviteUserSearchItem,
   databasesApi,
 } from '@/lib/api';
+import toast from 'react-hot-toast';
 import { UserInviteMultiSelect } from '@/components/user/user-invite-multi-select';
 import {
   formatSqlDumpMaxUploadLabel,
@@ -82,6 +84,69 @@ function formatNumber(value: number) {
   return value.toLocaleString('en-US');
 }
 
+function parseTableScaleRolesJson(
+  raw: string,
+): Record<string, 'fact' | 'dimension'> | undefined | 'invalid' {
+  const t = raw.trim();
+  if (!t) return undefined;
+  try {
+    const o = JSON.parse(t) as unknown;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return 'invalid';
+    const out: Record<string, 'fact' | 'dimension'> = {};
+    for (const [k, v] of Object.entries(o)) {
+      if (v !== 'fact' && v !== 'dimension') return 'invalid';
+      out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return 'invalid';
+  }
+}
+
+function buildDatasetScaleDownPayload(params: {
+  allowEmptyTablesInDerived: boolean;
+  inferTableRoles: boolean;
+  useQuadraticRefinement: boolean;
+  strictFkMetadata: boolean;
+  dimensionBudgetFractionStr: string;
+  tableScaleRolesJson: string;
+}): DatasetScaleDownOptions | undefined {
+  const roles = parseTableScaleRolesJson(params.tableScaleRolesJson);
+  if (roles === 'invalid') {
+    return undefined;
+  }
+
+  const dimParsed = Number.parseFloat(params.dimensionBudgetFractionStr);
+  const dimFracCustom =
+    params.inferTableRoles &&
+    Number.isFinite(dimParsed) &&
+    Math.abs(dimParsed - 0.15) > 1e-6;
+
+  const out: DatasetScaleDownOptions = {};
+  if (params.allowEmptyTablesInDerived) out.allowEmptyTablesInDerived = true;
+  if (params.inferTableRoles) out.inferTableRoles = true;
+  if (params.useQuadraticRefinement) out.useQuadraticRefinement = true;
+  if (params.strictFkMetadata) out.strictFkMetadata = true;
+  if (dimFracCustom) {
+    out.dimensionBudgetFraction = Math.min(0.5, Math.max(0, dimParsed));
+  }
+  if (roles) {
+    out.tableScaleRoles = roles;
+  }
+
+  if (
+    !out.allowEmptyTablesInDerived &&
+    !out.inferTableRoles &&
+    !out.useQuadraticRefinement &&
+    !out.strictFkMetadata &&
+    out.dimensionBudgetFraction === undefined &&
+    !out.tableScaleRoles
+  ) {
+    return undefined;
+  }
+  return out;
+}
+
 export function DatabaseImportPanel({
   variant = 'admin',
   onClose,
@@ -112,6 +177,12 @@ export function DatabaseImportPanel({
   const [resumeLoading, setResumeLoading] = useState(false);
   /** When true, next scan skips strict CREATE TABLE parsing (MySQL/SQL Server dumps, odd DDL). */
   const [skipStrictSchemaScan, setSkipStrictSchemaScan] = useState(false);
+  const [allowEmptyTablesInDerived, setAllowEmptyTablesInDerived] = useState(false);
+  const [inferTableRoles, setInferTableRoles] = useState(false);
+  const [useQuadraticRefinement, setUseQuadraticRefinement] = useState(false);
+  const [strictFkMetadata, setStrictFkMetadata] = useState(false);
+  const [dimensionBudgetFractionStr, setDimensionBudgetFractionStr] = useState('0.15');
+  const [tableScaleRolesJson, setTableScaleRolesJson] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const effectiveReplaceId = isUser ? undefined : replaceSchemaTemplateId;
@@ -144,6 +215,11 @@ export function DatabaseImportPanel({
       setImportSuccess(null);
       setSelectedFile(null);
       setSkipStrictSchemaScan(Boolean(result.artifactOnly));
+      setAllowEmptyTablesInDerived(false);
+      setInferTableRoles(false);
+      setUseQuadraticRefinement(false);
+      setDimensionBudgetFractionStr('0.15');
+      setTableScaleRolesJson('');
     },
     [
       effectiveReplaceId,
@@ -283,6 +359,12 @@ export function DatabaseImportPanel({
     setTags('');
     setImportSuccess(null);
     setSkipStrictSchemaScan(false);
+    setAllowEmptyTablesInDerived(false);
+    setInferTableRoles(false);
+    setUseQuadraticRefinement(false);
+    setStrictFkMetadata(false);
+    setDimensionBudgetFractionStr('0.15');
+    setTableScaleRolesJson('');
   };
 
   const tablePreview = useMemo(
@@ -318,6 +400,31 @@ export function DatabaseImportPanel({
       .map((tag) => tag.trim())
       .filter(Boolean);
 
+    const rolesCheck = parseTableScaleRolesJson(tableScaleRolesJson);
+    if (rolesCheck === 'invalid') {
+      toast.error(
+        'Table roles JSON must be an object with "fact" or "dimension" values, e.g. {"orders":"fact","categories":"dimension"}.',
+      );
+      return;
+    }
+
+    if (inferTableRoles) {
+      const df = Number.parseFloat(dimensionBudgetFractionStr);
+      if (!Number.isFinite(df) || df < 0 || df > 0.5) {
+        toast.error('Dimension budget fraction must be a number between 0 and 0.5.');
+        return;
+      }
+    }
+
+    const scaleDown = buildDatasetScaleDownPayload({
+      allowEmptyTablesInDerived,
+      inferTableRoles,
+      useQuadraticRefinement,
+      strictFkMetadata,
+      dimensionBudgetFractionStr,
+      tableScaleRolesJson,
+    });
+
     if (isUser) {
       const invited = invitedUsers.map((u) => u.id);
       const payload: UserSqlDumpImportPayload = {
@@ -333,6 +440,7 @@ export function DatabaseImportPanel({
         tags: normalizedTags.length ? normalizedTags : undefined,
         visibility: dbVisibility,
         ...(dbVisibility === 'private' && invited.length ? { invitedUserIds: invited } : {}),
+        ...scaleDown,
       };
       importMutation.mutate(payload);
       return;
@@ -350,6 +458,7 @@ export function DatabaseImportPanel({
       description: description.trim() || undefined,
       tags: normalizedTags.length ? normalizedTags : undefined,
       ...(effectiveReplaceId ? { replaceSchemaTemplateId: effectiveReplaceId } : {}),
+      ...scaleDown,
     };
 
     importMutation.mutate(payload);
@@ -568,6 +677,89 @@ export function DatabaseImportPanel({
               onChange={(event) => setTags(event.target.value)}
               placeholder="Comma separated tags"
             />
+
+            <details className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 px-3 py-2 text-sm">
+              <summary className="cursor-pointer select-none font-medium text-on-surface">
+                Derived dataset scaling (advanced)
+              </summary>
+              <p className="mt-2 text-xs text-on-surface-variant">
+                Applies when the API builds smaller PostgreSQL derived tiers from your canonical dump.
+                {scanResult?.artifactOnly ? (
+                  <span className="block pt-1 text-secondary">
+                    Artifact-only scans do not generate derived tiers; these options are ignored.
+                  </span>
+                ) : null}
+              </p>
+              <div className="mt-3 space-y-3 border-t border-outline-variant/20 pt-3">
+                <label className="flex cursor-pointer items-start gap-2 text-on-surface">
+                  <input
+                    type="checkbox"
+                    checked={allowEmptyTablesInDerived}
+                    onChange={(e) => setAllowEmptyTablesInDerived(e.target.checked)}
+                    className="mt-0.5 size-4 rounded border-outline-variant"
+                  />
+                  <span>
+                    Allow empty tables in derived dumps — some tables may get 0 rows (tighter totals).
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-on-surface">
+                  <input
+                    type="checkbox"
+                    checked={inferTableRoles}
+                    onChange={(e) => setInferTableRoles(e.target.checked)}
+                    className="mt-0.5 size-4 rounded border-outline-variant"
+                  />
+                  <span>
+                    Infer fact vs dimension tables from names — reserves part of the row budget for
+                    &quot;dimension&quot; tables before scaling facts.
+                  </span>
+                </label>
+                {inferTableRoles ? (
+                  <Input
+                    label="Dimension budget fraction"
+                    type="number"
+                    min={0}
+                    max={0.5}
+                    step={0.01}
+                    value={dimensionBudgetFractionStr}
+                    onChange={(e) => setDimensionBudgetFractionStr(e.target.value)}
+                    hint="Share of the derived target for dimension tables (default 0.15)."
+                  />
+                ) : null}
+                <label className="flex cursor-pointer items-start gap-2 text-on-surface">
+                  <input
+                    type="checkbox"
+                    checked={useQuadraticRefinement}
+                    onChange={(e) => setUseQuadraticRefinement(e.target.checked)}
+                    className="mt-0.5 size-4 rounded border-outline-variant"
+                  />
+                  <span>
+                    Quadratic refinement — extra pass to better match proportional row targets
+                    (slightly slower import).
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-on-surface">
+                  <input
+                    type="checkbox"
+                    checked={strictFkMetadata}
+                    onChange={(e) => setStrictFkMetadata(e.target.checked)}
+                    className="mt-0.5 size-4 rounded border-outline-variant"
+                  />
+                  <span>
+                    Strict FK metadata — fail import if materialized derived row counts differ from
+                    apportioned targets (after FK-aware selection).
+                  </span>
+                </label>
+                <Textarea
+                  label="Explicit table roles (JSON, optional)"
+                  value={tableScaleRolesJson}
+                  onChange={(e) => setTableScaleRolesJson(e.target.value)}
+                  rows={3}
+                  placeholder='{"orders":"fact","categories":"dimension"}'
+                  hint="Overrides name inference. Values must be fact or dimension."
+                />
+              </div>
+            </details>
 
             {isUser ? (
               <>
