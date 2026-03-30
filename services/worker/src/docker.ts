@@ -226,9 +226,10 @@ export function sandboxContainerName(sandboxId: string): string {
   return `sqlcraft-sbx-${sandboxId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 16).toLowerCase()}`;
 }
 
+/** Remove sandbox engine container and its anonymous volumes (Postgres/MySQL data dirs). */
 export async function ensureSandboxContainerRemoved(containerRef: string): Promise<void> {
   try {
-    await runDocker(['rm', '-f', containerRef]);
+    await runDocker(['rm', '-fv', containerRef]);
   } catch (error) {
     const stderr =
       error && typeof error === 'object' && 'stderr' in error
