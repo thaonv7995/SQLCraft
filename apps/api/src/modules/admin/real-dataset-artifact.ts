@@ -312,6 +312,9 @@ function parseSchemaTables(definition: SchemaDefinition): SchemaTable[] {
         if (!parsed) {
           return null;
         }
+        if (parsed.referencedColumns.length !== 1) {
+          return null;
+        }
         return {
           localColumns: [column.name],
           referencedTable: parsed.referencedTable,

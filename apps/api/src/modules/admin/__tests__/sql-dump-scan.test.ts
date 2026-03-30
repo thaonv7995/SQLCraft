@@ -124,6 +124,60 @@ describe('parseSqlDumpBuffer()', () => {
     expect(result.detectedForeignKeys).toBe(2);
   });
 
+  it('parses column REFERENCES split across lines and optional ONLY', () => {
+    const sql = `
+      CREATE TABLE public.parent (id uuid PRIMARY KEY);
+      CREATE TABLE public.child (
+        pid uuid NOT NULL
+          REFERENCES
+          ONLY
+          public.parent
+          (
+            id
+          )
+      );
+    `;
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'only_ref.sql',
+      '66666666-6666-4666-8666-666666666666',
+    );
+    const child = result.definition.tables.find((t) => t.name === 'child');
+    expect(child?.columns.find((c) => c.name === 'pid')?.type).toContain('references parent(id)');
+    expect(child?.foreignKeyConstraints).toEqual([
+      {
+        localColumns: ['pid'],
+        referencedTable: 'parent',
+        referencedColumns: ['id'],
+      },
+    ]);
+  });
+
+  it('includes inline-only REFERENCES in foreignKeyConstraints (no table-level FK clause)', () => {
+    const sql = `
+      CREATE TABLE public.regions (id int PRIMARY KEY);
+      CREATE TABLE public.offices (
+        id int PRIMARY KEY,
+        region_id int NOT NULL REFERENCES public.regions(id)
+      );
+    `;
+    const result = parseSqlDumpBuffer(
+      Buffer.from(sql, 'utf8'),
+      'inline_fk.sql',
+      '77777777-7777-4777-8777-777777777777',
+    );
+    const offices = result.definition.tables.find((t) => t.name === 'offices');
+    expect(offices?.foreignKeyConstraints).toEqual(
+      expect.arrayContaining([
+        {
+          localColumns: ['region_id'],
+          referencedTable: 'regions',
+          referencedColumns: ['id'],
+        },
+      ]),
+    );
+  });
+
   it('parses ALTER TABLE ADD CONSTRAINT … FOREIGN KEY for composite keys', () => {
     const sql = `
       CREATE TABLE public.p (

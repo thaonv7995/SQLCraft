@@ -62,6 +62,11 @@ export interface StoredSqlDumpScan extends SqlDumpScanResult {
         name: string;
         type: string;
       }>;
+      foreignKeyConstraints?: Array<{
+        localColumns: string[];
+        referencedTable: string;
+        referencedColumns: string[];
+      }>;
     }>;
     indexes?: Array<{
       name: string;
@@ -630,15 +635,112 @@ function normalizeSpacing(input: string): string {
   return input.trim().replace(/\s+/g, ' ');
 }
 
-function extractReference(input: string): string | undefined {
-  const match = input.match(/references\s+([^\s(]+)\s*\(([^)]+)\)/i);
-  if (!match) {
+/** Collapse whitespace so FOREIGN KEY / REFERENCES clauses match across newlines. */
+function collapseDdlWhitespaceForFkMatch(input: string): string {
+  return input.trim().replace(/\s+/g, ' ');
+}
+
+function parseReferencesParenBody(ref: string): {
+  referencedTable: string;
+  referencedColumns: string[];
+} | null {
+  const open = ref.indexOf('(');
+  const close = ref.lastIndexOf(')');
+  if (open < 0 || close <= open) {
+    return null;
+  }
+  const referencedTable = parseQualifiedIdentifier(ref.slice(0, open).trim()).name;
+  const inner = ref.slice(open + 1, close);
+  const referencedColumns = splitTopLevelList(inner).map((value) =>
+    unquoteIdentifier(stripTsqlColumnSortSuffix(value)),
+  );
+  if (referencedColumns.length === 0) {
+    return null;
+  }
+  return { referencedTable, referencedColumns };
+}
+
+/**
+ * Column-level REFERENCES … (handles newlines, optional ONLY before parent table,
+ * parenthesized column lists with commas / nested parens via splitTopLevelList).
+ */
+function extractReferenceStructured(remainder: string): {
+  referencedTable: string;
+  referencedColumns: string[];
+} | undefined {
+  const refWord = remainder.search(/\breferences\s+/i);
+  if (refWord < 0) {
+    return undefined;
+  }
+  let rest = remainder.slice(refWord).replace(/^\s*references\s+/i, '');
+  rest = rest.trimStart();
+  if (/^only\s+/i.test(rest)) {
+    rest = rest.replace(/^only\s+/i, '').trimStart();
+  }
+
+  const openParen = rest.indexOf('(');
+  if (openParen < 0) {
     return undefined;
   }
 
-  const table = parseQualifiedIdentifier(match[1]).name;
-  const column = unquoteIdentifier(match[2].trim());
-  return `${table}(${column})`;
+  const tablePart = rest.slice(0, openParen).trim();
+  if (!tablePart) {
+    return undefined;
+  }
+
+  const referencedTable = parseQualifiedIdentifier(tablePart).name;
+  const closeParen = findMatchingParen(rest, openParen);
+  if (closeParen < 0) {
+    return undefined;
+  }
+
+  const inner = rest.slice(openParen + 1, closeParen);
+  const referencedColumns = splitTopLevelList(inner).map((value) =>
+    unquoteIdentifier(stripTsqlColumnSortSuffix(value)),
+  );
+  if (referencedColumns.length === 0) {
+    return undefined;
+  }
+
+  return { referencedTable, referencedColumns };
+}
+
+function extractReference(input: string): string | undefined {
+  const s = extractReferenceStructured(input);
+  if (!s) {
+    return undefined;
+  }
+  return `${s.referencedTable}(${s.referencedColumns.join(', ')})`;
+}
+
+/** Adds inline REFERENCES from column `references` strings when not already in the list. */
+function mergeInlineForeignKeysIntoList(
+  list: NonNullable<ParsedTable['foreignKeyConstraints']>,
+  columns: ParsedColumn[],
+): void {
+  const coversSingleColumn = (columnName: string): boolean =>
+    list.some((fk) => fk.localColumns.length === 1 && fk.localColumns[0] === columnName);
+
+  for (const col of columns) {
+    if (!col.references || !col.isForeign) {
+      continue;
+    }
+    if (coversSingleColumn(col.name)) {
+      continue;
+    }
+    const parsed = parseReferencesParenBody(col.references);
+    if (!parsed) {
+      continue;
+    }
+    if (parsed.referencedColumns.length !== 1) {
+      continue;
+    }
+    list.push({
+      localColumns: [col.name],
+      referencedTable: parsed.referencedTable,
+      referencedColumns: parsed.referencedColumns,
+    });
+  }
 }
 
 function formatDefinitionType(column: ParsedColumn): string {
@@ -872,9 +974,13 @@ function parseCreateTable(statement: string): ParsedTable | null {
       continue;
     }
 
+    const fkSeg = collapseDdlWhitespaceForFkMatch(segment);
+    const fkUpper = fkSeg.toUpperCase();
     const foreignKeyMatch =
-      upper.startsWith('FOREIGN KEY') || upper.startsWith('CONSTRAINT')
-        ? segment.match(/foreign\s+key\s*\(([^)]+)\)\s+references\s+([^\s(]+)\s*\(([^)]+)\)/i)
+      fkUpper.startsWith('FOREIGN KEY') || fkUpper.startsWith('CONSTRAINT')
+        ? fkSeg.match(
+            /foreign\s+key\s*\(([^)]+)\)\s+references\s+(?:only\s+)?([^\s(]+)\s*\(([^)]+)\)/i,
+          )
         : null;
     if (foreignKeyMatch) {
       const localColumns = splitTopLevelList(foreignKeyMatch[1]).map((value) =>
@@ -967,6 +1073,8 @@ function parseCreateTable(statement: string): ParsedTable | null {
     };
   });
 
+  mergeInlineForeignKeysIntoList(foreignKeyConstraintsList, normalizedColumns);
+
   return {
     name: identifier.name,
     schemaName: identifier.schemaName,
@@ -1005,10 +1113,12 @@ function applyAlterTableConstraints(statement: string, tables: ParsedTable[]): v
     );
   }
 
-  // Match every FOREIGN KEY … REFERENCES … (handles ADD CONSTRAINT …, multi-line, multiple clauses).
-  const fkPattern = /foreign\s+key\s*\(([^)]+)\)\s+references\s+([^\s(]+)\s*\(([^)]+)\)/gi;
+  // Match every FOREIGN KEY … REFERENCES … (handles ADD CONSTRAINT …, multi-line, ONLY, multiple clauses).
+  const stmtNorm = collapseDdlWhitespaceForFkMatch(statement);
+  const fkPattern =
+    /foreign\s+key\s*\(([^)]+)\)\s+references\s+(?:only\s+)?([^\s(]+)\s*\(([^)]+)\)/gi;
   let foreignKeyMatch: RegExpExecArray | null;
-  while ((foreignKeyMatch = fkPattern.exec(statement)) !== null) {
+  while ((foreignKeyMatch = fkPattern.exec(stmtNorm)) !== null) {
     const localColumns = splitTopLevelList(foreignKeyMatch[1]).map((value) => unquoteIdentifier(value));
     const targetTable = parseQualifiedIdentifier(foreignKeyMatch[2]).name;
     const targetColumns = splitTopLevelList(foreignKeyMatch[3]).map((value) => unquoteIdentifier(value));
@@ -1056,6 +1166,11 @@ function applyAlterTableConstraints(statement: string, tables: ParsedTable[]): v
       columns: uniqueConstraint.columns,
     });
   }
+
+  if (!table.foreignKeyConstraints) {
+    table.foreignKeyConstraints = [];
+  }
+  mergeInlineForeignKeysIntoList(table.foreignKeyConstraints, table.columns);
 }
 
 export function parseSqlDumpBuffer(
