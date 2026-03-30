@@ -23,7 +23,11 @@ import {
   SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES,
   SQL_DUMP_FULL_PARSE_MAX_MB,
 } from '@/lib/sql-dump-limits';
-import { DATASET_SCALE_TIER_OPTIONS } from '@/lib/database-catalog';
+import {
+  DATASET_SCALE_SHORT_LABELS,
+  DATASET_SCALE_TIER_OPTIONS,
+  inferDatasetScaleFromRowCount,
+} from '@/lib/database-catalog';
 
 interface DatabaseImportPanelProps {
   /** Admin: publish to catalog. User: import with visibility / invites (enforced server-side). */
@@ -203,7 +207,11 @@ export function DatabaseImportPanel({
           : nameFromScan,
       );
       setDomain(effectiveReplaceId && lockedCatalogDomain ? lockedCatalogDomain : result.domain);
-      setDatasetScale(result.inferredScale ?? '');
+      setDatasetScale(
+        result.totalRows > 0
+          ? inferDatasetScaleFromRowCount(result.totalRows)
+          : (result.inferredScale ?? ''),
+      );
       setDialect(effectiveReplaceId && lockedDialect ? lockedDialect : result.inferredDialect);
       setEngineVersion(
         effectiveReplaceId && lockedEngineVersion !== undefined
@@ -591,6 +599,14 @@ export function DatabaseImportPanel({
                   <p className="text-[11px] text-on-surface-variant">Primary Keys</p>
                   <p className="text-lg font-semibold">{scanResult.detectedPrimaryKeys}</p>
                 </div>
+                {!scanResult.artifactOnly && scanResult.totalRows > 0 ? (
+                  <div className="sm:col-span-2">
+                    <p className="text-[11px] text-on-surface-variant">Scale from row total</p>
+                    <p className="text-lg font-semibold">
+                      {DATASET_SCALE_SHORT_LABELS[inferDatasetScaleFromRowCount(scanResult.totalRows)]}
+                    </p>
+                  </div>
+                ) : null}
               </div>
               <p className="mt-3 text-xs text-on-surface-variant">
                 Dialect:{' '}
