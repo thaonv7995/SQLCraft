@@ -23,7 +23,50 @@ export function stripMySqlSessionNoiseLines(sql: string): string {
     .replace(/^\s*SET\s+NAMES\s+[^;\r\n]+;?\s*$/gim, '')
     .replace(/^\s*SET\s+FOREIGN_KEY_CHECKS\s*=\s*\d+\s*;?\s*$/gim, '')
     .replace(/^\s*SET\s+UNIQUE_CHECKS\s*=\s*\d+\s*;?\s*$/gim, '')
-    .replace(/^\s*SET\s+SQL_MODE\s*=\s*[^;\r\n]+;?\s*$/gim, '');
+    .replace(/^\s*SET\s+SQL_MODE\s*=\s*[^;\r\n]+;?\s*$/gim, '')
+    .replace(/^\s*ALTER\s+TABLE\s+[^;\r\n]+DISABLE\s+KEYS\s*;\s*$/gim, '')
+    .replace(/^\s*ALTER\s+TABLE\s+[^;\r\n]+ENABLE\s+KEYS\s*;\s*$/gim, '');
+}
+
+/**
+ * US-style or day-first M/D/YY(YY) in VALUES — unquoted slashes are parsed as division in T‑SQL
+ * (e.g. Msg 102 near '87' for 6/15/87). Quote as a single literal for implicit datetime conversion.
+ */
+export function tryRewriteUsStyleSlashDate(rest: string): { len: number; text: string } | null {
+  const m = rest.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?=\s*(?:[,);]|$))/);
+  if (!m) return null;
+  const y = m[3];
+  if (y.length !== 2 && y.length !== 4) return null;
+  const a = +m[1];
+  const b = +m[2];
+  const usOk = a >= 1 && a <= 12 && b >= 1 && b <= 31;
+  const dmOk = a >= 1 && a <= 31 && b >= 1 && b <= 12;
+  if (!usOk && !dmOk) return null;
+  return { len: m[0].length, text: `'${m[1]}/${m[2]}/${m[3]}'` };
+}
+
+/**
+ * SQL Server rejects multiple CASCADE paths (Msg 1785). MySQL/Postgres dumps often use CASCADE;
+ * for sandbox restore, NO ACTION is enough and avoids cycle errors.
+ */
+export function normalizeFkCascadeSingleLine(line: string): string {
+  return line
+    .replace(/\bON\s+DELETE\s+CASCADE\b/gi, 'ON DELETE NO ACTION')
+    .replace(/\bON\s+UPDATE\s+CASCADE\b/gi, 'ON UPDATE NO ACTION');
+}
+
+export function normalizeSqlServerForeignKeyCascade(sql: string): string {
+  let s = sql;
+  s = s.replace(/\bON\s+DELETE\s*[\r\n]+\s*CASCADE\b/gi, 'ON DELETE NO ACTION');
+  s = s.replace(/\bON\s+UPDATE\s*[\r\n]+\s*CASCADE\b/gi, 'ON UPDATE NO ACTION');
+  return normalizeFkCascadeSingleLine(s);
+}
+
+function shouldDeferFkCascadeLine(line: string, mode: 'delete' | 'update'): boolean {
+  if (/\bON\s+DELETE\s+CASCADE\b/i.test(line) || /\bON\s+UPDATE\s+CASCADE\b/i.test(line)) return false;
+  if (/\bON\s+DELETE\s+NO\s+ACTION\b/i.test(line) || /\bON\s+UPDATE\s+NO\s+ACTION\b/i.test(line)) return false;
+  if (mode === 'delete') return /\bON\s+DELETE\s*$/i.test(line.trimEnd());
+  return /\bON\s+UPDATE\s*$/i.test(line.trimEnd());
 }
 
 /**
@@ -59,6 +102,17 @@ export function quoteUnquotedIsoDatesOutsideStringsAndComments(sql: string): str
       /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
+
+    const usSlash = tryRewriteUsStyleSlashDate(rest);
+    if (usSlash) return usSlash;
+
+    const mysqlNull = rest.match(/^\\N(?=[\s,);]|$)/);
+    if (mysqlNull) {
+      const before = pos > 0 ? sql[pos - 1] : '';
+      if (pos === 0 || /[\s,(]/.test(before)) {
+        return { len: 2, text: 'NULL' };
+      }
+    }
 
     const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*(?:[,);]|$))/i);
     if (bool) {
@@ -254,6 +308,8 @@ export function sanitizeSqlServerDumpScript(sql: string): string {
 
   s = quoteUnquotedIsoDatesOutsideStringsAndComments(s);
 
+  s = normalizeSqlServerForeignKeyCascade(s);
+
   return s;
 }
 
@@ -288,6 +344,8 @@ function sanitizeLineLevel(line: string): string {
   if (/^\s*SET\s+FOREIGN_KEY_CHECKS\s*=/i.test(line) && /;?\s*$/.test(line)) return '';
   if (/^\s*SET\s+UNIQUE_CHECKS\s*=/i.test(line) && /;?\s*$/.test(line)) return '';
   if (/^\s*SET\s+SQL_MODE\s*=/i.test(line) && /;?\s*$/.test(line)) return '';
+  if (/^\s*ALTER\s+TABLE\s+/i.test(line) && /DISABLE\s+KEYS\s*;\s*$/i.test(line)) return '';
+  if (/^\s*ALTER\s+TABLE\s+/i.test(line) && /ENABLE\s+KEYS\s*;\s*$/i.test(line)) return '';
 
   // Strip sp_addtype
   if (/^\s*(?:execute|exec)\s+sp_addtype\b/i.test(line)) return '';
@@ -325,6 +383,8 @@ function sanitizeLineLevel(line: string): string {
   s = s.replace(new RegExp(`\\bDELETE\\s+FROM\\s+(${R})\\b`, 'gi'), (_m, name) => `DELETE FROM [${name}]`);
   s = s.replace(new RegExp(`\\bTRUNCATE\\s+TABLE\\s+(${R})\\b`, 'gi'), (_m, name) => `TRUNCATE TABLE [${name}]`);
 
+  s = normalizeFkCascadeSingleLine(s);
+
   return s;
 }
 
@@ -360,6 +420,17 @@ function quoteDatesAndBoolsInLine(
       /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
+
+    const usSlash = tryRewriteUsStyleSlashDate(rest);
+    if (usSlash) return usSlash;
+
+    const mysqlNull = rest.match(/^\\N(?=[\s,);]|$)/);
+    if (mysqlNull) {
+      const before = pos > 0 ? line[pos - 1] : '';
+      if (pos === 0 || /[\s,(]/.test(before)) {
+        return { len: 2, text: 'NULL' };
+      }
+    }
 
     const bool = rest.match(/^(TRUE|FALSE)\b(?=\s*(?:[,);]|$))/i);
     if (bool) {
@@ -448,6 +519,8 @@ export function createSqlServerSanitizeTransform(): Transform {
     inBlockComment: false,
   };
 
+  let pendingFkCascade: { line: string; mode: 'delete' | 'update' } | null = null;
+
   function processLine(line: string): string {
     // Detect if bootstrap is needed (idempotent check per line, before stripping)
     if (!needsBootstrap && !bootstrapEmitted) {
@@ -465,6 +538,44 @@ export function createSqlServerSanitizeTransform(): Transform {
     const result = quoteDatesAndBoolsInLine(line, dateState);
     dateState = result.state;
     return result.output;
+  }
+
+  function emitProcessedLine(line: string, output: string[]) {
+    if (needsBootstrap && !bootstrapEmitted) {
+      output.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
+      bootstrapEmitted = true;
+    }
+    output.push(applyDateQuoting(line));
+  }
+
+  function handleSanitizedLine(sanitized: string, output: string[]) {
+    if (pendingFkCascade) {
+      if (/^\s*CASCADE\b/i.test(sanitized)) {
+        const re =
+          pendingFkCascade.mode === 'delete' ? /\bON\s+DELETE\s*$/i : /\bON\s+UPDATE\s*$/i;
+        const replacement =
+          pendingFkCascade.mode === 'delete' ? 'ON DELETE NO ACTION' : 'ON UPDATE NO ACTION';
+        const merged =
+          pendingFkCascade.line.replace(re, replacement) + sanitized.replace(/^\s*CASCADE\b/i, '');
+        pendingFkCascade = null;
+        handleSanitizedLine(merged, output);
+        return;
+      }
+      emitProcessedLine(pendingFkCascade.line, output);
+      pendingFkCascade = null;
+      handleSanitizedLine(sanitized, output);
+      return;
+    }
+
+    if (shouldDeferFkCascadeLine(sanitized, 'delete')) {
+      pendingFkCascade = { line: sanitized, mode: 'delete' };
+      return;
+    }
+    if (shouldDeferFkCascadeLine(sanitized, 'update')) {
+      pendingFkCascade = { line: sanitized, mode: 'update' };
+      return;
+    }
+    emitProcessedLine(sanitized, output);
   }
 
   return new Transform({
@@ -487,15 +598,7 @@ export function createSqlServerSanitizeTransform(): Transform {
       const output: string[] = [];
 
       for (const rawLine of lines) {
-        const sanitized = processLine(rawLine);
-
-        // Emit bootstrap before first processed line if needed
-        if (needsBootstrap && !bootstrapEmitted) {
-          output.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
-          bootstrapEmitted = true;
-        }
-
-        output.push(applyDateQuoting(sanitized));
+        handleSanitizedLine(processLine(rawLine), output);
       }
 
       if (output.length > 0) {
@@ -509,15 +612,14 @@ export function createSqlServerSanitizeTransform(): Transform {
       const remaining: string[] = [];
 
       if (partialLine) {
-        const sanitized = processLine(partialLine);
-        if (needsBootstrap && !bootstrapEmitted) {
-          remaining.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
-          bootstrapEmitted = true;
-        }
-        remaining.push(applyDateQuoting(sanitized));
+        handleSanitizedLine(processLine(partialLine), remaining);
         partialLine = '';
+      }
+
+      if (pendingFkCascade) {
+        emitProcessedLine(pendingFkCascade.line, remaining);
+        pendingFkCascade = null;
       } else if (needsBootstrap && !bootstrapEmitted) {
-        // All lines were stripped but bootstrap was triggered — emit it
         remaining.push(INST_PUBS_DBO_TYPES_BOOTSTRAP.trimEnd());
         bootstrapEmitted = true;
       }

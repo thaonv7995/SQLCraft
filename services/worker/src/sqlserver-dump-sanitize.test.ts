@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test, describe, it } from 'vitest';
-import { sanitizeSqlServerDumpScript, createSqlServerSanitizeTransform } from './sqlserver-dump-sanitize';
+import {
+  sanitizeSqlServerDumpScript,
+  createSqlServerSanitizeTransform,
+  normalizeSqlServerForeignKeyCascade,
+} from './sqlserver-dump-sanitize';
 
 test('brackets unquoted Order in CREATE TABLE', () => {
   const out = sanitizeSqlServerDumpScript('CREATE TABLE Order (\n  id int\n);');
@@ -129,6 +133,44 @@ test('rewrites PostgreSQL TRUE/FALSE to 1/0 in value position', () => {
   assert.match(out, /VALUES\s*\(\s*1\s*,\s*1\s*,\s*0\s*\)/i);
 });
 
+test('quotes US-style slash dates with two-digit year (avoids Msg 102 near year segment)', () => {
+  const out = sanitizeSqlServerDumpScript('INSERT INTO t (d) VALUES (6/15/87);');
+  assert.match(out, /VALUES\s*\(\s*'6\/15\/87'\s*\)/i);
+});
+
+test('quotes M/D/YYYY slash dates in VALUES', () => {
+  const out = sanitizeSqlServerDumpScript('INSERT INTO t (d) VALUES (12/31/2024);');
+  assert.match(out, /'12\/31\/2024'/);
+});
+
+test('rewrites mysqldump NULL token to T-SQL NULL', () => {
+  const out = sanitizeSqlServerDumpScript('INSERT INTO t (a,b) VALUES (1,\\N);');
+  assert.match(out, /VALUES\s*\(\s*1\s*,\s*NULL\s*\)/i);
+});
+
+test('strips MySQL DISABLE KEYS / ENABLE KEYS', () => {
+  const out = sanitizeSqlServerDumpScript(
+    "ALTER TABLE `x` DISABLE KEYS;\nINSERT INTO [x] VALUES (1);\nALTER TABLE `x` ENABLE KEYS;\n",
+  );
+  assert.ok(!/DISABLE\s+KEYS/i.test(out));
+  assert.ok(!/ENABLE\s+KEYS/i.test(out));
+});
+
+test('replaces ON DELETE/UPDATE CASCADE with NO ACTION (Msg 1785)', () => {
+  const input =
+    "ALTER TABLE categories ADD CONSTRAINT FK_parent FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE CASCADE;";
+  const out = normalizeSqlServerForeignKeyCascade(input);
+  assert.match(out, /ON\s+DELETE\s+NO\s+ACTION/i);
+  assert.ok(!/\bON\s+DELETE\s+CASCADE\b/i.test(out));
+});
+
+test('normalizes CASCADE split across lines', () => {
+  const input = 'REFERENCES dbo.categories(id) ON DELETE\nCASCADE';
+  const out = normalizeSqlServerForeignKeyCascade(input);
+  assert.ok(!/\bCASCADE\b/i.test(out));
+  assert.match(out, /ON\s+DELETE\s+NO\s+ACTION/i);
+});
+
 // ─── Streaming Transform equivalence tests ─────────────────────────────────
 
 async function collectStreamOutput(input: string): Promise<string> {
@@ -235,6 +277,37 @@ describe('createSqlServerSanitizeTransform (streaming equivalence)', () => {
 
   it('matches buffer for TRUE/FALSE rewriting', async () => {
     const input = 'INSERT INTO t (a, b, c) VALUES (1, TRUE, FALSE);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for US-style M/D/YY dates', async () => {
+    const input = 'INSERT INTO t (d) VALUES (6/15/87);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+    assert.match(bufferOut, /'6\/15\/87'/);
+  });
+
+  it('matches buffer for mysqldump \\N NULL', async () => {
+    const input = 'INSERT INTO t (a,b) VALUES (1,\\N);';
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+  });
+
+  it('matches buffer for FK CASCADE → NO ACTION', async () => {
+    const input =
+      "ALTER TABLE categories ADD CONSTRAINT FK_x FOREIGN KEY (p) REFERENCES categories(id) ON DELETE CASCADE;";
+    const bufferOut = sanitizeSqlServerDumpScript(input);
+    const streamOut = await collectStreamOutput(input);
+    assert.strictEqual(normalize(streamOut), normalize(bufferOut));
+    assert.match(bufferOut, /ON\s+DELETE\s+NO\s+ACTION/i);
+  });
+
+  it('matches buffer when ON DELETE and CASCADE are on separate lines', async () => {
+    const input = 'REFERENCES dbo.t(id) ON DELETE\nCASCADE';
     const bufferOut = sanitizeSqlServerDumpScript(input);
     const streamOut = await collectStreamOutput(input);
     assert.strictEqual(normalize(streamOut), normalize(bufferOut));
