@@ -315,7 +315,7 @@ export async function completeSqlDumpUploadSession(
     detectedPrimaryKeys: baseScan.detectedPrimaryKeys,
     detectedForeignKeys: baseScan.detectedForeignKeys,
     tables: baseScan.tables,
-    artifactOnly: true,
+    artifactOnly: Boolean(row.artifactOnly),
     scanStatus: 'queued',
     progressBytes: 0,
     totalBytes: stat.size,

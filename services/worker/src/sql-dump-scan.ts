@@ -231,6 +231,90 @@ function countColumnsInCreateTableBody(body: string): { columns: number; pk: num
   return { columns: cols, pk, fk };
 }
 
+function extractCreateTableBodies(text: string): Array<{ name: string; body: string }> {
+  const results: Array<{ name: string; body: string }> = [];
+  // We look for CREATE TABLE statements and then match the first (...) block with balanced parentheses.
+  // This is more resilient to MySQL where statements often end with `) ENGINE=...;`.
+  // MySQL dumps sometimes inject versioned directives between tokens, e.g.:
+  // `CREATE /*!40101 ... */ TABLE ...` or `CREATE TEMPORARY TABLE ...`.
+  const re =
+    /CREATE\s+(?:\/\*![\s\S]*?\*\/\s*)*(?:TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)\s*/gi;
+
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const rawName = m[1] ?? '';
+    const name = normalizeTableName(rawName);
+
+    // Find the opening paren after the match.
+    const openIdx = text.indexOf('(', re.lastIndex);
+    if (openIdx < 0) continue;
+
+    let depth = 0;
+    let inSingle = false;
+    let inDouble = false;
+    let inBacktick = false;
+
+    let i = openIdx;
+    for (; i < text.length; i++) {
+      const ch = text[i]!;
+
+      // Basic quote handling; enough for dump DDL.
+      if (inSingle) {
+        if (ch === '\\') {
+          i++; // skip escaped char
+          continue;
+        }
+        if (ch === "'") inSingle = false;
+        continue;
+      }
+      if (inDouble) {
+        if (ch === '\\') {
+          i++;
+          continue;
+        }
+        if (ch === '"') inDouble = false;
+        continue;
+      }
+      if (inBacktick) {
+        if (ch === '`') inBacktick = false;
+        continue;
+      }
+
+      if (ch === "'") {
+        inSingle = true;
+        continue;
+      }
+      if (ch === '"') {
+        inDouble = true;
+        continue;
+      }
+      if (ch === '`') {
+        inBacktick = true;
+        continue;
+      }
+
+      if (ch === '(') depth++;
+      if (ch === ')') {
+        depth--;
+        if (depth === 0) {
+          const closeIdx = i;
+          const body = text.slice(openIdx + 1, closeIdx);
+          results.push({ name, body });
+
+          // Move regex cursor forward to avoid nested matches.
+          re.lastIndex = closeIdx + 1;
+          break;
+        }
+      }
+    }
+
+    // Safety: stop early in case of runaway input.
+    if (results.length >= 4000) break;
+  }
+
+  return results;
+}
+
 async function ddlOnlyScanFromArtifactHead(params: {
   artifactUrl: string;
   fileName: string;
@@ -243,34 +327,34 @@ async function ddlOnlyScanFromArtifactHead(params: {
   const stream = createMcCatObjectReadStream(artifactUrl);
   const chunks: Buffer[] = [];
   let seen = 0;
-  for await (const chunk of stream) {
+
+  // If gzipped, we need to decompress the head bytes; otherwise we would be parsing compressed bytes.
+  // Note: maxBytes here is for decompressed text size.
+  const isGz = /\.(gz|sql\.gz)$/i.test(fileName);
+  const source: Readable = isGz ? stream.pipe(createGunzip()) : stream;
+
+  for await (const chunk of source) {
     const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     chunks.push(b);
     seen += b.length;
     if (seen >= maxBytes) {
-      stream.destroy();
+      // Best-effort stop; stream may already be piped through gunzip.
+      source.destroy();
       break;
     }
   }
 
-  let text = Buffer.concat(chunks).toString('utf8');
-  if (/\.(gz|sql\.gz)$/i.test(fileName)) {
-    // If gzipped, ddl scan via head bytes is unreliable; skip DDL.
-    return base;
-  }
-  // Scan CREATE TABLE statements quickly with regex.
-  const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(]+)\s*\(([\s\S]*?)\)\s*;?/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const name = normalizeTableName(m[1] ?? '');
-    const body = m[2] ?? '';
-    const counts = countColumnsInCreateTableBody(body);
+  const text = Buffer.concat(chunks).toString('utf8');
+  const tables = extractCreateTableBodies(text);
+
+  for (const t of tables) {
+    const counts = countColumnsInCreateTableBody(t.body);
     base.totalTables += 1;
     base.columnCount += counts.columns;
     base.detectedPrimaryKeys += counts.pk;
     base.detectedForeignKeys += counts.fk;
     base.tables.push({
-      name,
+      name: t.name,
       columnCount: counts.columns,
       detectedPrimaryKeys: counts.pk,
       detectedForeignKeys: counts.fk,
@@ -319,13 +403,32 @@ export async function runSqlDumpScanJob(
   await updateScan(input.scanId, { status: 'running', progressBytes: 0 });
 
   const artifactOnly = Boolean(input.artifactOnly);
-  const ddlSummary = artifactOnly
-    ? null
-    : await ddlOnlyScanFromArtifactHead({
-        artifactUrl: input.artifactUrl,
-        fileName: input.fileName,
-        maxBytes: 64 * 1024 * 1024,
-      }).catch(() => null);
+  const ddlSummary = await (async () => {
+    if (artifactOnly) return null;
+
+    // First try a small head slice; if no tables detected, retry with more bytes.
+    const first = await ddlOnlyScanFromArtifactHead({
+      artifactUrl: input.artifactUrl,
+      fileName: input.fileName,
+      maxBytes: 64 * 1024 * 1024,
+    }).catch(() => null);
+
+    if (first && first.totalTables > 0) return first;
+
+    const second = await ddlOnlyScanFromArtifactHead({
+      artifactUrl: input.artifactUrl,
+      fileName: input.fileName,
+      maxBytes: 192 * 1024 * 1024,
+    }).catch(() => null);
+    if (second && second.totalTables > 0) return second;
+
+    // Last attempt: increase head slice again for dumps where DDL is late.
+    return await ddlOnlyScanFromArtifactHead({
+      artifactUrl: input.artifactUrl,
+      fileName: input.fileName,
+      maxBytes: 256 * 1024 * 1024,
+    }).catch(() => null);
+  })();
 
   const baseStream: Readable = createMcCatObjectReadStream(input.artifactUrl);
   const rowCounter = new RowCountTransform();
@@ -392,6 +495,29 @@ export async function runSqlDumpScanJob(
           })
         : [];
 
+    // Also populate `definition.tables` so downstream import uses the schema graph
+    // (row apportionment + catalog persistence). We only have counts here, so we
+    // generate stable placeholder column definitions.
+    const definitionTablesOut =
+      ddlTables && ddlTables.length
+        ? ddlTables.map((t) => {
+            const columns = Array.from({ length: t.columnCount }, (_, idx) => {
+              const i = idx + 1;
+              const name = `col_${i}`;
+              const isPk = idx < t.detectedPrimaryKeys;
+              return {
+                name,
+                type: isPk ? 'INT PRIMARY KEY' : 'INT',
+              };
+            });
+            return {
+              name: t.name,
+              columns,
+              foreignKeyConstraints: [],
+            };
+          })
+        : [];
+
     const patch = {
       ...base,
       scanId: input.scanId,
@@ -407,10 +533,15 @@ export async function runSqlDumpScanJob(
       artifactOnly,
       definition: {
         ...(typeof base.definition === 'object' && base.definition ? (base.definition as Record<string, unknown>) : {}),
+        // Overwrite schema graph tables for catalog persistence.
+        tables: definitionTablesOut,
         metadata: {
           ...((typeof (base as any).definition?.metadata === 'object' && (base as any).definition?.metadata
             ? (base as any).definition.metadata
             : {}) as Record<string, unknown>),
+          // Keep artifact-only flag consistent so `toSqlDumpScanResult()` doesn't
+          // incorrectly treat the scan as artifact-only after DDL-only parsing.
+          artifactOnly,
           totalRows,
           totalTables: Number(
             ddlSummary?.totalTables ??
