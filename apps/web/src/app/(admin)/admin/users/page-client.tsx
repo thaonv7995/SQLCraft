@@ -345,15 +345,19 @@ export default function AdminUsersPage(_props: ClientPageProps) {
       return;
     }
 
-    createMutation.mutate({
+    const payload: AdminCreateUserPayload = {
       email: form.email.trim(),
       username: form.username.trim(),
       displayName: form.displayName.trim() || undefined,
       password: form.password,
       bio: form.bio.trim() || null,
       role: form.role,
-      status: form.status,
-    });
+    };
+    // API only accepts active | disabled | invited — omit while still awaiting approval
+    if (form.status !== 'pending') {
+      payload.status = form.status;
+    }
+    createMutation.mutate(payload);
   };
 
   return (
