@@ -1338,3 +1338,48 @@ export async function rejectSchemaTemplateReview(schemaTemplateId: string): Prom
     .set({ reviewStatus: 'rejected', updatedAt: now })
     .where(eq(schema.schemaTemplates.id, schemaTemplateId));
 }
+
+export async function retriggerGoldenBakeForSchemaTemplate(
+  schemaTemplateId: string,
+): Promise<void> {
+  const db = getDb();
+
+  const [row] = await db
+    .select({ id: schema.schemaTemplates.id })
+    .from(schema.schemaTemplates)
+    .where(eq(schema.schemaTemplates.id, schemaTemplateId))
+    .limit(1);
+
+  if (!row) {
+    throw new NotFoundError('Database not found');
+  }
+
+  const datasetRows = await db
+    .select({ id: schema.datasetTemplates.id })
+    .from(schema.datasetTemplates)
+    .where(
+      and(
+        eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+        eq(schema.datasetTemplates.status, 'published'),
+      ),
+    );
+
+  if (!datasetRows.length) {
+    throw new NotFoundError('No published dataset templates found for this database');
+  }
+
+  await db
+    .update(schema.datasetTemplates)
+    .set({ sandboxGoldenStatus: 'pending', sandboxGoldenError: null })
+    .where(
+      and(
+        eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+        eq(schema.datasetTemplates.status, 'published'),
+      ),
+    );
+
+  const { enqueueDatasetGoldenBake } = await import('../../lib/queue');
+  for (const d of datasetRows) {
+    await enqueueDatasetGoldenBake({ datasetTemplateId: d.id });
+  }
+}

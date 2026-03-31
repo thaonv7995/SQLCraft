@@ -20,7 +20,7 @@ import {
   SANDBOX_GOLDEN_STATUS_STYLES,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
-import { toastError } from '@/lib/toast-error';
+import { GoldenSnapshotErrorDialog } from '@/components/admin/golden-snapshot-error-dialog';
 
 function FilterSelect({
   value,
@@ -61,7 +61,13 @@ function CatalogMetric({ label, value, hint }: { label: string; value: string; h
   );
 }
 
-function DatabaseCatalogCard({ database }: { database: Database }) {
+function DatabaseCatalogCard({
+  database,
+  onGoldenErrorClick,
+}: {
+  database: Database;
+  onGoldenErrorClick: (db: Database) => void;
+}) {
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
   const goldenStatus = database.sandboxGoldenStatus ?? 'none';
@@ -116,13 +122,13 @@ function DatabaseCatalogCard({ database }: { database: Database }) {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                toastError('Golden snapshot failed', database.sandboxGoldenError);
+                onGoldenErrorClick(database);
               }}
               onKeyDown={(e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 e.preventDefault();
                 e.stopPropagation();
-                toastError('Golden snapshot failed', database.sandboxGoldenError);
+                onGoldenErrorClick(database);
               }}
             >
               {golden.label}
@@ -227,6 +233,7 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
     requestedView === 'import' || requestedTab === 'sql-imports' || Boolean(replaceParam),
   );
   const [resumeScanId, setResumeScanId] = useState<string | null>(null);
+  const [goldenErrorDb, setGoldenErrorDb] = useState<Database | null>(null);
   const [pendingPage, setPendingPage] = useState(1);
   const [catalogPage, setCatalogPage] = useState(1);
   const [domain, setDomain] = useState('all');
@@ -530,7 +537,11 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         <>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
             {databases.map((database) => (
-              <DatabaseCatalogCard key={database.id} database={database} />
+              <DatabaseCatalogCard
+                key={database.id}
+                database={database}
+                onGoldenErrorClick={setGoldenErrorDb}
+              />
             ))}
           </div>
           {data && data.totalPages > 1 ? (
@@ -667,6 +678,15 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
           </>
         )}
       </div>
+
+      <GoldenSnapshotErrorDialog
+        open={goldenErrorDb !== null}
+        databaseId={goldenErrorDb?.id ?? ''}
+        databaseName={goldenErrorDb?.name ?? ''}
+        schemaTemplateId={goldenErrorDb?.schemaTemplateId}
+        error={goldenErrorDb?.sandboxGoldenError}
+        onClose={() => setGoldenErrorDb(null)}
+      />
     </div>
   );
 }

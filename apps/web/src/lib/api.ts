@@ -2280,6 +2280,13 @@ export const adminApi = {
       )
       .then((r) => r.data),
 
+  retriggerGoldenBake: (schemaTemplateId: string) =>
+    api
+      .post<{ ok: boolean }>(
+        `/admin/databases/schema-templates/${schemaTemplateId}/retrigger-golden-bake`,
+      )
+      .then((r) => r.data),
+
   createChallenge: (payload: AdminCreateChallengePayload) =>
     api.post<AdminCreateChallengeResult>('/admin/challenges', payload).then((r) => r.data),
 

@@ -44,6 +44,7 @@ import {
   getPendingSchemaTemplateReviewDetailHandler,
   approveSchemaTemplateReviewHandler,
   rejectSchemaTemplateReviewHandler,
+  retriggerGoldenBakeHandler,
   updateAdminConfigHandler,
   createSqlDumpUploadSessionHandler,
   presignSqlDumpUploadPartHandler,
@@ -437,6 +438,24 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     rejectSchemaTemplateReviewHandler,
+  );
+
+  fastify.post<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/schema-templates/:id/retrigger-golden-bake',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Retrigger golden snapshot bake for all published dataset templates of a schema',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    retriggerGoldenBakeHandler,
   );
 
   fastify.post<{ Body: CreateSqlDumpUploadSessionBody }>(

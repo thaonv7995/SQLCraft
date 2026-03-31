@@ -21,6 +21,7 @@ import {
   TableSkeleton,
 } from '@/components/ui/table';
 import { DatabaseImportPanel } from '@/components/admin/database-import-panel';
+import { GoldenSnapshotErrorDialog } from '@/components/admin/golden-snapshot-error-dialog';
 import { adminApi, databasesApi, type Database } from '@/lib/api';
 import {
   DATABASE_DIFFICULTY_STYLES,
@@ -31,7 +32,6 @@ import {
 import { cn, formatRelativeTime, formatRows } from '@/lib/utils';
 import { searchParamFirst } from '@/lib/next-app-page';
 import type { ClientPageProps } from '@/lib/page-props';
-import { toastError } from '@/lib/toast-error';
 
 type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'generation-jobs';
 
@@ -452,6 +452,7 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
   );
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [showUploadVersionPanel, setShowUploadVersionPanel] = useState(false);
+  const [goldenErrorOpen, setGoldenErrorOpen] = useState(false);
 
   const { data: database, isLoading, isError } = useQuery({
     queryKey: ['admin-database-detail', databaseId, pendingReview],
@@ -639,13 +640,11 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
                     golden.badge,
                   )}
                   title="Snapshot failed (click to view error)"
-                  onClick={() =>
-                    toastError('Golden snapshot failed', database.sandboxGoldenError)
-                  }
+                  onClick={() => setGoldenErrorOpen(true)}
                   onKeyDown={(e) => {
                     if (e.key !== 'Enter' && e.key !== ' ') return;
                     e.preventDefault();
-                    toastError('Golden snapshot failed', database.sandboxGoldenError);
+                    setGoldenErrorOpen(true);
                   }}
                 >
                   {golden.label}
@@ -798,6 +797,17 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
         }}
         titleId="admin-delete-database-title"
       />
+
+      {database ? (
+        <GoldenSnapshotErrorDialog
+          open={goldenErrorOpen}
+          databaseId={database.id}
+          databaseName={database.name}
+          schemaTemplateId={database.schemaTemplateId}
+          error={database.sandboxGoldenError}
+          onClose={() => setGoldenErrorOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

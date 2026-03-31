@@ -69,6 +69,7 @@ import {
   listPendingSchemaTemplatesForReview,
   approveSchemaTemplateReview,
   rejectSchemaTemplateReview,
+  retriggerGoldenBakeForSchemaTemplate,
 } from './admin.service';
 import {
   abortSqlDumpUploadSession,
@@ -415,6 +416,14 @@ export async function rejectSchemaTemplateReviewHandler(
 ): Promise<void> {
   await rejectSchemaTemplateReview(request.params.id);
   reply.send(success({ ok: true }, 'Public database review rejected'));
+}
+
+export async function retriggerGoldenBakeHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  await retriggerGoldenBakeForSchemaTemplate(request.params.id);
+  reply.send(success({ ok: true }, 'Golden bake retriggered'));
 }
 
 export async function listSystemJobsHandler(
