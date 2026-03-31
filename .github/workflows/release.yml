@@ -22,6 +22,8 @@ jobs:
         run: |
           echo "IMAGE_PREFIX=${{ env.REGISTRY }}/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
+      - uses: docker/setup-qemu-action@v3
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -36,6 +38,7 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_PREFIX }}/sqlcraft-api:${{ github.ref_name }}
             ${{ env.IMAGE_PREFIX }}/sqlcraft-api:latest
@@ -48,6 +51,7 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           build-args: |
             NEXT_PUBLIC_API_URL=/v1
             NEXT_INTERNAL_API_ORIGIN=http://api:4000
@@ -63,6 +67,7 @@ jobs:
           context: .
           file: services/worker/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_PREFIX }}/sqlcraft-worker:${{ github.ref_name }}
             ${{ env.IMAGE_PREFIX }}/sqlcraft-worker:latest
