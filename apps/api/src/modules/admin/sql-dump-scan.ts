@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatasetSize, SchemaSqlDialect } from '@sqlcraft/types';
+import { config } from '../../lib/config';
 import { classifyDatasetScaleFromTotalRows } from '../../lib/dataset-scales';
 import { ValidationError } from '../../lib/errors';
 import { inferEngineVersionFromDump } from '../../lib/sql-engine-version';
@@ -52,6 +53,11 @@ export interface SqlDumpScanResult {
   tables: SqlDumpTableSummary[];
   /** True when upload was stored without parsing CREATE TABLE (canonical SQL artifact only). */
   artifactOnly?: boolean;
+  /** Async scan status (queued/running/done/failed) for very large dumps. */
+  scanStatus?: 'queued' | 'running' | 'done' | 'failed';
+  progressBytes?: number;
+  totalBytes?: number;
+  errorMessage?: string | null;
 }
 
 export interface StoredSqlDumpScan extends SqlDumpScanResult {
@@ -1486,6 +1492,38 @@ async function readFilePrefixBytes(filePath: string, byteLength: number): Promis
   }
 }
 
+async function countRowsInWorkerThread(
+  filePath: string,
+): Promise<{ rowCounts: Record<string, number>; totalRows: number }> {
+  const { Worker } = await import('node:worker_threads');
+  const { join } = await import('node:path');
+
+  // Dev runs via tsx; production runs compiled JS from dist.
+  const isDist = /[\\/](dist)[\\/]/.test(__filename);
+  const workerFile = isDist ? 'sql-dump-rowcount.worker.js' : 'sql-dump-rowcount.worker.ts';
+  const workerPath = join(__dirname, workerFile);
+  const execArgv = isDist ? [] : ['-r', 'tsx/register'];
+
+  return await new Promise((resolvePromise, rejectPromise) => {
+    const w = new Worker(workerPath, {
+      workerData: { filePath },
+      execArgv,
+    });
+    w.once('message', (msg: unknown) => {
+      const m = msg as { ok?: boolean; rowCounts?: Record<string, number>; totalRows?: number; error?: string };
+      if (m && m.ok && m.rowCounts && typeof m.totalRows === 'number') {
+        resolvePromise({ rowCounts: m.rowCounts, totalRows: m.totalRows });
+      } else {
+        rejectPromise(new Error(m?.error || 'Rowcount worker failed'));
+      }
+    });
+    w.once('error', rejectPromise);
+    w.once('exit', (code) => {
+      if (code !== 0) rejectPromise(new Error(`Rowcount worker exited with code ${code}`));
+    });
+  });
+}
+
 async function persistSqlDumpScanPayload(
   scan: StoredSqlDumpScan,
   sqlPayload: Buffer | { path: string; size: number },
@@ -1564,9 +1602,11 @@ export async function createStoredSqlDumpScanFromFile(
   fileName: string,
   options?: CreateStoredSqlDumpScanOptions,
 ): Promise<SqlDumpScanResult> {
-  const { config } = await import('../../lib/config');
   const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
-  const artifactOnly = Boolean(options?.artifactOnly);
+  const userArtifactOnly = Boolean(options?.artifactOnly);
+  // Large dumps: keep the scan responsive; still compute accurate row counts via a stream worker.
+  const autoArtifactOnly = byteSize > config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB * 1024 * 1024;
+  const artifactOnly = userArtifactOnly || autoArtifactOnly;
   const { readFile } = await import('node:fs/promises');
 
   if (!artifactOnly && byteSize > maxFullParse) {
@@ -1579,6 +1619,7 @@ export async function createStoredSqlDumpScanFromFile(
   let scan: StoredSqlDumpScan;
 
   if (artifactOnly) {
+    const { rowCounts, totalRows } = await countRowsInWorkerThread(filePath);
     if (byteSize <= maxFullParse) {
       const buf = await readFile(filePath);
       scan = parseSqlDumpBufferArtifactOnly(buf, fileName, scanId);
@@ -1587,6 +1628,18 @@ export async function createStoredSqlDumpScanFromFile(
       const head = await readFilePrefixBytes(filePath, headLen);
       scan = parseSqlDumpBufferArtifactOnly(head, fileName, scanId);
     }
+    scan = {
+      ...scan,
+      totalRows: totalRows || scan.totalRows,
+      rowCounts: Object.keys(rowCounts).length ? rowCounts : scan.rowCounts,
+      definition: {
+        ...scan.definition,
+        metadata: {
+          ...scan.definition.metadata,
+          totalRows: totalRows || scan.definition.metadata.totalRows,
+        },
+      },
+    };
   } else {
     const buf = await readFile(filePath);
     scan = parseSqlDumpBuffer(buf, fileName, scanId);
@@ -1618,7 +1671,9 @@ export async function createStoredSqlDumpScanFromStagingObject(
     await import('./sql-dump-upload-format');
 
   const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
-  const artifactOnly = Boolean(options?.artifactOnly);
+  const userArtifactOnly = Boolean(options?.artifactOnly);
+  const autoArtifactOnly = byteSize > config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB * 1024 * 1024;
+  const artifactOnly = userArtifactOnly || autoArtifactOnly;
 
   if (!artifactOnly && byteSize > maxFullParse) {
     throw new ValidationError(
@@ -1665,6 +1720,18 @@ export async function createStoredSqlDumpScanFromStagingObject(
   let scan: StoredSqlDumpScan;
 
   if (artifactOnly) {
+    // For accurate row counts on large dumps, stream staging object to a temp file and count via worker thread.
+    // We still avoid full schema parsing for responsiveness.
+    const tempDir = await mkdtemp(join(tmpdir(), 'sqlforge-rowcount-'));
+    const tmpPath = join(tempDir, 'rowcount.sql');
+    let counted: { rowCounts: Record<string, number>; totalRows: number } | null = null;
+    try {
+      await streamObjectToFile(stagingObjectKey, tmpPath);
+      counted = await countRowsInWorkerThread(tmpPath);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+
     if (byteSize <= maxFullParse) {
       const buf = await readFullObject(stagingObjectKey);
       scan = parseSqlDumpBufferArtifactOnly(buf, fileName, scanId);
@@ -1672,6 +1739,20 @@ export async function createStoredSqlDumpScanFromStagingObject(
       const headLen = Math.min(SQL_DUMP_INFERENCE_HEAD_BYTES, byteSize);
       const headFull = await readObjectRange(stagingObjectKey, 0, headLen);
       scan = parseSqlDumpBufferArtifactOnly(headFull, fileName, scanId);
+    }
+    if (counted) {
+      scan = {
+        ...scan,
+        totalRows: counted.totalRows || scan.totalRows,
+        rowCounts: Object.keys(counted.rowCounts).length ? counted.rowCounts : scan.rowCounts,
+        definition: {
+          ...scan.definition,
+          metadata: {
+            ...scan.definition.metadata,
+            totalRows: counted.totalRows || scan.definition.metadata.totalRows,
+          },
+        },
+      };
     }
   } else {
     const buf = await readFullObject(stagingObjectKey);

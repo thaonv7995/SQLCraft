@@ -65,8 +65,8 @@ import type {
 } from './admin.types';
 import {
   createStoredSqlDumpScan,
-  createStoredSqlDumpScanFromFile,
   loadStoredSqlDumpScan,
+  parseSqlDumpBufferArtifactOnly,
   toSqlDumpScanResult,
 } from './sql-dump-scan';
 import {
@@ -76,6 +76,7 @@ import {
   readLocalHeadBytes,
 } from './sql-dump-upload-format';
 import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
+import { enqueueSqlDumpScan } from '../../lib/queue';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 import { deleteStorageForDatasetTemplates } from './delete-database-storage';
 import {
@@ -1145,12 +1146,83 @@ export async function scanSqlDumpFromUploadedFile(
     head,
   });
   try {
-    return await createStoredSqlDumpScanFromFile(
+    const userId = options?.uploadingUserId;
+    if (!userId) {
+      throw new ValidationError('Missing uploader identity for SQL dump scan');
+    }
+    const scanId = randomUUID();
+    const artifactObjectName = `admin/sql-dumps/${scanId}.sql`;
+    const metadataObjectName = `admin/sql-dumps/${scanId}.json`;
+    const artifactUrl = `s3://${config.STORAGE_BUCKET}/${artifactObjectName}`;
+    const metadataUrl = `s3://${config.STORAGE_BUCKET}/${metadataObjectName}`;
+    const artifactOnly = Boolean(options?.artifactOnly);
+
+    const [{ uploadFileFromPath }, db] = await Promise.all([
+      import('../../lib/storage'),
+      Promise.resolve(getDb()),
+    ]);
+    await uploadFileFromPath(
+      artifactObjectName,
       normalized.filePath,
       normalized.byteSize,
-      normalized.effectiveFileName,
-      { ...options, displayFileName: fileName.trim() },
+      'application/sql',
     );
+
+    const headLen = Math.min(12 * 1024 * 1024, normalized.byteSize);
+    const head = await readLocalHeadBytes(normalized.filePath, normalized.byteSize, headLen);
+    const baseScan = {
+      ...parseSqlDumpBufferArtifactOnly(head, normalized.effectiveFileName, scanId),
+      artifactObjectName,
+      artifactUrl,
+    };
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await db.insert(schema.sqlDumpScans).values({
+      id: scanId,
+      userId,
+      fileName: fileName.trim(),
+      byteSize: normalized.byteSize,
+      artifactUrl,
+      metadataUrl,
+      artifactOnly,
+      status: 'queued',
+      progressBytes: 0,
+      totalBytes: normalized.byteSize,
+      expiresAt,
+    });
+
+    await enqueueSqlDumpScan({
+      scanId,
+      artifactUrl,
+      fileName: normalized.effectiveFileName,
+      byteSize: normalized.byteSize,
+      artifactOnly,
+      metadataUrl,
+      baseScanJson: baseScan,
+    });
+
+    return {
+      scanId,
+      fileName: fileName.trim(),
+      databaseName: baseScan.databaseName,
+      schemaName: baseScan.schemaName,
+      domain: baseScan.domain,
+      inferredScale: baseScan.inferredScale,
+      inferredDialect: baseScan.inferredDialect,
+      dialectConfidence: baseScan.dialectConfidence,
+      inferredEngineVersion: baseScan.inferredEngineVersion,
+      totalTables: baseScan.totalTables,
+      totalRows: 0,
+      columnCount: baseScan.columnCount,
+      detectedPrimaryKeys: baseScan.detectedPrimaryKeys,
+      detectedForeignKeys: baseScan.detectedForeignKeys,
+      tables: baseScan.tables,
+      artifactOnly,
+      scanStatus: 'queued',
+      progressBytes: 0,
+      totalBytes: normalized.byteSize,
+      errorMessage: null,
+    };
   } finally {
     await normalized.dispose();
   }
@@ -1161,6 +1233,44 @@ export async function listPendingScans(query: ListPendingScansQuery) {
 }
 
 export async function getAdminSqlDumpScan(scanId: string): Promise<SqlDumpScanResult> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(schema.sqlDumpScans)
+    .where(eq(schema.sqlDumpScans.id, scanId))
+    .limit(1);
+
+  if (row) {
+    // If worker has uploaded the metadata sidecar, prefer the full scan result from storage.
+    if (row.status === 'done') {
+      const stored = await loadStoredSqlDumpScan(row.id);
+      if (stored) return toSqlDumpScanResult(stored);
+    }
+
+    return {
+      scanId: row.id,
+      fileName: row.fileName,
+      databaseName: null,
+      schemaName: null,
+      domain: 'other',
+      inferredScale: null,
+      inferredDialect: 'postgresql',
+      dialectConfidence: 'low',
+      inferredEngineVersion: null,
+      totalTables: 0,
+      totalRows: typeof row.totalRows === 'number' ? row.totalRows : 0,
+      columnCount: 0,
+      detectedPrimaryKeys: 0,
+      detectedForeignKeys: 0,
+      tables: [],
+      artifactOnly: true,
+      scanStatus: row.status as SqlDumpScanResult['scanStatus'],
+      progressBytes: row.progressBytes ?? 0,
+      totalBytes: row.totalBytes ?? row.byteSize,
+      errorMessage: row.errorMessage ?? null,
+    };
+  }
+
   const result = await getSqlDumpScanById(scanId);
   if (!result) {
     throw new NotFoundError('SQL dump scan not found or has expired');
@@ -1170,6 +1280,42 @@ export async function getAdminSqlDumpScan(scanId: string): Promise<SqlDumpScanRe
 
 /** End-user: scan metadata only if the authenticated user created the scan (upload session or multipart). */
 export async function getSqlDumpScanForUser(scanId: string, userId: string): Promise<SqlDumpScanResult> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(schema.sqlDumpScans)
+    .where(and(eq(schema.sqlDumpScans.id, scanId), eq(schema.sqlDumpScans.userId, userId)))
+    .limit(1);
+
+  if (row) {
+    if (row.status === 'done') {
+      const stored = await loadStoredSqlDumpScan(row.id);
+      if (stored) return toSqlDumpScanResult(stored);
+    }
+    return {
+      scanId: row.id,
+      fileName: row.fileName,
+      databaseName: null,
+      schemaName: null,
+      domain: 'other',
+      inferredScale: null,
+      inferredDialect: 'postgresql',
+      dialectConfidence: 'low',
+      inferredEngineVersion: null,
+      totalTables: 0,
+      totalRows: typeof row.totalRows === 'number' ? row.totalRows : 0,
+      columnCount: 0,
+      detectedPrimaryKeys: 0,
+      detectedForeignKeys: 0,
+      tables: [],
+      artifactOnly: true,
+      scanStatus: row.status as SqlDumpScanResult['scanStatus'],
+      progressBytes: row.progressBytes ?? 0,
+      totalBytes: row.totalBytes ?? row.byteSize,
+      errorMessage: row.errorMessage ?? null,
+    };
+  }
+
   const stored = await loadStoredSqlDumpScan(scanId);
   if (!stored) {
     throw new NotFoundError('SQL dump scan not found or has expired');

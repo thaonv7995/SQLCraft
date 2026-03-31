@@ -17,6 +17,7 @@ export const QUEUE_NAMES = {
   QUERY_EXECUTION: 'query-execution',
   /** Bake golden snapshot metadata (fingerprint, engine image); full datadir tar upload later */
   DATASET_SANDBOX_GOLDEN_BAKE: 'dataset-sandbox-golden-bake',
+  SQL_DUMP_SCAN: 'sql-dump-scan',
 } as const;
 
 type BullConnection = import('bullmq').ConnectionOptions;
@@ -28,6 +29,7 @@ const sandboxCleanupQueue = new Queue(QUEUE_NAMES.SANDBOX_CLEANUP, queueOptions)
 const sandboxResetQueue = new Queue(QUEUE_NAMES.SANDBOX_RESET, queueOptions);
 const datasetGoldenBakeQueue = new Queue(QUEUE_NAMES.DATASET_SANDBOX_GOLDEN_BAKE, queueOptions);
 export const queryExecutionQueue = new Queue(QUEUE_NAMES.QUERY_EXECUTION, queueOptions);
+const sqlDumpScanQueue = new Queue(QUEUE_NAMES.SQL_DUMP_SCAN, queueOptions);
 
 export interface ProvisionSandboxJobData {
   sandboxInstanceId: string;
@@ -57,6 +59,16 @@ export interface CancelQueryJobData {
 
 export interface DatasetGoldenBakeJobData {
   datasetTemplateId: string;
+}
+
+export interface SqlDumpScanJobData {
+  scanId: string;
+  artifactUrl: string;
+  fileName: string;
+  byteSize: number;
+  artifactOnly: boolean;
+  metadataUrl: string;
+  baseScanJson: unknown;
 }
 
 export async function enqueueProvisionSandbox(data: ProvisionSandboxJobData): Promise<void> {
@@ -105,5 +117,13 @@ export async function enqueueExecuteQuery(data: ExecuteQueryJobData): Promise<st
 export async function enqueueCancelQuery(data: CancelQueryJobData): Promise<void> {
   await queryExecutionQueue.add('cancel_query', data, {
     attempts: 1,
+  });
+}
+
+export async function enqueueSqlDumpScan(data: SqlDumpScanJobData): Promise<void> {
+  await sqlDumpScanQueue.add('sql_dump_scan', data, {
+    jobId: `sql-dump-scan-${data.scanId}`,
+    attempts: 1,
+    removeOnComplete: true,
   });
 }

@@ -180,6 +180,13 @@ export function DatabaseImportPanel({
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeLoading, setResumeLoading] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{
+    status: 'queued' | 'running' | 'done' | 'failed';
+    progressBytes: number;
+    totalBytes: number;
+    startedAt: number;
+    updatedAt: number;
+  } | null>(null);
   /** When true, next scan skips strict CREATE TABLE parsing (MySQL/SQL Server dumps, odd DDL). */
   const [skipStrictSchemaScan, setSkipStrictSchemaScan] = useState(false);
   const [allowEmptyTablesInDerived, setAllowEmptyTablesInDerived] = useState(false);
@@ -294,10 +301,48 @@ export function DatabaseImportPanel({
   const scanMutation = useMutation({
     mutationFn: ({ file, artifactOnly }: { file: File; artifactOnly: boolean }) =>
       isUser
-        ? databasesApi.userScanSqlDump(file, { artifactOnly })
-        : databasesApi.scanSqlDump(file, { artifactOnly }),
+        ? databasesApi.userScanSqlDump(file, {
+            artifactOnly,
+            onProgress: (scan) => {
+              const total = scan.totalBytes ?? file.size;
+              const now = Date.now();
+              setScanProgress((prev) => ({
+                status: scan.scanStatus ?? 'running',
+                progressBytes: scan.progressBytes ?? prev?.progressBytes ?? 0,
+                totalBytes: total,
+                startedAt: prev?.startedAt ?? now,
+                updatedAt: now,
+              }));
+            },
+          })
+        : databasesApi.scanSqlDump(file, {
+            artifactOnly,
+            onProgress: (scan) => {
+              const total = scan.totalBytes ?? file.size;
+              const now = Date.now();
+              setScanProgress((prev) => ({
+                status: scan.scanStatus ?? 'running',
+                progressBytes: scan.progressBytes ?? prev?.progressBytes ?? 0,
+                totalBytes: total,
+                startedAt: prev?.startedAt ?? now,
+                updatedAt: now,
+              }));
+            },
+          }),
     onSuccess(result) {
       applyScanResult(result);
+      setScanProgress((prev) =>
+        prev
+          ? { ...prev, status: 'done', progressBytes: prev.totalBytes, updatedAt: Date.now() }
+          : null,
+      );
+    },
+    onError() {
+      setScanProgress((prev) =>
+        prev
+          ? { ...prev, status: 'failed', updatedAt: Date.now() }
+          : null,
+      );
     },
   });
 
@@ -395,9 +440,28 @@ export function DatabaseImportPanel({
     if (!selectedFile) {
       return;
     }
-
+    const now = Date.now();
+    setScanProgress({
+      status: 'queued',
+      progressBytes: 0,
+      totalBytes: selectedFile.size,
+      startedAt: now,
+      updatedAt: now,
+    });
     scanMutation.mutate({ file: selectedFile, artifactOnly: skipStrictSchemaScan });
   };
+
+  const progressUi = useMemo(() => {
+    if (!scanProgress) return null;
+    const total = Math.max(1, scanProgress.totalBytes);
+    const progress = Math.max(0, Math.min(1, scanProgress.progressBytes / total));
+    const pct = Math.round(progress * 100);
+    const elapsedSec = Math.max(0.001, (scanProgress.updatedAt - scanProgress.startedAt) / 1000);
+    const mbps = (scanProgress.progressBytes / (1024 * 1024)) / elapsedSec;
+    const remainingBytes = Math.max(0, total - scanProgress.progressBytes);
+    const etaSec = mbps > 0.01 ? remainingBytes / (mbps * 1024 * 1024) : null;
+    return { pct, mbps, etaSec };
+  }, [scanProgress]);
 
   const handleImport = () => {
     if (!scanResult) {
@@ -567,6 +631,24 @@ export function DatabaseImportPanel({
               {scanMutation.isPending ? 'Scanning…' : 'Scan SQL Dump'}
             </Button>
           </div>
+          {scanMutation.isPending && scanProgress && progressUi ? (
+            <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low/50 px-3 py-2">
+              <div className="mb-1.5 flex items-center justify-between text-[11px] text-on-surface-variant">
+                <span>Scan status: {scanProgress.status}</span>
+                <span>{progressUi.pct}%</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-container-highest/80">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-500"
+                  style={{ width: `${progressUi.pct}%` }}
+                />
+              </div>
+              <p className="mt-1.5 text-[11px] text-on-surface-variant">
+                {progressUi.mbps.toFixed(1)} MB/s
+                {progressUi.etaSec != null ? ` · ETA ${Math.ceil(progressUi.etaSec)}s` : ' · ETA —'}
+              </p>
+            </div>
+          ) : null}
 
           {scanMutation.isError ? (
             <p className="text-xs text-error">

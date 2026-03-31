@@ -54,6 +54,7 @@ import {
   readS3ArtifactBuffer,
   statS3ObjectSizeViaMinioContainer,
 } from './docker';
+import { runSqlDumpScanJob } from './sql-dump-scan';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
 import { sandboxDbNameFromInstanceId } from './sandbox-naming';
 import { applySchemaAndDatasetToContainer } from './sandbox-apply-dataset';
@@ -166,6 +167,7 @@ const QUEUES = {
   SANDBOX_RESET: 'sandbox-reset',
   QUERY_EXECUTION: 'query-execution',
   DATASET_SANDBOX_GOLDEN_BAKE: 'dataset-sandbox-golden-bake',
+  SQL_DUMP_SCAN: 'sql-dump-scan',
 } as const;
 
 // Queue client used by the expiry scanner to enqueue cleanup jobs
@@ -684,6 +686,38 @@ const datasetGoldenBakeWorker = sandboxQueuesEnabled
     )
   : null;
 
+// ─── Worker: sql_dump_scan (async upload scan) ────────────────────────────────
+
+const sqlDumpScanWorker = sandboxQueuesEnabled
+  ? new Worker(
+      QUEUES.SQL_DUMP_SCAN,
+      async (job: Job) => {
+        const data = job.data as {
+          scanId: string;
+          artifactUrl: string;
+          fileName: string;
+          byteSize: number;
+          artifactOnly: boolean;
+          metadataUrl: string;
+          baseScanJson?: unknown;
+        };
+        await runSqlDumpScanJob(
+          {
+            scanId: data.scanId,
+            artifactUrl: data.artifactUrl,
+            fileName: data.fileName,
+            byteSize: data.byteSize,
+            metadataUrl: data.metadataUrl,
+            baseScanJson: data.baseScanJson,
+            artifactOnly: data.artifactOnly,
+          },
+          logger,
+        );
+      },
+      longJobOpts,
+    )
+  : null;
+
 if (sandboxProvisioningWorker) {
   attachSandboxProvisioningFailedCleanup(sandboxProvisioningWorker);
 }
@@ -1047,6 +1081,9 @@ if (datasetGoldenBakeWorker) {
 }
 if (queryExecutionWorker) {
   workers.push({ name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker });
+}
+if (sqlDumpScanWorker) {
+  workers.push({ name: QUEUES.SQL_DUMP_SCAN, worker: sqlDumpScanWorker });
 }
 
 if (workers.length === 0) {

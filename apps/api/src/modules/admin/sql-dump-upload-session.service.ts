@@ -22,10 +22,12 @@ import type {
   SqlDumpScanResult,
   SqlDumpUploadPresignPartResult,
 } from './admin.types';
-import { createStoredSqlDumpScanFromStagingObject } from './sql-dump-scan';
+import { parseSqlDumpBufferArtifactOnly, type StoredSqlDumpScan } from './sql-dump-scan';
 import { isAllowedSqlDumpUpload } from './sql-dump-upload-format';
+import { enqueueSqlDumpScan } from '../../lib/queue';
 
 const STAGING_PREFIX = 'admin/sql-dumps/staging';
+const FINAL_PREFIX = 'admin/sql-dumps';
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 /** Use multipart presigned parts at or above this size (unless client forces multipart). */
@@ -252,12 +254,73 @@ export async function completeSqlDumpUploadSession(
     );
   }
 
-  const scan = await createStoredSqlDumpScanFromStagingObject(
-    row.stagingKey,
-    stat.size,
-    row.fileName,
-    { artifactOnly: row.artifactOnly, uploadingUserId: userId },
-  );
+  const scanId = randomUUID();
+  const artifactObjectName = `${FINAL_PREFIX}/${scanId}.sql`;
+  const metadataObjectName = `${FINAL_PREFIX}/${scanId}.json`;
+  const artifactUrl = `s3://${config.STORAGE_BUCKET}/${artifactObjectName}`;
+  const metadataUrl = `s3://${config.STORAGE_BUCKET}/${metadataObjectName}`;
+
+  // Persist artifact: copy staging → final key (server-side), then delete staging.
+  // Scanning runs asynchronously in the worker (BullMQ).
+  const { copyObjectSameBucket, readObjectRange } = await import('../../lib/storage');
+  await copyObjectSameBucket(row.stagingKey, artifactObjectName);
+  await deleteFile(row.stagingKey).catch(() => undefined);
+
+  const headLen = Math.min(12 * 1024 * 1024, stat.size);
+  const head = await readObjectRange(artifactObjectName, 0, headLen);
+  const baseScan: StoredSqlDumpScan = {
+    ...parseSqlDumpBufferArtifactOnly(head, row.fileName, scanId),
+    artifactObjectName,
+    artifactUrl,
+  };
+
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+  await getDb().insert(schema.sqlDumpScans).values({
+    id: scanId,
+    userId,
+    fileName: row.fileName,
+    byteSize: stat.size,
+    artifactUrl,
+    metadataUrl,
+    artifactOnly: row.artifactOnly,
+    status: 'queued',
+    progressBytes: 0,
+    totalBytes: stat.size,
+    expiresAt,
+  });
+
+  await enqueueSqlDumpScan({
+    scanId,
+    artifactUrl,
+    fileName: row.fileName,
+    byteSize: stat.size,
+    artifactOnly: row.artifactOnly,
+    metadataUrl,
+    baseScanJson: baseScan,
+  });
+
+  const scan: SqlDumpScanResult = {
+    scanId,
+    fileName: row.fileName,
+    databaseName: baseScan.databaseName,
+    schemaName: baseScan.schemaName,
+    domain: baseScan.domain,
+    inferredScale: baseScan.inferredScale,
+    inferredDialect: baseScan.inferredDialect,
+    dialectConfidence: baseScan.dialectConfidence,
+    inferredEngineVersion: baseScan.inferredEngineVersion,
+    totalTables: baseScan.totalTables,
+    totalRows: 0,
+    columnCount: baseScan.columnCount,
+    detectedPrimaryKeys: baseScan.detectedPrimaryKeys,
+    detectedForeignKeys: baseScan.detectedForeignKeys,
+    tables: baseScan.tables,
+    artifactOnly: true,
+    scanStatus: 'queued',
+    progressBytes: 0,
+    totalBytes: stat.size,
+    errorMessage: null,
+  };
 
   await getDb()
     .update(schema.sqlDumpUploadSessions)

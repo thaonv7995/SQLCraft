@@ -513,3 +513,31 @@ export const sqlDumpUploadSessions = pgTable(
     expiresIdx: index('sql_dump_upload_sessions_expires_at_idx').on(table.expiresAt),
   }),
 );
+
+/** Async SQL dump scans (queued/running/done/failed) — row counts via worker stream scan. */
+export const sqlDumpScans = pgTable(
+  'sql_dump_scans',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    fileName: text('file_name').notNull(),
+    byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+    artifactUrl: text('artifact_url').notNull(),
+    metadataUrl: text('metadata_url').notNull(),
+    artifactOnly: boolean('artifact_only').notNull().default(false),
+    status: varchar('status', { length: 24 }).notNull().default('queued'),
+    progressBytes: bigint('progress_bytes', { mode: 'number' }).notNull().default(0),
+    totalBytes: bigint('total_bytes', { mode: 'number' }),
+    totalRows: bigint('total_rows', { mode: 'number' }),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (table) => ({
+    userIdx: index('sql_dump_scans_user_id_idx').on(table.userId, table.createdAt),
+    statusIdx: index('sql_dump_scans_status_idx').on(table.status, table.updatedAt),
+  }),
+);

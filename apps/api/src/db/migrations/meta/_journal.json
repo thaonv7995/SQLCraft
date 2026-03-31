@@ -169,6 +169,13 @@
       "when": 1774508418000,
       "tag": "0023_user_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1774508419000,
+      "tag": "0024_sql_dump_scans",
+      "breakpoints": true
     }
   ]
 }

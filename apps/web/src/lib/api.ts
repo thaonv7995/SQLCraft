@@ -1142,6 +1142,11 @@ export interface SqlDumpScanResult {
   tables: SqlDumpTableSummary[];
   /** Server stored the file without parsing CREATE TABLE (canonical SQL only). */
   artifactOnly?: boolean;
+  /** Async progress fields for very large scans. */
+  scanStatus?: 'queued' | 'running' | 'done' | 'failed';
+  progressBytes?: number;
+  totalBytes?: number;
+  errorMessage?: string | null;
 }
 
 export interface SqlDumpImportPayload extends DatasetScaleDownOptions {
@@ -2389,7 +2394,7 @@ export const adminApi = {
 /** `prefix` is `/admin/databases` or `/databases` (authenticated user uploads). */
 async function scanSqlDumpViaPresignedStorage(
   file: File,
-  options: { artifactOnly?: boolean; prefix: string },
+  options: { artifactOnly?: boolean; prefix: string; onProgress?: (scan: SqlDumpScanResult) => void },
 ): Promise<SqlDumpScanResult> {
   const { prefix } = options;
   const session = await api
@@ -2415,13 +2420,15 @@ async function scanSqlDumpViaPresignedStorage(
       await abort();
       throw new Error(`Direct upload failed (${putRes.status})`);
     }
-    return api
+    const initial = await api
       .post<SqlDumpScanResult>(
         `${prefix}/sql-dump-upload-sessions/${session.sessionId}/complete`,
         {},
         { timeout: 600_000 },
       )
       .then((r) => r.data);
+    options.onProgress?.(initial);
+    return await pollSqlDumpScanUntilDone(prefix, initial, options.onProgress);
   }
 
   const { partSize, totalParts, sessionId } = session;
@@ -2452,13 +2459,44 @@ async function scanSqlDumpViaPresignedStorage(
     parts.push({ partNumber: p, etag });
   }
 
-  return api
+  const initial = await api
     .post<SqlDumpScanResult>(
       `${prefix}/sql-dump-upload-sessions/${sessionId}/complete`,
       { parts },
       { timeout: 600_000 },
     )
     .then((r) => r.data);
+  options.onProgress?.(initial);
+  return await pollSqlDumpScanUntilDone(prefix, initial, options.onProgress);
+}
+
+async function pollSqlDumpScanUntilDone(
+  prefix: string,
+  initial: SqlDumpScanResult,
+  onProgress?: (scan: SqlDumpScanResult) => void,
+): Promise<SqlDumpScanResult> {
+  const status = initial.scanStatus;
+  if (!status || status === 'done') return initial;
+  if (status === 'failed') {
+    throw new Error(initial.errorMessage || 'SQL dump scan failed');
+  }
+
+  const scanId = initial.scanId;
+  const deadline = Date.now() + 20 * 60_000; // 20 min
+  let delay = 800;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, delay));
+    const next = await api.get<SqlDumpScanResult>(`${prefix}/scans/${scanId}`).then((r) => r.data);
+    onProgress?.(next);
+    if (next.scanStatus === 'done' || !next.scanStatus) return next;
+    if (next.scanStatus === 'failed') {
+      throw new Error(next.errorMessage || 'SQL dump scan failed');
+    }
+    delay = Math.min(3000, Math.round(delay * 1.25));
+  }
+
+  throw new Error('SQL dump scan timed out (still running)');
 }
 
 export const databasesApi = {
@@ -2523,7 +2561,7 @@ export const databasesApi = {
       )
       .then((r) => normalizeLearningSession(r.data.session)),
 
-  scanSqlDump: (file: File, options?: { artifactOnly?: boolean }) => {
+  scanSqlDump: (file: File, options?: { artifactOnly?: boolean; onProgress?: (scan: SqlDumpScanResult) => void }) => {
     if (file.size >= SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES) {
       return scanSqlDumpViaPresignedStorage(file, { ...options, prefix: '/admin/databases' });
     }
@@ -2537,11 +2575,14 @@ export const databasesApi = {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 600_000,
       })
-      .then((r) => r.data);
+      .then((r) => {
+        options?.onProgress?.(r.data);
+        return pollSqlDumpScanUntilDone('/admin/databases', r.data, options?.onProgress);
+      });
   },
 
   /** Current user: scan then POST import-from-scan (visibility / invites). */
-  userScanSqlDump: (file: File, options?: { artifactOnly?: boolean }) => {
+  userScanSqlDump: (file: File, options?: { artifactOnly?: boolean; onProgress?: (scan: SqlDumpScanResult) => void }) => {
     if (file.size >= SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES) {
       return scanSqlDumpViaPresignedStorage(file, { ...options, prefix: '/databases' });
     }
@@ -2555,7 +2596,10 @@ export const databasesApi = {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 600_000,
       })
-      .then((r) => r.data);
+      .then((r) => {
+        options?.onProgress?.(r.data);
+        return pollSqlDumpScanUntilDone('/databases', r.data, options?.onProgress);
+      });
   },
 
   userImportFromScan: (payload: UserSqlDumpImportPayload) =>
