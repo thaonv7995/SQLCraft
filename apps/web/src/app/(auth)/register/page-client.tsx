@@ -51,7 +51,9 @@ export default function RegisterPage(_props: ClientPageProps) {
 
   // eslint-disable-next-line react-hooks/incompatible-library -- RHF watch() drives password strength UI; not safely memoizable
   const password = watch('password', '');
+  const confirmPassword = watch('confirmPassword', '');
   const passwordStrength = getPasswordStrength(password);
+  const passwordsMatch = confirmPassword.length > 0 && confirmPassword === password;
 
   const onSubmit = async (data: RegisterFormData): Promise<void> => {
     try {
@@ -176,6 +178,16 @@ export default function RegisterPage(_props: ClientPageProps) {
               autoComplete="new-password"
               error={errors.confirmPassword?.message}
               leftIcon={<span className="material-symbols-outlined text-base">lock_clock</span>}
+              rightIcon={
+                passwordsMatch ? (
+                  <span
+                    className="material-symbols-outlined text-base text-secondary"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    check_circle
+                  </span>
+                ) : undefined
+              }
               {...register('confirmPassword')}
             />
 
