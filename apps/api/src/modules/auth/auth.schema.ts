@@ -9,10 +9,12 @@ export const RegisterBodySchema = z.object({
     .regex(/^[a-zA-Z0-9_-]+$/, 'Only alphanumeric, _ and - allowed'),
   password: z
     .string()
-    .min(8)
+    .min(10, 'Password must be at least 10 characters')
     .max(100)
     .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
-    .regex(/[0-9]/, 'Must contain at least one number'),
+    .regex(/[a-z]/, 'Must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Must contain at least one number')
+    .regex(/[^A-Za-z0-9]/, 'Must contain at least one special character'),
   displayName: z.string().max(100).optional(),
 });
 

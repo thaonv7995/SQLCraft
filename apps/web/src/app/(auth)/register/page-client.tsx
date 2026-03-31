@@ -22,9 +22,11 @@ const registerSchema = z
     email: z.string().email('Please enter a valid email address'),
     password: z
       .string()
-      .min(8, 'Password must be at least 8 characters')
+      .min(10, 'Password must be at least 10 characters')
       .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
-      .regex(/[0-9]/, 'Must contain at least one number'),
+      .regex(/[a-z]/, 'Must contain at least one lowercase letter')
+      .regex(/[0-9]/, 'Must contain at least one number')
+      .regex(/[^A-Za-z0-9]/, 'Must contain at least one special character'),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -218,13 +220,20 @@ export default function RegisterPage(_props: ClientPageProps) {
 
 function getPasswordStrength(password: string): 0 | 1 | 2 | 3 | 4 {
   if (!password) return 0;
-  let score = 0;
-  if (password.length >= 8) score++;
-  if (password.length >= 12) score++;
-  if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
-  return Math.min(4, score) as 0 | 1 | 2 | 3 | 4;
+  // Each rule that must pass to reach "Strong":
+  const rules = [
+    password.length >= 10,
+    /[A-Z]/.test(password) && /[a-z]/.test(password),
+    /[0-9]/.test(password),
+    /[^A-Za-z0-9]/.test(password),
+    password.length >= 14, // bonus for extra length
+  ];
+  const score = rules.filter(Boolean).length;
+  // map 0-5 → 0-4
+  if (score <= 1) return 1;
+  if (score === 2) return 2;
+  if (score === 3) return 3;
+  return 4;
 }
 
 const strengthLabels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
