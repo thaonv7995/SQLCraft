@@ -45,6 +45,7 @@ import {
   approveSchemaTemplateReviewHandler,
   rejectSchemaTemplateReviewHandler,
   retriggerGoldenBakeHandler,
+  getDatasetArtifactDownloadUrlsHandler,
   updateAdminConfigHandler,
   createSqlDumpUploadSessionHandler,
   presignSqlDumpUploadPartHandler,
@@ -456,6 +457,24 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     retriggerGoldenBakeHandler,
+  );
+
+  fastify.get<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/schema-templates/:id/artifact-download-urls',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Generate presigned download URLs (5 min TTL) for all published dataset artifact SQL dumps',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    getDatasetArtifactDownloadUrlsHandler,
   );
 
   fastify.post<{ Body: CreateSqlDumpUploadSessionBody }>(

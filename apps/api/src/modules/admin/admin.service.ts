@@ -1383,3 +1383,89 @@ export async function retriggerGoldenBakeForSchemaTemplate(
     await enqueueDatasetGoldenBake({ datasetTemplateId: d.id });
   }
 }
+
+const ARTIFACT_DOWNLOAD_TTL = 300; // 5 minutes
+
+export interface ArtifactDownloadItem {
+  scale: string;
+  name: string;
+  fileName: string | null;
+  downloadUrl: string | null;
+  hasArtifact: boolean;
+  expiresAt: string | null;
+}
+
+/**
+ * Returns presigned GET URLs for all published dataset template artifacts
+ * belonging to a schema template. URLs are valid for 5 minutes.
+ */
+export async function getDatasetArtifactDownloadUrls(
+  schemaTemplateId: string,
+): Promise<ArtifactDownloadItem[]> {
+  const db = getDb();
+
+  const [schemaRow] = await db
+    .select({ id: schema.schemaTemplates.id })
+    .from(schema.schemaTemplates)
+    .where(eq(schema.schemaTemplates.id, schemaTemplateId))
+    .limit(1);
+
+  if (!schemaRow) {
+    throw new NotFoundError('Database not found');
+  }
+
+  const rows = await db
+    .select({
+      id: schema.datasetTemplates.id,
+      name: schema.datasetTemplates.name,
+      size: schema.datasetTemplates.size,
+      artifactUrl: schema.datasetTemplates.artifactUrl,
+    })
+    .from(schema.datasetTemplates)
+    .where(
+      and(
+        eq(schema.datasetTemplates.schemaTemplateId, schemaTemplateId),
+        eq(schema.datasetTemplates.status, 'published'),
+      ),
+    )
+    .orderBy(schema.datasetTemplates.size);
+
+  const { getPresignedUrl } = await import('../../lib/storage');
+  const { parseOurBucketObjectKey } = await import('./delete-database-storage');
+
+  const expiresAt = new Date(Date.now() + ARTIFACT_DOWNLOAD_TTL * 1000).toISOString();
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const objectKey = parseOurBucketObjectKey(row.artifactUrl);
+      const fileName = objectKey ? objectKey.split('/').pop() ?? null : null;
+
+      if (!objectKey) {
+        return {
+          scale: row.size,
+          name: row.name,
+          fileName: null,
+          downloadUrl: null,
+          hasArtifact: false,
+          expiresAt: null,
+        };
+      }
+
+      let downloadUrl: string | null = null;
+      try {
+        downloadUrl = await getPresignedUrl(objectKey, ARTIFACT_DOWNLOAD_TTL);
+      } catch {
+        // Artifact key exists in DB but object may be missing — return metadata only
+      }
+
+      return {
+        scale: row.size,
+        name: row.name,
+        fileName,
+        downloadUrl,
+        hasArtifact: true,
+        expiresAt: downloadUrl ? expiresAt : null,
+      };
+    }),
+  );
+}

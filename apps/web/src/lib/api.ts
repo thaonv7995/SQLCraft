@@ -2287,6 +2287,20 @@ export const adminApi = {
       )
       .then((r) => r.data),
 
+  getArtifactDownloadUrls: (schemaTemplateId: string) =>
+    api
+      .get<{
+        items: Array<{
+          scale: string;
+          name: string;
+          fileName: string | null;
+          downloadUrl: string | null;
+          hasArtifact: boolean;
+          expiresAt: string | null;
+        }>;
+      }>(`/admin/databases/schema-templates/${schemaTemplateId}/artifact-download-urls`)
+      .then((r) => r.data.items),
+
   createChallenge: (payload: AdminCreateChallengePayload) =>
     api.post<AdminCreateChallengeResult>('/admin/challenges', payload).then((r) => r.data),
 

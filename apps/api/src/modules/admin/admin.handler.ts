@@ -70,6 +70,7 @@ import {
   approveSchemaTemplateReview,
   rejectSchemaTemplateReview,
   retriggerGoldenBakeForSchemaTemplate,
+  getDatasetArtifactDownloadUrls,
 } from './admin.service';
 import {
   abortSqlDumpUploadSession,
@@ -424,6 +425,14 @@ export async function retriggerGoldenBakeHandler(
 ): Promise<void> {
   await retriggerGoldenBakeForSchemaTemplate(request.params.id);
   reply.send(success({ ok: true }, 'Golden bake retriggered'));
+}
+
+export async function getDatasetArtifactDownloadUrlsHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const items = await getDatasetArtifactDownloadUrls(request.params.id);
+  reply.send(success({ items }, 'Artifact download URLs generated'));
 }
 
 export async function listSystemJobsHandler(

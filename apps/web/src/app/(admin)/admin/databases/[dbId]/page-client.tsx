@@ -260,6 +260,32 @@ function DatasetTemplatesTab({
               : 0,
         }));
 
+  const [downloadingScale, setDownloadingScale] = useState<string | null>(null);
+
+  const downloadMutation = useMutation({
+    mutationFn: (scale: string) => adminApi.getArtifactDownloadUrls(schemaTemplateId).then(
+      (items) => ({ items, scale }),
+    ),
+    onSuccess: ({ items, scale }) => {
+      const item = items.find((i) => i.scale === scale);
+      if (item?.downloadUrl) {
+        window.open(item.downloadUrl, '_blank', 'noopener');
+      } else {
+        toast.error('No artifact available for this scale');
+      }
+      setDownloadingScale(null);
+    },
+    onError: () => {
+      toast.error('Failed to generate download URL');
+      setDownloadingScale(null);
+    },
+  });
+
+  const handleDownload = (scale: string) => {
+    setDownloadingScale(scale);
+    downloadMutation.mutate(scale);
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid gap-3 md:grid-cols-3">
@@ -295,13 +321,31 @@ function DatasetTemplatesTab({
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {variants.map((variant) => {
           const isSource = variant.scale === (database.sourceScale ?? database.scale);
+          const isDownloading = downloadingScale === variant.scale;
 
           return (
             <Card key={`${database.id}-${variant.scale}`} className="border border-outline-variant/10">
               <CardHeader className="flex-col items-start gap-2">
                 <div className="flex w-full items-start justify-between gap-3">
                   <CardTitle>{variant.scale.toUpperCase()}</CardTitle>
-                  {isSource ? <Badge variant="active">Source</Badge> : <Badge variant="default">Derived</Badge>}
+                  <div className="flex items-center gap-1.5">
+                    {isSource ? <Badge variant="active">Source</Badge> : <Badge variant="default">Derived</Badge>}
+                    {!reviewDraft ? (
+                      <button
+                        type="button"
+                        title={`Download ${variant.scale} SQL dump (presigned, 5 min TTL)`}
+                        disabled={isDownloading}
+                        onClick={() => handleDownload(variant.scale)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-50"
+                      >
+                        {isDownloading ? (
+                          <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
+                        ) : (
+                          <span className="material-symbols-outlined text-[18px]">download</span>
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <CardDescription>
                   {DATABASE_SCALE_LABELS[variant.scale]} dataset variant for sandbox resets and session provisioning.
