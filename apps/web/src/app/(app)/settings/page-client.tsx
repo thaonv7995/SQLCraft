@@ -69,27 +69,6 @@ export default function SettingsPage(_props: ClientPageProps) {
 
       <ProfileSection user={user} updateUser={updateUser} />
 
-      <section className="section-card card-padding">
-        <h2 className="page-section-title">Challenge authoring</h2>
-        <p className="mt-1 text-sm text-on-surface-variant">
-          Import a SQL file for challenges you create — same flow as{' '}
-          <Link href="/challenges/new" className="text-primary underline-offset-2 hover:underline">
-            Create challenge
-          </Link>
-          . Private imports are ready immediately; public ones need admin review for the shared
-          catalog.
-        </p>
-        <div className="mt-4">
-          <Link href="/explore?import=1">
-            <Button
-              variant="secondary"
-              leftIcon={<span className="material-symbols-outlined text-base">upload_file</span>}
-            >
-              Import on Explorer
-            </Button>
-          </Link>
-        </div>
-      </section>
 
       <PasswordSection />
       <NotificationsSection />
