@@ -1,115 +1,21 @@
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
 import { eq, or, sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import * as schema from './schema/index';
-import {
-  ADMIN_ROLE_NAME,
-  CONTRIBUTOR_ROLE_NAME,
-  DEFAULT_USER_ROLE_NAME,
-} from '../lib/roles';
 import { NotificationType } from '../modules/notifications/notifications.types';
+import { createSeedContext, getFirstAdminConfig, seedBootstrapCore } from './seed-core';
 
 async function seed() {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  const db = drizzle(pool, { schema });
+  const { pool, db } = createSeedContext();
 
   console.log('Seeding database...');
-  const firstAdminEmail = process.env.FIRST_ADMIN_EMAIL?.trim() || 'admin@sqlcraft.dev';
-  const firstAdminUsername = process.env.FIRST_ADMIN_USERNAME?.trim() || 'admin';
-  const firstAdminPassword = process.env.FIRST_ADMIN_PASSWORD?.trim() || 'admin123';
+  const { adminUser, learnerRole, firstAdmin } = await seedBootstrapCore(db);
+  const firstAdminEmail = firstAdmin.email;
+  const firstAdminUsername = firstAdmin.username;
+  const firstAdminPassword = firstAdmin.password;
 
-  // 1. Create roles
-  console.log('Creating roles...');
-  const existingRoles = await db.select().from(schema.roles);
-
-  let adminRole = existingRoles.find((r) => r.name === ADMIN_ROLE_NAME);
-  let learnerRole = existingRoles.find((r) => r.name === DEFAULT_USER_ROLE_NAME);
-  let contributorRole = existingRoles.find((r) => r.name === CONTRIBUTOR_ROLE_NAME);
-
-  if (!adminRole) {
-    const [r] = await db
-      .insert(schema.roles)
-      .values({ name: ADMIN_ROLE_NAME, description: 'Platform administrator' })
-      .returning();
-    adminRole = r;
-    console.log('  Created admin role');
-  }
-
-  if (!learnerRole) {
-    const [r] = await db
-      .insert(schema.roles)
-      .values({ name: DEFAULT_USER_ROLE_NAME, description: 'SQL learner' })
-      .returning();
-    learnerRole = r;
-    console.log('  Created learner role');
-  }
-
-  if (!contributorRole) {
-    const [r] = await db
-      .insert(schema.roles)
-      .values({
-        name: CONTRIBUTOR_ROLE_NAME,
-        description: 'Content contributor — can submit lessons, databases, and challenges for review',
-      })
-      .returning();
-    contributorRole = r;
-    console.log('  Created contributor role');
-  }
-
-  // 2. Create admin user
-  console.log('Creating admin user...');
-  const adminPasswordHash = await bcrypt.hash(firstAdminPassword, 12);
-  let adminUser = (
-    await db
-      .select()
-      .from(schema.users)
-      .where(or(eq(schema.users.email, firstAdminEmail), eq(schema.users.username, firstAdminUsername)))
-      .limit(1)
-  )[0];
-
-  if (!adminUser) {
-    const [u] = await db
-      .insert(schema.users)
-      .values({
-        email: firstAdminEmail,
-        username: firstAdminUsername,
-        passwordHash: adminPasswordHash,
-        displayName: 'SQLCraft Admin',
-        status: 'active',
-        provider: 'email',
-      })
-      .returning();
-    adminUser = u;
-    console.log(`  Created admin user: ${firstAdminEmail} / ${firstAdminPassword}`);
-  } else {
-    const [u] = await db
-      .update(schema.users)
-      .set({
-        email: firstAdminEmail,
-        username: firstAdminUsername,
-        passwordHash: adminPasswordHash,
-        displayName: 'SQLCraft Admin',
-        status: 'active',
-        provider: 'email',
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.users.id, adminUser.id))
-      .returning();
-    adminUser = u;
-    console.log(`  Updated admin user: ${firstAdminEmail} / ${firstAdminPassword}`);
-  }
-
-  // Assign admin role
-  await db.delete(schema.userRoles).where(eq(schema.userRoles.userId, adminUser.id));
-  await db.insert(schema.userRoles).values({
-    userId: adminUser.id,
-    roleId: adminRole.id,
-  });
-
-  // 3. Create standard test user
+  // 2. Create standard test user
   console.log('Creating standard test user...');
   const userPasswordHash = await bcrypt.hash('user12345', 12);
   let standardUser = (
@@ -158,7 +64,7 @@ async function seed() {
     roleId: learnerRole.id,
   });
 
-  // 4. Create schema template for ecommerce
+  // 3. Create schema template for ecommerce
   console.log('Creating ecommerce schema template...');
   let ecommerceSchema = (
     await db
@@ -243,7 +149,7 @@ async function seed() {
     console.log('  Created ecommerce schema template');
   }
 
-  // 5. Create dataset templates
+  // 4. Create dataset templates
   console.log('Creating dataset templates...');
   const datasetSizes: Array<{
     size: 'tiny' | 'small' | 'medium' | 'large';
@@ -286,7 +192,7 @@ async function seed() {
     console.log(`  Updated ${ds.size} dataset template`);
   }
 
-  // 6. Create sample challenge + published version
+  // 5. Create sample challenge + published version
   console.log('Creating sample challenge...');
   let challenge = (
     await db
@@ -351,7 +257,7 @@ async function seed() {
       .where(eq(schema.challenges.id, challenge.id));
   }
 
-  // 7. Demo in-app notifications for first admin (navbar / Settings)
+  // 6. Demo in-app notifications for first admin (navbar / Settings)
   console.log('Seeding demo notifications for admin...');
   await db.execute(
     sql`DELETE FROM user_notifications WHERE user_id = ${adminUser.id} AND COALESCE(metadata->>'seed', '') = 'true'`,

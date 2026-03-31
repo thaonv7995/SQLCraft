@@ -87,22 +87,27 @@ prod-setup: ## Generate .env.production with auto secrets + first admin (interac
 	if [ -z "$$minio_password" ] || [ "$$minio_password" = "change-me" ]; then minio_password="$$(openssl rand -hex 16)"; fi; \
 	if [ -z "$$storage_secret" ] || [ "$$storage_secret" = "change-me" ]; then storage_secret="$$minio_password"; fi; \
 	if [ -z "$$sandbox_password" ] || [ "$$sandbox_password" = "change-me" ]; then sandbox_password="$$(openssl rand -hex 16)"; fi; \
-	if [ -z "$$admin_email" ] || [ "$$admin_email" = "admin@sqlcraft.local" ]; then \
+	if [ -z "$$admin_email" ]; then admin_email="admin@sqlcraft.local"; fi; \
+	if [ -z "$$admin_username" ]; then admin_username="admin"; fi; \
+	if [ -z "$$admin_email" ] || [ -z "$$admin_username" ] || [ -z "$$admin_password" ] || [ "$$admin_password" = "change-me" ]; then \
 		echo ""; \
-		echo "Configure first admin (press Enter for defaults):"; \
-		default_email="admin@sqlcraft.local"; \
-		default_username="admin"; \
+		echo "Configure first admin (press Enter for current/default values):"; \
 		default_password="$$(openssl rand -hex 12)"; \
-		printf "  FIRST_ADMIN_EMAIL [$${default_email}]: "; \
+		printf "  FIRST_ADMIN_EMAIL [$${admin_email}]: "; \
 		read input_admin_email; \
-		admin_email="$${input_admin_email:-$${default_email}}"; \
-		printf "  FIRST_ADMIN_USERNAME [$${default_username}]: "; \
+		admin_email="$${input_admin_email:-$${admin_email}}"; \
+		printf "  FIRST_ADMIN_USERNAME [$${admin_username}]: "; \
 		read input_admin_username; \
-		admin_username="$${input_admin_username:-$${default_username}}"; \
-		printf "  FIRST_ADMIN_PASSWORD [auto-generated]: "; \
+		admin_username="$${input_admin_username:-$${admin_username}}"; \
+		printf "  FIRST_ADMIN_PASSWORD [%s]: " "$$( [ -n "$$admin_password" ] && [ "$$admin_password" != "change-me" ] && printf 'configured' || printf 'auto-generated' )"; \
 		read input_admin_password; \
-		admin_password="$${input_admin_password:-$${default_password}}"; \
-	elif [ -z "$$admin_password" ] || [ "$$admin_password" = "change-me" ]; then \
+		if [ -n "$$input_admin_password" ]; then \
+			admin_password="$$input_admin_password"; \
+		elif [ -z "$$admin_password" ] || [ "$$admin_password" = "change-me" ]; then \
+			admin_password="$${default_password}"; \
+		fi; \
+	fi; \
+	if [ -z "$$admin_password" ] || [ "$$admin_password" = "change-me" ]; then \
 		admin_password="$$(openssl rand -hex 12)"; \
 	fi; \
 	set_kv "JWT_SECRET" "$$jwt_secret" ".env.production"; \
@@ -129,7 +134,7 @@ prod-setup: ## Generate .env.production with auto secrets + first admin (interac
 prod-build: prod-setup ## Build images, bootstrap DB/admin, and start production stack
 	@set -e; \
 	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build postgres redis minio; \
-	docker compose --env-file .env.production -f docker-compose.prod.yml run --rm --entrypoint sh api -lc "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:seed"; \
+	docker compose --env-file .env.production -f docker-compose.prod.yml run --rm --entrypoint sh api -lc "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:bootstrap"; \
 	docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build api web worker worker-query; \
 	first_admin_email="$$(awk -F= '/^FIRST_ADMIN_EMAIL=/{print $$2}' .env.production)"; \
 	first_admin_username="$$(awk -F= '/^FIRST_ADMIN_USERNAME=/{print $$2}' .env.production)"; \
@@ -168,37 +173,14 @@ release-docker: ## Build production Docker images only (no compose up; optional:
 test: ## Run all tests
 	pnpm run test
 
-test-api: ## Run API tests
-	pnpm --filter @sqlcraft/api test
-
-test-web: ## Run frontend tests
-	pnpm --filter @sqlcraft/web test
-
-# ---- Code Quality ----
-lint: ## Run linter
+lint: ## Run lint
 	pnpm run lint
 
-typecheck: ## Run TypeScript type checking
-	pnpm run typecheck
-
-format: ## Format code with Prettier
-	pnpm exec prettier --write .
-
-# ---- Cleanup ----
-stop: ## Stop all Docker services
+stop: ## Stop development stack
 	docker compose -f docker-compose.dev.yml down
 
-clean: ## Stop services and remove volumes
+clean: ## Stop dev stack and remove volumes
 	docker compose -f docker-compose.dev.yml down -v
-	rm -rf apps/*/node_modules packages/*/node_modules services/*/node_modules
-	rm -rf apps/*/.next apps/*/dist services/*/dist packages/*/dist
 
-# ---- Utilities ----
-logs: ## Show logs for a specific service (usage: make logs SERVICE=api)
-	docker compose -f docker-compose.dev.yml logs -f $(SERVICE)
-
-shell-api: ## Open shell in API container
-	docker compose -f docker-compose.dev.yml exec api sh
-
-shell-db: ## Open psql in Postgres container
-	docker compose -f docker-compose.dev.yml exec postgres psql -U sqlcraft -d sqlcraft
+logs: ## Tail development logs
+	docker compose -f docker-compose.dev.yml logs -f

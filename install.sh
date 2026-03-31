@@ -543,9 +543,9 @@ bootstrap_stack() {
   infra_up_with_retry
   prepare_app_images
 
-  headline "Running migrations + seed"
+  headline "Running migrations + bootstrap"
   run_compose run --rm --entrypoint sh api -lc \
-    "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:seed"
+    "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:bootstrap"
 
   headline "Starting API + Web + Worker + Worker-query"
   run_compose up -d api web worker worker-query
