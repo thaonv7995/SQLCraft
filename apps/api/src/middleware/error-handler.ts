@@ -73,9 +73,11 @@ export function errorHandler(
     });
   }
 
-  // JWT errors
-  if (error.message?.includes('jwt') || error.message?.includes('JWT')) {
-    if (error.message.includes('expired')) {
+  // JWT errors — only match errors originating from @fastify/jwt (FST_JWT_* codes).
+  // Avoid matching arbitrary DB/column errors whose message happens to contain "jwt".
+  const jwtCode = (error as FastifyError).code ?? '';
+  if (jwtCode.startsWith('FST_JWT_')) {
+    if (jwtCode === 'FST_JWT_AUTHORIZATION_TOKEN_EXPIRED' || error.message?.includes('expired')) {
       return reply.status(401).send({
         success: false,
         code: ApiCode.TOKEN_EXPIRED,

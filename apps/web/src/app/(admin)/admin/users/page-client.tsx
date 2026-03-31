@@ -24,7 +24,7 @@ import {
   type User,
   type UserRole,
 } from '@/lib/api';
-import { formatDate, generateInitials } from '@/lib/utils';
+import { cn, formatDate, generateInitials } from '@/lib/utils';
 import type { ClientPageProps } from '@/lib/page-props';
 import toast from 'react-hot-toast';
 
@@ -34,7 +34,7 @@ interface AdminUser extends User {
 
 type AdminRoleFilter = 'all' | UserRole;
 type ManagedRole = UserRole;
-type ManagedStatus = 'active' | 'disabled' | 'invited';
+type ManagedStatus = 'active' | 'disabled' | 'invited' | 'pending';
 
 interface UserEditorFormState {
   email: string;
@@ -63,9 +63,18 @@ const ROLE_OPTIONS = [
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
+  { value: 'pending', label: 'Pending approval' },
   { value: 'disabled', label: 'Disabled' },
   { value: 'invited', label: 'Invited' },
 ] satisfies Array<{ value: ManagedStatus; label: string }>;
+
+/** Table / badge label (API uses lowercase enum values). */
+const STATUS_LABELS: Record<ManagedStatus, string> = {
+  active: 'active',
+  pending: 'pending approval',
+  disabled: 'disabled',
+  invited: 'invited',
+};
 
 const ROLE_STYLES: Record<ManagedRole, string> = {
   admin: 'text-error bg-error/10',
@@ -88,6 +97,10 @@ function getManagedStatus(user: AdminUser): ManagedStatus {
 
   if (user.status === 'invited') {
     return 'invited';
+  }
+
+  if (user.status === 'pending') {
+    return 'pending';
   }
 
   return 'active';
@@ -239,6 +252,7 @@ export default function AdminUsersPage(_props: ClientPageProps) {
   const [page, setPage] = useState(1);
   const [editorState, setEditorState] = useState<UserEditorState | null>(null);
   const [userPendingDelete, setUserPendingDelete] = useState<AdminUser | null>(null);
+  const [userPendingReview, setUserPendingReview] = useState<AdminUser | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin-users', search, roleFilter, page],
@@ -312,17 +326,21 @@ export default function AdminUsersPage(_props: ClientPageProps) {
 
   const handleEditorSubmit = (form: UserEditorFormState) => {
     if (editorState?.mode === 'edit') {
+      const payload: AdminUpdateUserPayload = {
+        email: form.email.trim(),
+        username: form.username.trim(),
+        displayName: form.displayName.trim() || null,
+        password: form.password.trim() || undefined,
+        bio: form.bio.trim() || null,
+        role: form.role,
+      };
+      // API only accepts active | disabled | invited — omit while still awaiting approval
+      if (form.status !== 'pending') {
+        payload.status = form.status;
+      }
       updateMutation.mutate({
         userId: editorState.user.id,
-        payload: {
-          email: form.email.trim(),
-          username: form.username.trim(),
-          displayName: form.displayName.trim() || null,
-          password: form.password.trim() || undefined,
-          bio: form.bio.trim() || null,
-          role: form.role,
-          status: form.status,
-        },
+        payload,
       });
       return;
     }
@@ -490,18 +508,35 @@ export default function AdminUsersPage(_props: ClientPageProps) {
                     </TableCell>
 
                     <TableCell>
-                      <Badge
-                        variant={
-                          managedStatus === 'active'
-                            ? 'active'
-                            : managedStatus === 'disabled'
-                              ? 'archived'
-                              : 'pending'
-                        }
-                        dot
-                      >
-                        {managedStatus}
-                      </Badge>
+                      {managedStatus === 'pending' ? (
+                        <button
+                          type="button"
+                          onClick={() => setUserPendingReview(user)}
+                          className={cn(
+                            'rounded-full outline-none transition-opacity',
+                            'hover:opacity-90',
+                            'focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-container-low',
+                          )}
+                          title="Review signup — approve or reject"
+                        >
+                          <Badge variant="pending" dot>
+                            {STATUS_LABELS[managedStatus]}
+                          </Badge>
+                        </button>
+                      ) : (
+                        <Badge
+                          variant={
+                            managedStatus === 'active'
+                              ? 'active'
+                              : managedStatus === 'disabled'
+                                ? 'archived'
+                                : 'pending'
+                          }
+                          dot
+                        >
+                          {STATUS_LABELS[managedStatus]}
+                        </Badge>
+                      )}
                     </TableCell>
 
                     <TableCell className="font-mono text-xs text-on-surface-variant">
@@ -595,6 +630,81 @@ export default function AdminUsersPage(_props: ClientPageProps) {
           </div>
         ) : null}
       </div>
+
+      {userPendingReview ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!enableMutation.isPending && !disableMutation.isPending) {
+              setUserPendingReview(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-pending-review-title"
+            className="w-full max-w-md rounded-xl border border-outline-variant/15 bg-surface-container-low p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-5 flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-tertiary/10 text-tertiary">
+                <span className="material-symbols-outlined text-[22px]">person_search</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-outline">
+                  Admin
+                </p>
+                <h2 id="admin-pending-review-title" className="mt-1 text-lg font-semibold text-on-surface">
+                  Review registration
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  <span className="font-medium text-on-surface">
+                    {userPendingReview.displayName ?? userPendingReview.username}
+                  </span>{' '}
+                  ({userPendingReview.email}) is waiting for approval. Approve to grant access, or reject to
+                  disable the account.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setUserPendingReview(null)}
+                disabled={enableMutation.isPending || disableMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                loading={
+                  disableMutation.isPending && disableMutation.variables === userPendingReview.id
+                }
+                onClick={() =>
+                  disableMutation.mutate(userPendingReview.id, {
+                    onSuccess: () => setUserPendingReview(null),
+                  })
+                }
+              >
+                Reject
+              </Button>
+              <Button
+                variant="primary"
+                loading={
+                  enableMutation.isPending && enableMutation.variables === userPendingReview.id
+                }
+                onClick={() =>
+                  enableMutation.mutate(userPendingReview.id, {
+                    onSuccess: () => setUserPendingReview(null),
+                  })
+                }
+              >
+                Approve
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <ConfirmModal
         open={userPendingDelete !== null}

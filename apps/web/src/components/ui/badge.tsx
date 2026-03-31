@@ -61,7 +61,8 @@ const variantConfig: Record<BadgeVariant, { label: string; classes: string; dotC
   active: {
     label: 'Active',
     classes: 'text-primary bg-primary/15',
-    dotClass: 'bg-primary',
+    /** Light green dot — distinct from primary text */
+    dotClass: 'bg-emerald-400/85',
   },
   archived: {
     label: 'Archived',
