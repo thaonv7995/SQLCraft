@@ -928,11 +928,11 @@ export function DatabaseImportPanel({
                     <div className="flex items-center justify-between text-sm">
                       <p className="font-medium text-on-surface">{table.name}</p>
                       <p className="text-xs text-on-surface-variant">
-                        {table.rowCount.toLocaleString()} rows · {table.columnCount} cols
+                        {(table.rowCount ?? 0).toLocaleString()} rows · {table.columnCount} cols
                       </p>
                     </div>
                     <p className="mt-1 text-xs text-on-surface-variant">
-                      {table.columns.map((column) => column.name).join(', ')}
+                      {(table.columns ?? []).map((column) => column.name).join(', ')}
                     </p>
                   </div>
                 ))

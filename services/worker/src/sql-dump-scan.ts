@@ -367,6 +367,31 @@ export async function runSqlDumpScanJob(
       input.baseScanJson && typeof input.baseScanJson === 'object'
         ? (input.baseScanJson as Record<string, unknown>)
         : {};
+
+    const ddlTables = Array.isArray((ddlSummary as any)?.tables) ? ddlSummary!.tables : null;
+    const tablesOut =
+      ddlTables && ddlTables.length
+        ? ddlTables.map((t) => {
+            const rowCount = rowCounter.rowCounts[t.name] ?? 0;
+            const columns = Array.from({ length: t.columnCount }, (_, idx) => {
+              const i = idx + 1;
+              return {
+                name: `col_${i}`,
+                type: '—',
+                nullable: true,
+                isPrimary: idx < t.detectedPrimaryKeys,
+                isForeign: idx < t.detectedForeignKeys,
+              };
+            });
+            return {
+              name: t.name,
+              rowCount,
+              columnCount: t.columnCount,
+              columns,
+            };
+          })
+        : [];
+
     const patch = {
       ...base,
       scanId: input.scanId,
@@ -378,7 +403,7 @@ export async function runSqlDumpScanJob(
       columnCount: ddlSummary?.columnCount ?? (base as any).columnCount ?? 0,
       detectedPrimaryKeys: ddlSummary?.detectedPrimaryKeys ?? (base as any).detectedPrimaryKeys ?? 0,
       detectedForeignKeys: ddlSummary?.detectedForeignKeys ?? (base as any).detectedForeignKeys ?? 0,
-      tables: ddlSummary?.tables ?? (base as any).tables ?? [],
+      tables: tablesOut,
       artifactOnly,
       definition: {
         ...(typeof base.definition === 'object' && base.definition ? (base.definition as Record<string, unknown>) : {}),

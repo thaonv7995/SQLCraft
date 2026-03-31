@@ -208,6 +208,21 @@ ensure_core_env() {
   set_env_value "STACK_NAME" "$desired_stack" "$ENV_FILE"
   set_env_value "SANDBOX_DOCKER_NETWORK" "${desired_stack}-prod" "$ENV_FILE"
 
+  local web_bind api_bind postgres_bind redis_bind minio_api_bind minio_console_bind
+  web_bind="$(get_env_value "WEB_BIND" "$ENV_FILE")"
+  api_bind="$(get_env_value "API_BIND" "$ENV_FILE")"
+  postgres_bind="$(get_env_value "POSTGRES_BIND" "$ENV_FILE")"
+  redis_bind="$(get_env_value "REDIS_BIND" "$ENV_FILE")"
+  minio_api_bind="$(get_env_value "MINIO_API_BIND" "$ENV_FILE")"
+  minio_console_bind="$(get_env_value "MINIO_CONSOLE_BIND" "$ENV_FILE")"
+
+  set_env_value "WEB_BIND" "${web_bind:-0.0.0.0}" "$ENV_FILE"
+  set_env_value "API_BIND" "${api_bind:-127.0.0.1}" "$ENV_FILE"
+  set_env_value "POSTGRES_BIND" "${postgres_bind:-127.0.0.1}" "$ENV_FILE"
+  set_env_value "REDIS_BIND" "${redis_bind:-127.0.0.1}" "$ENV_FILE"
+  set_env_value "MINIO_API_BIND" "${minio_api_bind:-127.0.0.1}" "$ENV_FILE"
+  set_env_value "MINIO_CONSOLE_BIND" "${minio_console_bind:-127.0.0.1}" "$ENV_FILE"
+
   ensure_port "WEB_PORT" 13029
   ensure_port "API_PORT" 4000
   ensure_port "POSTGRES_PORT" 5432
