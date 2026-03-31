@@ -1,3 +1,4 @@
+import { AppMain } from '@/components/layout/app-main';
 import { Navbar } from '@/components/layout/navbar';
 import { Sidebar } from '@/components/layout/sidebar';
 import { MobileAppNav } from '@/components/layout/mobile-app-nav';
@@ -19,10 +20,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Sidebar />
           </div>
 
-          {/* Main content — padding bottom on mobile for bottom nav */}
-          <main className="flex-1 min-w-0 min-h-0 overflow-y-auto bg-surface pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
-            {children}
-          </main>
+          {/* Main — pb mobile chỉ khi có bottom nav (trùng logic MobileAppNav) */}
+          <AppMain>{children}</AppMain>
         </div>
 
         <MobileAppNav />
