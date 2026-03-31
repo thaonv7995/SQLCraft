@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { eq, or } from 'drizzle-orm';
+import { eq, or, sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import * as schema from './schema/index';
 import {
@@ -10,6 +10,7 @@ import {
   CONTRIBUTOR_ROLE_NAME,
   DEFAULT_USER_ROLE_NAME,
 } from '../lib/roles';
+import { NotificationType } from '../modules/notifications/notifications.types';
 
 async function seed() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -349,6 +350,53 @@ async function seed() {
       .set({ publishedVersionId: version.id, status: 'published', updatedAt: new Date() })
       .where(eq(schema.challenges.id, challenge.id));
   }
+
+  // 7. Demo in-app notifications for first admin (navbar / Settings)
+  console.log('Seeding demo notifications for admin...');
+  await db.execute(
+    sql`DELETE FROM user_notifications WHERE user_id = ${adminUser.id} AND COALESCE(metadata->>'seed', '') = 'true'`,
+  );
+
+  const demoDatasetId = ecommerceSchema.catalogAnchorId;
+  await db.insert(schema.userNotifications).values([
+    {
+      userId: adminUser.id,
+      type: NotificationType.DATASET_REVIEW_PENDING,
+      title: 'Database submitted for review',
+      body: '“Demo public upload” is pending catalog approval. You’ll get another notice when it’s approved or rejected.',
+      metadata: {
+        seed: true,
+        databaseId: demoDatasetId,
+        schemaTemplateId: ecommerceSchema.id,
+      },
+      readAt: null,
+    },
+    {
+      userId: adminUser.id,
+      type: NotificationType.DATASET_REVIEW_APPROVED,
+      title: 'Database approved',
+      body: '“Ecommerce” is now on the public catalog (pending golden snapshot if not ready yet).',
+      metadata: { seed: true, databaseId: demoDatasetId },
+      readAt: new Date(),
+    },
+    {
+      userId: adminUser.id,
+      type: NotificationType.GOLDEN_READY,
+      title: 'Golden snapshot ready',
+      body: 'Sandbox restores for “Ecommerce Tiny” can use the golden snapshot.',
+      metadata: { seed: true, datasetTemplateId: randomUUID(), schemaTemplateId: ecommerceSchema.id },
+      readAt: null,
+    },
+    {
+      userId: adminUser.id,
+      type: NotificationType.GOLDEN_FAILED,
+      title: 'Golden snapshot failed',
+      body: 'Timeout while restoring artifact (demo seed).',
+      metadata: { seed: true, error: 'demo seed', datasetTemplateId: randomUUID() },
+      readAt: null,
+    },
+  ]);
+  console.log('  Inserted 4 demo notifications (3 unread, 1 read)');
 
   console.log('\nSeed completed successfully!');
   console.log('First admin credentials:');

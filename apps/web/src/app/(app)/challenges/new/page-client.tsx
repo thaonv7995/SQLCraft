@@ -215,16 +215,16 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
 
   return (
     <div className="page-shell-wide page-stack pb-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
         <div>
           <Link
             href="/leaderboard"
-            className="text-sm text-primary hover:underline mb-2 inline-block"
+            className="mb-2 inline-block text-sm text-primary hover:underline"
           >
             ← Challenges
           </Link>
           <h1 className="page-title-lg">Create challenge</h1>
-          <p className="mt-2 max-w-3xl text-sm text-on-surface-variant">
+          <p className="mt-2 max-w-4xl text-sm text-on-surface-variant">
             Save a <strong>draft</strong> tied to a catalog database.{' '}
             <span className="text-on-surface">
               Public drafts go through admin review before they appear in the challenge list.
@@ -233,17 +233,16 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
             other users.
           </p>
         </div>
-      </div>
 
-      <Card className="border-outline-variant/10 bg-surface-container-low/40 max-w-3xl">
-        <CardHeader>
-          <CardTitle className="text-lg">Challenge details</CardTitle>
-          <CardDescription>
-            Same validation rules as the admin form. Pass criteria must include at least one rule.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmitCreate} className="space-y-4">
+        <Card className="w-full border-outline-variant/10 bg-surface-container-low/40">
+          <CardHeader className="space-y-1 pb-4">
+            <CardTitle className="text-lg">Challenge details</CardTitle>
+            <CardDescription>
+              Same validation rules as the admin form. Pass criteria must include at least one rule.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmitCreate} className="space-y-5">
             <Select
               label="Database (schema)"
               value={databaseId}
@@ -282,10 +281,10 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
             />
 
             <div className="space-y-2">
-              <p className="text-xs font-medium text-on-surface-variant uppercase tracking-wide">
+              <p className="text-xs font-medium uppercase tracking-wide text-on-surface-variant">
                 Visibility
               </p>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-2">
                 {VISIBILITY_OPTIONS.map((opt) => (
                   <label
                     key={opt.value}
@@ -343,7 +342,7 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
               hint="Sandbox data volume for every submission on this challenge."
             />
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-3">
               <Select
                 label="Difficulty"
                 value={difficulty}
@@ -411,9 +410,14 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Button type="submit" disabled={busy}>
-                {createMutation.isPending ? 'Saving…' : 'Save draft'}
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-outline-variant/10 pt-4">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => router.push('/leaderboard')}
+                disabled={busy}
+              >
+                Cancel
               </Button>
               <Button
                 type="button"
@@ -423,18 +427,14 @@ export default function UserNewChallengePage(_props: ClientPageProps) {
               >
                 {validateMutation.isPending ? 'Checking…' : 'Check draft'}
               </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => router.push('/leaderboard')}
-                disabled={busy}
-              >
-                Cancel
+              <Button type="submit" disabled={busy}>
+                {createMutation.isPending ? 'Saving…' : 'Save draft'}
               </Button>
             </div>
           </form>
         </CardContent>
       </Card>
     </div>
+  </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { notificationsApi, type InAppNotificationItem, type User } from '@/lib/api';
 import { useMounted } from '@/hooks/use-mounted';
@@ -156,29 +156,27 @@ function NotificationsBell() {
     void refreshUnread();
   }, [refreshUnread]);
 
+  /** Mở panel = coi như đã xem: đánh dấu tất cả đã đọc rồi mới load list. */
+  const openSeq = useRef(0);
   useEffect(() => {
-    if (open) void loadList();
-  }, [open, loadList]);
-
-  const onMarkRead = async (id: string) => {
-    try {
-      await notificationsApi.markRead(id);
+    if (!open) return;
+    const seq = ++openSeq.current;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await notificationsApi.markAllRead();
+      } catch {
+        /* ignore */
+      }
+      if (cancelled || seq !== openSeq.current) return;
       await loadList();
+      if (cancelled || seq !== openSeq.current) return;
       await refreshUnread();
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const onMarkAllRead = async () => {
-    try {
-      await notificationsApi.markAllRead();
-      await loadList();
-      await refreshUnread();
-    } catch {
-      /* ignore */
-    }
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, loadList, refreshUnread]);
 
   return (
     <div className="relative">
@@ -205,17 +203,8 @@ function NotificationsBell() {
             role="dialog"
             aria-label="Notification list"
           >
-            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/30 bg-surface-container-highest/40">
+            <div className="px-3 py-2 border-b border-outline-variant/30 bg-surface-container-highest/40">
               <span className="text-sm font-semibold text-on-surface">Notifications</span>
-              {unreadCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => void onMarkAllRead()}
-                  className="text-xs font-medium text-primary hover:underline"
-                >
-                  Mark all read
-                </button>
-              )}
             </div>
             <div className="overflow-y-auto flex-1 min-h-0">
               {loading ? (
@@ -228,12 +217,7 @@ function NotificationsBell() {
                     <li key={n.id}>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (!n.read) void onMarkRead(n.id);
-                        }}
-                        className={`w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-surface-container-highest/80 ${
-                          n.read ? 'opacity-90' : 'bg-primary/8'
-                        }`}
+                        className="w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-surface-container-highest/80 opacity-90"
                       >
                         <p className="font-medium text-on-surface line-clamp-2">{n.title}</p>
                         {n.body && (
