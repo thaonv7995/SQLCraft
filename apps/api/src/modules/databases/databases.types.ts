@@ -68,6 +68,8 @@ export interface DatabaseItem {
   sandboxGoldenStatus: SandboxGoldenStatus;
   /** When `sandboxGoldenStatus === 'failed'`, contains the golden-bake error details (best-effort). */
   sandboxGoldenError: string | null;
+  /** GET detail when authenticated: you own this schema template (manage invites, delete, golden retry). */
+  canManage?: boolean;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }

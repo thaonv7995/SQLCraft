@@ -2,7 +2,7 @@ import type { SchemaSqlDialect } from '@sqlcraft/types';
 import { normalizeSchemaSqlEngine } from '@sqlcraft/types';
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { getDb, schema as dbSchema } from '../../db';
-import { sessionsRepository } from '../../db/repositories';
+import { challengesRepository, sessionsRepository } from '../../db/repositories';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { inferDatabaseDomain } from '../../lib/infer-database-domain';
 import { enqueueProvisionSandbox } from '../../lib/queue';
@@ -41,6 +41,40 @@ interface SchemaDefinition {
 
 type SchemaTemplateRow = typeof dbSchema.schemaTemplates.$inferSelect;
 type DatasetTemplateRow = typeof dbSchema.datasetTemplates.$inferSelect;
+
+async function isSchemaTemplateOwnedByUser(userId: string, schemaTemplateId: string): Promise<boolean> {
+  const db = getDb();
+  const [row] = await db
+    .select({ createdBy: dbSchema.schemaTemplates.createdBy })
+    .from(dbSchema.schemaTemplates)
+    .where(eq(dbSchema.schemaTemplates.id, schemaTemplateId))
+    .limit(1);
+  return row?.createdBy === userId;
+}
+
+async function assertUserOwnsDatabase(userId: string, databaseId: string): Promise<DatabaseItem> {
+  const database = await getDatabase(databaseId, { viewerUserId: userId });
+  if (!database.canManage) {
+    throw new ForbiddenError('You do not own this database');
+  }
+  return database;
+}
+
+async function validateNewInviteUserIds(
+  invitedUserIds: string[] | undefined,
+  creatorUserId: string,
+): Promise<string[]> {
+  const raw = invitedUserIds ?? [];
+  const unique = [...new Set(raw)].filter((id) => id !== creatorUserId);
+  if (unique.length === 0) {
+    return [];
+  }
+  const n = await challengesRepository.countUsersWithIds(unique);
+  if (n !== unique.length) {
+    throw new ValidationError('One or more invited users were not found');
+  }
+  return unique;
+}
 
 const DOMAIN_ICONS: Record<DatabaseDomain, string> = {
   ecommerce: 'storefront',
@@ -687,7 +721,12 @@ export async function getDatabase(
     );
   }
 
-  return database;
+  const canManage =
+    opts?.viewerUserId != null &&
+    opts.viewerUserId !== '' &&
+    (await isSchemaTemplateOwnedByUser(opts.viewerUserId, database.schemaTemplateId));
+
+  return { ...database, canManage };
 }
 
 export async function createDatabaseSession(
@@ -828,4 +867,72 @@ export async function getDatabaseItemForAdminPendingReview(
   }
 
   return buildDatabaseItem(template, Object.values(bySize), 'public_pending_owner');
+}
+
+export async function ownerRetriggerGoldenBake(userId: string, databaseId: string): Promise<void> {
+  const database = await assertUserOwnsDatabase(userId, databaseId);
+  const { retriggerGoldenBakeForSchemaTemplate } = await import('../admin/admin.service');
+  await retriggerGoldenBakeForSchemaTemplate(database.schemaTemplateId);
+}
+
+export async function ownerDeleteDatabase(userId: string, databaseId: string) {
+  const database = await assertUserOwnsDatabase(userId, databaseId);
+  const { deleteDatabase } = await import('../admin/admin.service');
+  return deleteDatabase(database.schemaTemplateId);
+}
+
+export async function ownerUpdateDatabaseDescription(
+  userId: string,
+  databaseId: string,
+  description: string,
+): Promise<void> {
+  const database = await assertUserOwnsDatabase(userId, databaseId);
+  const db = getDb();
+  const trimmed = description.trim();
+  await db
+    .update(dbSchema.schemaTemplates)
+    .set({
+      description: trimmed && trimmed.length > 0 ? trimmed : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(dbSchema.schemaTemplates.id, database.schemaTemplateId));
+}
+
+export async function ownerAddDatabaseInvites(
+  userId: string,
+  databaseId: string,
+  invitedUserIds: string[],
+): Promise<void> {
+  const database = await assertUserOwnsDatabase(userId, databaseId);
+  const db = getDb();
+  const [st] = await db
+    .select({ visibility: dbSchema.schemaTemplates.visibility })
+    .from(dbSchema.schemaTemplates)
+    .where(eq(dbSchema.schemaTemplates.id, database.schemaTemplateId))
+    .limit(1);
+  if (!st) {
+    throw new NotFoundError('Database not found');
+  }
+  if (st.visibility !== 'private') {
+    throw new ValidationError('Invites are only available for private databases');
+  }
+  const validated = await validateNewInviteUserIds(invitedUserIds, userId);
+  if (validated.length === 0) {
+    throw new ValidationError('Add at least one user to invite');
+  }
+  for (const uid of validated) {
+    try {
+      await db.insert(dbSchema.schemaTemplateInvites).values({
+        schemaTemplateId: database.schemaTemplateId,
+        userId: uid,
+        invitedBy: userId,
+      });
+    } catch (err: unknown) {
+      const code = typeof err === 'object' && err !== null && 'code' in err ? (err as { code: string }).code : '';
+      if (code === '23505') {
+        continue;
+      }
+      throw err;
+    }
+  }
 }

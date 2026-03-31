@@ -28,21 +28,29 @@ import {
 } from '../admin/sql-dump-upload-session.service';
 import { scanSqlDumpHandler as adminScanSqlDumpHandler } from '../admin/admin.handler';
 import {
+  AddOwnerDatabaseInvitesBodySchema,
   CreateDatabaseSessionBodySchema,
   DatabaseParamsSchema,
   GetDatabaseQuerySchema,
   ListDatabasesQuerySchema,
+  UpdateOwnerDatabaseBodySchema,
 } from './databases.schema';
 import type {
+  AddOwnerDatabaseInvitesBody,
   CreateDatabaseSessionBody,
   DatabaseParams,
   GetDatabaseQuery,
   ListDatabasesQuery,
+  UpdateOwnerDatabaseBody,
 } from './databases.schema';
 import {
   createDatabaseSession,
   getDatabase,
   listDatabases,
+  ownerAddDatabaseInvites,
+  ownerDeleteDatabase,
+  ownerRetriggerGoldenBake,
+  ownerUpdateDatabaseDescription,
 } from './databases.service';
 
 function assertAdminForIncludeAwaitingGolden(
@@ -175,4 +183,46 @@ export async function scanUserSqlDumpHandler(
   reply: FastifyReply,
 ): Promise<void> {
   return adminScanSqlDumpHandler(request, reply);
+}
+
+export async function ownerRetriggerGoldenBakeHandler(
+  request: FastifyRequest<{ Params: DatabaseParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { databaseId } = DatabaseParamsSchema.parse(request.params);
+  const userId = (request.user as JwtPayload).sub;
+  await ownerRetriggerGoldenBake(userId, databaseId);
+  reply.send(success(null, 'Golden snapshot bake queued'));
+}
+
+export async function ownerDeleteDatabaseHandler(
+  request: FastifyRequest<{ Params: DatabaseParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { databaseId } = DatabaseParamsSchema.parse(request.params);
+  const userId = (request.user as JwtPayload).sub;
+  const result = await ownerDeleteDatabase(userId, databaseId);
+  reply.send(success(result, 'Database deleted successfully'));
+}
+
+export async function ownerPatchDatabaseHandler(
+  request: FastifyRequest<{ Params: DatabaseParams; Body: UpdateOwnerDatabaseBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { databaseId } = DatabaseParamsSchema.parse(request.params);
+  const userId = (request.user as JwtPayload).sub;
+  const body = UpdateOwnerDatabaseBodySchema.parse(request.body ?? {});
+  await ownerUpdateDatabaseDescription(userId, databaseId, body.description);
+  reply.send(success(null, 'Database updated'));
+}
+
+export async function ownerAddInvitesHandler(
+  request: FastifyRequest<{ Params: DatabaseParams; Body: AddOwnerDatabaseInvitesBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const { databaseId } = DatabaseParamsSchema.parse(request.params);
+  const userId = (request.user as JwtPayload).sub;
+  const body = AddOwnerDatabaseInvitesBodySchema.parse(request.body);
+  await ownerAddDatabaseInvites(userId, databaseId, body.userIds);
+  reply.send(success(null, 'Invites added'));
 }

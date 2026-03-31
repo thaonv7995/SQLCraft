@@ -22,6 +22,10 @@ import {
   getUserSqlDumpScanHandler,
   importUserDatabaseHandler,
   listDatabasesHandler,
+  ownerAddInvitesHandler,
+  ownerDeleteDatabaseHandler,
+  ownerPatchDatabaseHandler,
+  ownerRetriggerGoldenBakeHandler,
   presignUserSqlDumpUploadPartHandler,
   scanUserSqlDumpHandler,
 } from './databases.handler';
@@ -130,6 +134,90 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
       },
     },
     getDatabaseHandler,
+  );
+
+  fastify.post<{ Params: DatabaseParams }>(
+    '/v1/databases/:databaseId/retrigger-golden-bake',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Databases'],
+        summary: 'Owner: queue golden snapshot bake again for this database',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['databaseId'],
+          properties: { databaseId: { type: 'string' } },
+        },
+      },
+    },
+    ownerRetriggerGoldenBakeHandler,
+  );
+
+  fastify.delete<{ Params: DatabaseParams }>(
+    '/v1/databases/:databaseId',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Databases'],
+        summary: 'Owner: delete your uploaded database (no challenges may reference it)',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['databaseId'],
+          properties: { databaseId: { type: 'string' } },
+        },
+      },
+    },
+    ownerDeleteDatabaseHandler,
+  );
+
+  fastify.patch<{ Params: DatabaseParams; Body: { description?: string } }>(
+    '/v1/databases/:databaseId',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Databases'],
+        summary: 'Owner: update catalog description for your database',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['databaseId'],
+          properties: { databaseId: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          required: ['description'],
+          properties: { description: { type: 'string', maxLength: 4000 } },
+        },
+      },
+    },
+    ownerPatchDatabaseHandler,
+  );
+
+  fastify.post<{ Params: DatabaseParams; Body: { userIds: string[] } }>(
+    '/v1/databases/:databaseId/invites',
+    {
+      onRequest: [fastify.authenticate],
+      schema: {
+        tags: ['Databases'],
+        summary: 'Owner: invite users to a private database',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['databaseId'],
+          properties: { databaseId: { type: 'string' } },
+        },
+        body: {
+          type: 'object',
+          required: ['userIds'],
+          properties: {
+            userIds: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1, maxItems: 50 },
+          },
+        },
+      },
+    },
+    ownerAddInvitesHandler,
   );
 
   fastify.post<{ Body: CreateDatabaseSessionBody }>(

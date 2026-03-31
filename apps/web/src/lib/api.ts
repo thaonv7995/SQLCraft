@@ -1029,6 +1029,8 @@ export interface Database {
   sandboxGoldenStatus?: SandboxGoldenStatus;
   /** When `sandboxGoldenStatus === 'failed'`, contains golden-bake error details (best-effort). */
   sandboxGoldenError?: string | null;
+  /** GET detail when logged in: you own this upload (edit/delete/invites/golden retry). */
+  canManage?: boolean;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }
@@ -1318,6 +1320,7 @@ function normalizeDatabase(database: Database): Database {
     ...database,
     sandboxGoldenStatus: database.sandboxGoldenStatus ?? 'none',
     sandboxGoldenError: database.sandboxGoldenError ?? null,
+    canManage: database.canManage === true,
     catalogKind: database.catalogKind ?? 'public',
     sourceScale: scaleContext.sourceScale,
     selectedScale: scaleContext.selectedScale,
@@ -2459,6 +2462,24 @@ export const databasesApi = {
       .get<Database>(`/databases/${id}`, Object.keys(params).length > 0 ? { params } : undefined)
       .then((r) => normalizeDatabase(r.data));
   },
+
+  /** Owner: queue golden snapshot bake (same as admin retrigger). */
+  retriggerGoldenBake: (databaseId: string) =>
+    api.post(`/databases/${encodeURIComponent(databaseId)}/retrigger-golden-bake`).then((r) => r.data),
+
+  /** Owner: delete uploaded database (blocked if challenges reference it). */
+  deleteOwner: (databaseId: string) =>
+    api.delete(`/databases/${encodeURIComponent(databaseId)}`).then((r) => r.data),
+
+  /** Owner: update catalog description. */
+  patchOwner: (databaseId: string, body: { description?: string }) =>
+    api.patch(`/databases/${encodeURIComponent(databaseId)}`, body).then((r) => r.data),
+
+  /** Owner: add invites to a private database. */
+  addOwnerInvites: (databaseId: string, userIds: string[]) =>
+    api
+      .post(`/databases/${encodeURIComponent(databaseId)}/invites`, { userIds })
+      .then((r) => r.data),
 
   createSession: (databaseId: string, scale?: DatabaseScale) =>
     api

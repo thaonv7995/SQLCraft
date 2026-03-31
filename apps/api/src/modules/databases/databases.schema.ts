@@ -58,7 +58,18 @@ export const CreateDatabaseSessionBodySchema = z.object({
   scale: z.enum(['tiny', 'small', 'medium', 'large', 'extra_large']).optional(),
 });
 
+export const UpdateOwnerDatabaseBodySchema = z.object({
+  /** Empty string clears the catalog description. */
+  description: z.string().max(4000),
+});
+
+export const AddOwnerDatabaseInvitesBodySchema = z.object({
+  userIds: z.array(z.string().uuid()).min(1).max(50),
+});
+
 export type ListDatabasesQuery = z.infer<typeof ListDatabasesQuerySchema>;
 export type DatabaseParams = z.infer<typeof DatabaseParamsSchema>;
 export type GetDatabaseQuery = z.infer<typeof GetDatabaseQuerySchema>;
 export type CreateDatabaseSessionBody = z.infer<typeof CreateDatabaseSessionBodySchema>;
+export type UpdateOwnerDatabaseBody = z.infer<typeof UpdateOwnerDatabaseBodySchema>;
+export type AddOwnerDatabaseInvitesBody = z.infer<typeof AddOwnerDatabaseInvitesBodySchema>;

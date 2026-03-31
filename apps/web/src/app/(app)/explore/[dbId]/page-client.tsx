@@ -19,6 +19,8 @@ import {
 import { cn, formatEstimatedDatasetFootprint, formatRows } from '@/lib/utils';
 import { saveLabBootstrap } from '@/lib/lab-bootstrap';
 import type { ClientPageProps } from '@/lib/page-props';
+import { useAuthStore } from '@/stores/auth';
+import { ExploreDatabaseOwnerPanel } from '@/components/user/explore-database-owner-panel';
 
 const SCALE_OPTIONS: Array<{ value: DatasetScale; label: string }> = [
   { value: 'tiny', label: DATABASE_SCALE_LABELS.tiny },
@@ -425,6 +427,7 @@ export default function DatabaseDetailPage({ params }: ClientPageProps) {
 
 function DatabaseDetail({ dbId }: { dbId: string }) {
   const router = useRouter();
+  const user = useAuthStore((s) => s.user);
   const [scaleOverride, setScaleOverride] = useState<DatasetScale | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [progress, setProgress] = useState(10);
@@ -435,7 +438,7 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['database', dbId],
+    queryKey: ['database', dbId, user?.id ?? 'anon'],
     queryFn: () => databasesApi.get(dbId),
     staleTime: 60_000,
   });
@@ -687,6 +690,13 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
                     Reviewing
                   </Badge>
                 ) : null}
+                {database.sandboxGoldenStatus &&
+                database.sandboxGoldenStatus !== 'ready' &&
+                !database.canManage ? (
+                  <Badge className="border border-outline-variant/30 bg-surface-container-high text-on-surface-variant">
+                    Snapshot: {database.sandboxGoldenStatus}
+                  </Badge>
+                ) : null}
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
@@ -727,6 +737,12 @@ function DatabaseDetail({ dbId }: { dbId: string }) {
             </aside>
           </div>
         </section>
+
+        {database.canManage ? (
+          <section>
+            <ExploreDatabaseOwnerPanel database={database} />
+          </section>
+        ) : null}
 
         <section className="space-y-6">
           <Card className="overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-low">
