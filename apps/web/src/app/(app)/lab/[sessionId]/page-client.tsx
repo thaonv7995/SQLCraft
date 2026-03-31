@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
 import toast from 'react-hot-toast';
@@ -2574,9 +2582,9 @@ function LabSessionLoading() {
   return (
     <div className="flex flex-1 flex-col bg-surface">
       <div className="h-12 shrink-0 animate-pulse border-b border-outline-variant/10 bg-surface-container-low" />
-      <div className="flex flex-1 gap-0 overflow-hidden">
-        <div className="w-[55%] animate-pulse bg-surface-container-lowest" />
-        <div className="flex-1 animate-pulse bg-surface-container-low" />
+      <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden md:flex-row">
+        <div className="h-[min(42vh,280px)] shrink-0 animate-pulse bg-surface-container-lowest md:h-auto md:w-[55%] md:shrink-0" />
+        <div className="min-h-0 flex-1 animate-pulse bg-surface-container-low" />
       </div>
       <div className="h-6 shrink-0 animate-pulse border-t border-outline-variant/10 bg-surface-container-lowest" />
     </div>
@@ -3052,7 +3060,8 @@ export default function LabPage({ params }: ClientPageProps) {
     return () => window.removeEventListener('keydown', handler);
   }, [isSessionReady, sessionId, currentQuery, isExecuting, runStatementAtCursor]);
 
-  const [leftWidth, setLeftWidth] = useState(55); // percent
+  const [leftWidth, setLeftWidth] = useState(55); // percent (desktop: editor width)
+  const [mobileEditorHeightPct, setMobileEditorHeightPct] = useState(48); // percent (mobile: editor height)
   const resizing = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [schemaTopHeight, setSchemaTopHeight] = useState(50); // percent
@@ -3078,6 +3087,38 @@ export default function LabPage({ params }: ClientPageProps) {
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
+  }, []);
+
+  /** Mobile: kéo dọc giữa editor và results (pointer = chuột + touch). */
+  const handleMobileSplitPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const h = rect.height;
+      if (h < 1) return;
+      const pct = ((ev.clientY - rect.top) / h) * 100;
+      setMobileEditorHeightPct(Math.min(78, Math.max(22, pct)));
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      try {
+        el.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }, []);
 
   const handleSchemaResizeMouseDown = useCallback((e: React.MouseEvent) => {
@@ -3504,13 +3545,21 @@ export default function LabPage({ params }: ClientPageProps) {
         <LabSessionExpired status={effectiveSessionStatus ?? session.status} />
       )}
 
-      {/* ── Main split pane ── */}
+      {/* ── Main split pane (mobile: editor on top, results below; md+: horizontal split) ── */}
       {isInteractiveSession && (
-      <div ref={containerRef} className="flex flex-1 overflow-hidden">
+      <div
+        ref={containerRef}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row"
+        style={
+          {
+            '--lab-editor-pct': `${leftWidth}%`,
+            '--mobile-editor-h-pct': `${mobileEditorHeightPct}%`,
+          } as CSSProperties
+        }
+      >
         {/* Left: Editor */}
         <div
-          className="flex flex-col overflow-hidden"
-          style={{ width: `${leftWidth}%` }}
+          className="flex min-h-0 w-full flex-col overflow-hidden max-md:h-[var(--mobile-editor-h-pct)] max-md:min-h-0 max-md:shrink-0 md:h-auto md:min-w-0 md:w-[var(--lab-editor-pct)] md:flex-shrink-0"
         >
           <div className="flex min-w-0 items-center border-b border-outline-variant/10 bg-surface-container-low/70 px-2">
             <div className="mr-2 flex shrink-0 items-center gap-1.5 border-r border-outline-variant/10 px-3 py-2 text-on-surface-variant">
@@ -3531,27 +3580,40 @@ export default function LabPage({ params }: ClientPageProps) {
               </kbd>
             </div>
           </div>
-          <SqlEditorPanel
-            ref={sqlEditorRef}
-            sessionId={sessionId}
-            schemaTables={sessionSchema?.tables}
-            onFormat={handleFormatSql}
-            onCopy={handleCopyQuery}
-            onClear={handleClearEditor}
-            notice={editorNotice}
-            onDismissErrorNotice={() => setEditorNotice(null)}
-          />
+          <div className="flex min-h-0 flex-1 flex-col">
+            <SqlEditorPanel
+              ref={sqlEditorRef}
+              sessionId={sessionId}
+              schemaTables={sessionSchema?.tables}
+              onFormat={handleFormatSql}
+              onCopy={handleCopyQuery}
+              onClear={handleClearEditor}
+              notice={editorNotice}
+              onDismissErrorNotice={() => setEditorNotice(null)}
+            />
+          </div>
         </div>
 
-        {/* Resize handle */}
+        {/* Mobile: kéo dọc để đổi tỷ lệ editor / results */}
         <div
-          className="resize-handle flex-none bg-transparent hover:bg-outline/40 transition-colors cursor-col-resize"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize SQL editor and results panels"
+          className="relative z-10 flex h-3 shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-outline-variant/25 bg-surface-container-low transition-colors hover:bg-surface-container-high active:bg-outline/20 md:hidden"
+          onPointerDown={handleMobileSplitPointerDown}
+        >
+          <span className="h-1 w-12 rounded-full bg-outline/60" aria-hidden />
+        </div>
+
+        {/* Desktop: kéo ngang */}
+        <div
+          className="resize-handle hidden flex-none cursor-col-resize bg-transparent transition-colors hover:bg-outline/40 md:block"
           style={{ width: '4px' }}
           onMouseDown={handleResizeMouseDown}
         />
 
         {/* Right: Results */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* Tabs */}
           <div
             className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-outline-variant/10 bg-surface-container-low/90"
