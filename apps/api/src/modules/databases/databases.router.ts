@@ -12,6 +12,7 @@ import type {
   DatabaseParams,
   GetDatabaseQuery,
   ListDatabasesQuery,
+  UpdateOwnerDatabaseBody,
 } from './databases.schema';
 import {
   abortUserSqlDumpUploadSessionHandler,
@@ -172,7 +173,7 @@ export default async function databasesRouter(fastify: FastifyInstance): Promise
     ownerDeleteDatabaseHandler,
   );
 
-  fastify.patch<{ Params: DatabaseParams; Body: { description?: string } }>(
+  fastify.patch<{ Params: DatabaseParams; Body: UpdateOwnerDatabaseBody }>(
     '/v1/databases/:databaseId',
     {
       onRequest: [fastify.authenticate],

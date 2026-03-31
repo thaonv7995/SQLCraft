@@ -24,7 +24,7 @@ import {
   sumDatasetRowCounts,
 } from '../../lib/dataset-scales';
 import { toStoredRoleName } from '../../lib/roles';
-import { sqlDumpMaxUncompressedBytes } from '../../lib/config';
+import { config, sqlDumpMaxUncompressedBytes } from '../../lib/config';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../lib/errors';
 import { enqueueDestroySandbox } from '../../lib/queue';
 import { resolvePublicAvatarUrl } from '../../lib/storage';

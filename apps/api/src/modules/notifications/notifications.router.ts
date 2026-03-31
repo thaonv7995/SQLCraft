@@ -5,9 +5,10 @@ import {
   markReadHandler,
   markAllReadHandler,
 } from './notifications.handler';
+import type { ListNotificationsQuery } from './notifications.schema';
 
 export default async function notificationsRouter(fastify: FastifyInstance): Promise<void> {
-  fastify.get(
+  fastify.get<{ Querystring: ListNotificationsQuery }>(
     '/v1/notifications',
     {
       onRequest: [fastify.authenticate],
@@ -41,7 +42,7 @@ export default async function notificationsRouter(fastify: FastifyInstance): Pro
     unreadCountHandler,
   );
 
-  fastify.patch(
+  fastify.patch<{ Params: { notificationId: string } }>(
     '/v1/notifications/:notificationId/read',
     {
       onRequest: [fastify.authenticate],

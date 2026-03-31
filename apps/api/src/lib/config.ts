@@ -69,6 +69,12 @@ const EnvSchema = z.object({
   SQL_DUMP_FULL_PARSE_MAX_MB: z.coerce.number().int().positive().max(8192).default(5120),
 
   /**
+   * Dumps larger than this (MiB) use artifact-only path for INSERT/stream rowcount scan.
+   * Defaults to {@link SQL_DUMP_FULL_PARSE_MAX_MB} when unset.
+   */
+  SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB: z.coerce.number().int().positive().max(8192).optional(),
+
+  /**
    * Hard cap on decompressed SQL size for .sql.gz / ZIP uploads (MiB). Prevents zip/gzip bombs.
    * Defaults to min(8192, 4 × SQL_DUMP_MAX_FILE_MB) when unset.
    */

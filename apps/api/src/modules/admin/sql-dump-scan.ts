@@ -1604,8 +1604,9 @@ export async function createStoredSqlDumpScanFromFile(
 ): Promise<SqlDumpScanResult> {
   const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
   const userArtifactOnly = Boolean(options?.artifactOnly);
+  const insertScanMaxMb = config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB ?? config.SQL_DUMP_FULL_PARSE_MAX_MB;
   // Large dumps: keep the scan responsive; still compute accurate row counts via a stream worker.
-  const autoArtifactOnly = byteSize > config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB * 1024 * 1024;
+  const autoArtifactOnly = byteSize > insertScanMaxMb * 1024 * 1024;
   const artifactOnly = userArtifactOnly || autoArtifactOnly;
   const { readFile } = await import('node:fs/promises');
 
@@ -1672,7 +1673,8 @@ export async function createStoredSqlDumpScanFromStagingObject(
 
   const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
   const userArtifactOnly = Boolean(options?.artifactOnly);
-  const autoArtifactOnly = byteSize > config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB * 1024 * 1024;
+  const insertScanMaxMb = config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB ?? config.SQL_DUMP_FULL_PARSE_MAX_MB;
+  const autoArtifactOnly = byteSize > insertScanMaxMb * 1024 * 1024;
   const artifactOnly = userArtifactOnly || autoArtifactOnly;
 
   if (!artifactOnly && byteSize > maxFullParse) {
