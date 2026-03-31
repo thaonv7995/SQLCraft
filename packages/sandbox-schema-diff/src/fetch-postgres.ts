@@ -76,7 +76,7 @@ export async function fetchPostgresSandboxSchemaSnapshot(connectionString: strin
           indexdef AS definition
         FROM pg_indexes
         WHERE schemaname = 'public'
-          -- PK indexes duplicate table DDL in diffs; lab SchemaPanel shows PK columns via template `isPrimary` + a `pk` chip.
+          -- PK indexes duplicate table DDL in diffs; lab SchemaPanel shows PK columns via template flag isPrimary and a pk chip.
           AND indexname !~ '_pkey$'
         ORDER BY tablename, indexname
       `,
