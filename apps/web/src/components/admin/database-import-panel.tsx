@@ -508,8 +508,7 @@ export function DatabaseImportPanel({
               <span className="font-medium text-on-surface">.sql / .txt / .sql.gz / .zip</span> · max{' '}
               <span className="font-medium text-on-surface">{formatSqlDumpMaxUploadLabel()}</span>
               {' · '}
-              {Math.round(SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES / (1024 * 1024))} MB+ uses direct storage upload
-              (bucket CORS must expose <span className="font-mono">ETag</span> for multipart).
+              {Math.round(SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES / (1024 * 1024))} MB+ uses direct storage upload.
             </p>
             <input
               ref={fileInputRef}

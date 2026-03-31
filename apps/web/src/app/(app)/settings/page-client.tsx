@@ -331,7 +331,7 @@ function NotificationsSection() {
     <section className="section-card card-padding">
       <h2 className="page-section-title">Notifications</h2>
       <p className="mt-2 text-sm text-on-surface-variant">
-        Email and push preferences are in progress. In-app toasts are currently supported.
+        Notifications are in-app only (toasts today; a bell/inbox later). They are not sent by email.
       </p>
     </section>
   );
