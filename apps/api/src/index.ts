@@ -20,6 +20,7 @@ import challengesRoutes from './modules/challenges/challenges.router';
 import sandboxesRoutes from './modules/sandboxes/sandboxes.router';
 import usersRoutes from './modules/users/users.router';
 import adminRoutes from './modules/admin/admin.router';
+import notificationsRoutes from './modules/notifications/notifications.router';
 import { cleanupStalePendingSqlDumpScans } from './modules/admin/sql-dump-pending';
 
 const { API_PORT: PORT, HOST, JWT_SECRET, NODE_ENV } = config;
@@ -193,6 +194,7 @@ All responses follow a standardized format:
         { name: 'Sandboxes', description: 'Sandbox management' },
         { name: 'Users', description: 'User profile management' },
         { name: 'Admin', description: 'Admin-only operations' },
+        { name: 'Notifications', description: 'In-app notifications (REST polling; no email)' },
       ],
     },
   });
@@ -248,6 +250,7 @@ All responses follow a standardized format:
   await app.register(sandboxesRoutes);
   await app.register(usersRoutes);
   await app.register(adminRoutes);
+  await app.register(notificationsRoutes);
 
   return app;
 }

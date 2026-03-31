@@ -78,6 +78,11 @@ import {
 import { getSqlDumpScanById, listPendingSqlDumpScans } from './sql-dump-pending';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 import { deleteStorageForDatasetTemplates } from './delete-database-storage';
+import {
+  notifyDatasetReviewApproved,
+  notifyDatasetReviewPending,
+  notifyDatasetReviewRejected,
+} from '../notifications/notifications.service';
 
 const ADMIN_CONFIG_SCOPE = 'global';
 const STALE_SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -816,6 +821,10 @@ async function importCanonicalDatabaseFromSqlDumpScan(
     result.warnings = [...(result.warnings ?? []), ...importWarnings];
   }
 
+  if (persist.schemaVisibility === 'public' && persist.schemaReviewStatus === 'pending') {
+    await notifyDatasetReviewPending(userId, result);
+  }
+
   return result;
 }
 
@@ -1282,8 +1291,13 @@ export async function approveSchemaTemplateReview(
   _reviewerId: string,
 ): Promise<void> {
   const db = getDb();
-  const [row] = await db
-    .select({ id: schema.schemaTemplates.id })
+  const [pending] = await db
+    .select({
+      id: schema.schemaTemplates.id,
+      createdBy: schema.schemaTemplates.createdBy,
+      name: schema.schemaTemplates.name,
+      catalogAnchorId: schema.schemaTemplates.catalogAnchorId,
+    })
     .from(schema.schemaTemplates)
     .where(
       and(
@@ -1296,7 +1310,7 @@ export async function approveSchemaTemplateReview(
     )
     .limit(1);
 
-  if (!row) {
+  if (!pending) {
     throw new NotFoundError('Pending public database not found');
   }
 
@@ -1320,12 +1334,24 @@ export async function approveSchemaTemplateReview(
   for (const row of datasetRows) {
     await enqueueDatasetGoldenBake({ datasetTemplateId: row.id });
   }
+
+  if (pending.createdBy) {
+    await notifyDatasetReviewApproved(
+      pending.createdBy,
+      pending.name?.trim() || 'Your database',
+      pending.catalogAnchorId,
+    );
+  }
 }
 
 export async function rejectSchemaTemplateReview(schemaTemplateId: string): Promise<void> {
   const db = getDb();
-  const [row] = await db
-    .select({ id: schema.schemaTemplates.id })
+  const [pending] = await db
+    .select({
+      id: schema.schemaTemplates.id,
+      createdBy: schema.schemaTemplates.createdBy,
+      name: schema.schemaTemplates.name,
+    })
     .from(schema.schemaTemplates)
     .where(
       and(
@@ -1338,7 +1364,7 @@ export async function rejectSchemaTemplateReview(schemaTemplateId: string): Prom
     )
     .limit(1);
 
-  if (!row) {
+  if (!pending) {
     throw new NotFoundError('Pending public database not found');
   }
 
@@ -1347,6 +1373,10 @@ export async function rejectSchemaTemplateReview(schemaTemplateId: string): Prom
     .update(schema.schemaTemplates)
     .set({ reviewStatus: 'rejected', updatedAt: now })
     .where(eq(schema.schemaTemplates.id, schemaTemplateId));
+
+  if (pending.createdBy) {
+    await notifyDatasetReviewRejected(pending.createdBy, pending.name?.trim() || 'Your database');
+  }
 }
 
 export async function retriggerGoldenBakeForSchemaTemplate(

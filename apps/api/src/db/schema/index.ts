@@ -123,6 +123,27 @@ export const refreshTokens = pgTable(
   }),
 );
 
+/** In-app notifications (REST polling; no email). See docs/notifications-scope.md */
+export const userNotifications = pgTable(
+  'user_notifications',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: varchar('type', { length: 96 }).notNull(),
+    title: text('title').notNull(),
+    body: text('body'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    readAt: timestamp('read_at'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    userCreatedIdx: index('user_notifications_user_created_idx').on(table.userId, table.createdAt),
+    userUnreadIdx: index('user_notifications_user_unread_idx').on(table.userId, table.readAt),
+  }),
+);
+
 // Learning Content
 
 export const challenges = pgTable(

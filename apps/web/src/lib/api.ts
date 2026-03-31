@@ -2031,6 +2031,40 @@ export const queryApi = {
   },
 };
 
+// ─── In-app notifications (REST; no email) ─────────────────────────────────────
+
+export interface InAppNotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  metadata: Record<string, unknown> | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface NotificationsListResult {
+  items: InAppNotificationItem[];
+  unreadCount: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export const notificationsApi = {
+  list: (params?: { page?: number; limit?: number; unreadOnly?: boolean }) =>
+    api.get<NotificationsListResult>('/notifications', { params }).then((r) => r.data),
+
+  unreadCount: () =>
+    api.get<{ unreadCount: number }>('/notifications/unread-count').then((r) => r.data),
+
+  markRead: (notificationId: string) =>
+    api.patch<{ ok: boolean }>(`/notifications/${notificationId}/read`).then((r) => r.data),
+
+  markAllRead: () =>
+    api.post<{ marked: number }>('/notifications/read-all').then((r) => r.data),
+};
+
 // ─── Users API ────────────────────────────────────────────────────────────────
 
 export interface UpdateProfilePayload {

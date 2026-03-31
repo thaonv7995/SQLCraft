@@ -66,7 +66,7 @@ const EnvSchema = z.object({
    * Dumps larger than this (MiB) cannot use full in-memory CREATE TABLE scan; use artifact-only
    * (streams file to object storage, reads only the first ~12 MiB for dialect heuristics).
    */
-  SQL_DUMP_FULL_PARSE_MAX_MB: z.coerce.number().int().positive().max(4096).default(256),
+  SQL_DUMP_FULL_PARSE_MAX_MB: z.coerce.number().int().positive().max(8192).default(5120),
 
   /**
    * Hard cap on decompressed SQL size for .sql.gz / ZIP uploads (MiB). Prevents zip/gzip bombs.

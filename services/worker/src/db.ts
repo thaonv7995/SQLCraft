@@ -116,6 +116,66 @@ export async function fetchDatasetTemplate(
   };
 }
 
+/** Match apps/api NotificationType (in-app only; worker inserts via raw SQL). */
+const NOTIFICATION_TYPE_GOLDEN_READY = 'golden.ready';
+const NOTIFICATION_TYPE_GOLDEN_FAILED = 'golden.failed';
+
+async function notifyOwnerGoldenSnapshotOutcome(
+  datasetTemplateId: string,
+  outcome: 'ready' | 'failed',
+  errorMessage: string | null,
+): Promise<void> {
+  const r = await mainDb.query<{
+    ownerUserId: string | null;
+    name: string;
+    schemaTemplateId: string;
+  }>(
+    `SELECT st.created_by AS "ownerUserId",
+            dt.name,
+            dt.schema_template_id AS "schemaTemplateId"
+       FROM dataset_templates dt
+       INNER JOIN schema_templates st ON st.id = dt.schema_template_id
+      WHERE dt.id = $1`,
+    [datasetTemplateId],
+  );
+  const row = r.rows[0];
+  if (!row?.ownerUserId) return;
+
+  const metadata: Record<string, unknown> = {
+    datasetTemplateId,
+    schemaTemplateId: row.schemaTemplateId,
+  };
+
+  if (outcome === 'ready') {
+    await mainDb.query(
+      `INSERT INTO user_notifications (user_id, type, title, body, metadata)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [
+        row.ownerUserId,
+        NOTIFICATION_TYPE_GOLDEN_READY,
+        'Golden snapshot ready',
+        `Sandbox restores for "${row.name}" can use the golden snapshot.`,
+        JSON.stringify(metadata),
+      ],
+    );
+    return;
+  }
+
+  const body = (errorMessage ?? 'Golden snapshot build failed').slice(0, 2000);
+  metadata.error = errorMessage;
+  await mainDb.query(
+    `INSERT INTO user_notifications (user_id, type, title, body, metadata)
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [
+      row.ownerUserId,
+      NOTIFICATION_TYPE_GOLDEN_FAILED,
+      'Golden snapshot failed',
+      body,
+      JSON.stringify(metadata),
+    ],
+  );
+}
+
 /** Golden bake succeeded: fingerprint + engine image + optional snapshot object in object storage. */
 export async function updateDatasetGoldenBakeSuccess(
   datasetTemplateId: string,
@@ -149,6 +209,7 @@ export async function updateDatasetGoldenBakeSuccess(
       params.schemaSnapshotUrl,
     ],
   );
+  await notifyOwnerGoldenSnapshotOutcome(datasetTemplateId, 'ready', null);
 }
 
 export async function updateDatasetGoldenBakeFailed(
@@ -162,6 +223,7 @@ export async function updateDatasetGoldenBakeFailed(
      WHERE id = $1`,
     [datasetTemplateId, errorMessage],
   );
+  await notifyOwnerGoldenSnapshotOutcome(datasetTemplateId, 'failed', errorMessage);
 }
 
 /** When BullMQ fails the job (e.g. stalled) without the processor throwing, only update if still pending. */
@@ -169,13 +231,17 @@ export async function updateDatasetGoldenBakeFailedIfPending(
   datasetTemplateId: string,
   errorMessage: string,
 ): Promise<void> {
-  await mainDb.query(
+  const result = await mainDb.query<{ id: string }>(
     `UPDATE dataset_templates
      SET sandbox_golden_status = 'failed',
          sandbox_golden_error = $2
-     WHERE id = $1 AND sandbox_golden_status = 'pending'`,
+     WHERE id = $1 AND sandbox_golden_status = 'pending'
+     RETURNING id`,
     [datasetTemplateId, errorMessage],
   );
+  if (result.rowCount && result.rowCount > 0) {
+    await notifyOwnerGoldenSnapshotOutcome(datasetTemplateId, 'failed', errorMessage);
+  }
 }
 
 /** Published datasets with pending golden and a non-empty artifact — eligible for enqueue (worker scan). */

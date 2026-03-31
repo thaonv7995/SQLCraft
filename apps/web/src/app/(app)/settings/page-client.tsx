@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -8,7 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { toastError } from '@/lib/toast-error';
-import { usersApi } from '@/lib/api';
+import { notificationsApi, usersApi, type InAppNotificationItem } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuthStore } from '@/stores/auth';
@@ -327,12 +327,107 @@ function PasswordSection() {
 // ─── Notifications Section ────────────────────────────────────────────────────
 
 function NotificationsSection() {
+  const [items, setItems] = useState<InAppNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [unreadOnly, setUnreadOnly] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await notificationsApi.list({ page: 1, limit: 50, unreadOnly });
+      setItems(res.items);
+      setUnreadCount(res.unreadCount);
+    } catch (err) {
+      toastError('Could not load notifications', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [unreadOnly]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onMarkRead = async (id: string) => {
+    try {
+      await notificationsApi.markRead(id);
+      await load();
+    } catch (err) {
+      toastError('Could not mark as read', err);
+    }
+  };
+
+  const onMarkAllRead = async () => {
+    try {
+      const { marked } = await notificationsApi.markAllRead();
+      if (marked > 0) toast.success(`Marked ${marked} as read`);
+      await load();
+    } catch (err) {
+      toastError('Could not mark all as read', err);
+    }
+  };
+
   return (
     <section className="section-card card-padding">
-      <h2 className="page-section-title">Notifications</h2>
-      <p className="mt-2 text-sm text-on-surface-variant">
-        Notifications are in-app only (toasts today; a bell/inbox later). They are not sent by email.
-      </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="page-section-title">Notifications</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            In-app only (poll this list or refresh the page). We do not send these by email.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 text-sm text-on-surface-variant">
+            <input
+              type="checkbox"
+              checked={unreadOnly}
+              onChange={(e) => setUnreadOnly(e.target.checked)}
+              className="rounded border-outline-variant"
+            />
+            Unread only
+          </label>
+          {unreadCount > 0 && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => void onMarkAllRead()}>
+              Mark all read
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="mt-4 text-sm text-on-surface-variant">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="mt-4 text-sm text-on-surface-variant">
+          {unreadOnly ? 'No unread notifications.' : 'No notifications yet.'}
+        </p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {items.map((n) => (
+            <li
+              key={n.id}
+              className={`rounded-xl border px-3 py-2.5 text-sm ${
+                n.read ? 'border-outline-variant/60 bg-surface-container/40' : 'border-primary/30 bg-primary/5'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-on-surface">{n.title}</p>
+                  {n.body && <p className="mt-0.5 whitespace-pre-wrap text-on-surface-variant">{n.body}</p>}
+                  <p className="mt-1 text-xs text-outline">
+                    {new Date(n.createdAt).toLocaleString()} · <span className="font-mono">{n.type}</span>
+                  </p>
+                </div>
+                {!n.read && (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void onMarkRead(n.id)}>
+                    Read
+                  </Button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

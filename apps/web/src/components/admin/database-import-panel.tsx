@@ -19,6 +19,7 @@ import {
 import toast from 'react-hot-toast';
 import { UserInviteMultiSelect } from '@/components/user/user-invite-multi-select';
 import {
+  formatSqlDumpFullParseLimitLabel,
   formatSqlDumpMaxUploadLabel,
   SQL_DUMP_DIRECT_UPLOAD_MIN_BYTES,
   SQL_DUMP_FULL_PARSE_MAX_MB,
@@ -551,8 +552,8 @@ export function DatabaseImportPanel({
               className="mt-0.5 size-4 rounded border-outline-variant"
             />
             <span>
-              Artifact only — required above {SQL_DUMP_FULL_PARSE_MAX_MB} MB, or for MySQL / SQL
-              Server / odd dumps.
+              Artifact only — required above {formatSqlDumpFullParseLimitLabel()}, or for MySQL /
+              SQL Server / odd dumps.
             </span>
           </label>
 
