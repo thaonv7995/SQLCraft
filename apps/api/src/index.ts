@@ -20,6 +20,7 @@ import challengesRoutes from './modules/challenges/challenges.router';
 import sandboxesRoutes from './modules/sandboxes/sandboxes.router';
 import usersRoutes from './modules/users/users.router';
 import adminRoutes from './modules/admin/admin.router';
+import { cleanupStalePendingSqlDumpScans } from './modules/admin/sql-dump-pending';
 
 const { API_PORT: PORT, HOST, JWT_SECRET, NODE_ENV } = config;
 
@@ -251,8 +252,31 @@ All responses follow a standardized format:
   return app;
 }
 
+const CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 h
+
+function scheduleStaleScansCleanup(log: { info: (msg: string) => void; warn: (obj: unknown, msg: string) => void }) {
+  const days = config.SQL_DUMP_SCAN_STALE_DAYS;
+  if (days <= 0) return;
+
+  const run = () => {
+    cleanupStalePendingSqlDumpScans(days)
+      .then((result) =>
+        log.info(
+          `Auto-cleanup: removed ${result.deleted} stale SQL dump scan(s) older than ${days} day(s) (${result.errors} error(s))`,
+        ),
+      )
+      .catch((err) => log.warn(err, 'Auto-cleanup: unexpected error during stale scan cleanup'));
+  };
+
+  // Run once shortly after startup, then every 12 h.
+  setTimeout(run, 60_000);
+  setInterval(run, CLEANUP_INTERVAL_MS);
+}
+
 async function main() {
   const app = await buildApp();
+
+  scheduleStaleScansCleanup(app.log);
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

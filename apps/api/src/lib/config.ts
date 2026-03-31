@@ -73,6 +73,13 @@ const EnvSchema = z.object({
    * Defaults to min(8192, 4 × SQL_DUMP_MAX_FILE_MB) when unset.
    */
   SQL_DUMP_MAX_UNCOMPRESSED_MB: z.coerce.number().int().positive().max(131072).optional(),
+
+  /**
+   * Pending SQL dump scans (uploaded but not yet imported) older than this many days are eligible
+   * for automatic garbage collection. Auto-cleanup runs every 12 h at startup.
+   * Set to 0 to disable auto-cleanup (manual-only via the admin endpoint).
+   */
+  SQL_DUMP_SCAN_STALE_DAYS: z.coerce.number().int().min(0).max(365).default(7),
 });
 
 const result = EnvSchema.safeParse(process.env);

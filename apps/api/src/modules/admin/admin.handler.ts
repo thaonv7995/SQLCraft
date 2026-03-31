@@ -28,9 +28,11 @@ import type {
   CreateSqlDumpUploadSessionBody,
   PresignSqlDumpUploadPartBody,
   CompleteSqlDumpUploadSessionBody,
+  CleanupStaleScansBody,
 } from './admin.schema';
 import {
   AdminConfigSchema,
+  CleanupStaleScansBodySchema,
   CompleteSqlDumpUploadSessionSchema,
   CreateAdminUserSchema,
   CreateChallengeSchema,
@@ -72,6 +74,10 @@ import {
   retriggerGoldenBakeForSchemaTemplate,
   getDatasetArtifactDownloadUrls,
 } from './admin.service';
+import {
+  deletePendingSqlDumpScan,
+  cleanupStalePendingSqlDumpScans,
+} from './sql-dump-pending';
 import {
   abortSqlDumpUploadSession,
   completeSqlDumpUploadSession,
@@ -451,4 +457,22 @@ export async function listAuditLogsHandler(
   const query = ListAuditLogsQuerySchema.parse(request.query);
   const result = await listAuditLogs(query);
   reply.send(success(result, 'Audit logs retrieved successfully'));
+}
+
+export async function deleteSqlDumpScanHandler(
+  request: FastifyRequest<{ Params: SqlDumpScanIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  await deletePendingSqlDumpScan(request.params.scanId);
+  reply.send(success({ ok: true }, 'Scan deleted'));
+}
+
+export async function cleanupStaleSqlDumpScansHandler(
+  request: FastifyRequest<{ Body: CleanupStaleScansBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = CleanupStaleScansBodySchema.parse(request.body ?? {});
+  const days = body.olderThanDays ?? config.SQL_DUMP_SCAN_STALE_DAYS;
+  const result = await cleanupStalePendingSqlDumpScans(days);
+  reply.send(success(result, `Cleanup complete: ${result.deleted} scan(s) deleted`));
 }

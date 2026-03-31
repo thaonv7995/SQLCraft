@@ -1,9 +1,12 @@
 import { listObjectsWithPrefix } from '../../lib/storage.js';
 import { adminRepository } from '../../db/repositories/admin.repository.js';
+import { ConflictError } from '../../lib/errors.js';
+import { logger } from '../../lib/logger.js';
 import {
   type SqlDumpScanResult,
   loadStoredSqlDumpScan,
   toSqlDumpScanResult,
+  deleteSqlDumpScanObjects,
 } from './sql-dump-scan.js';
 
 const DUMP_PREFIX = 'admin/sql-dumps/';
@@ -108,4 +111,57 @@ export async function getSqlDumpScanById(scanId: string): Promise<SqlDumpScanRes
   }
   if (!stored) return null;
   return toSqlDumpScanResult(stored);
+}
+
+/**
+ * Delete a pending (not yet imported) SQL dump scan from object storage.
+ * Throws ConflictError if the scan has already been imported into a schema template.
+ */
+export async function deletePendingSqlDumpScan(scanId: string): Promise<void> {
+  const importedIds = await adminRepository.getDistinctSqlDumpScanIdsFromTemplates();
+  if (importedIds.has(scanId.toLowerCase())) {
+    throw new ConflictError('Cannot delete a scan that has already been imported into the catalog');
+  }
+  await deleteSqlDumpScanObjects(scanId);
+}
+
+export interface CleanupStaleScansResult {
+  deleted: number;
+  errors: number;
+  olderThanDays: number;
+}
+
+/**
+ * Delete all pending (not imported) SQL dump scan objects older than `olderThanDays` days.
+ * Skips imported scans and objects whose lastModified is not available.
+ */
+export async function cleanupStalePendingSqlDumpScans(
+  olderThanDays: number,
+): Promise<CleanupStaleScansResult> {
+  const importedIds = await adminRepository.getDistinctSqlDumpScanIdsFromTemplates();
+  const objects = await listObjectsWithPrefix(DUMP_PREFIX, { recursive: true, maxKeys: 8_000 });
+  const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+
+  const processed = new Set<string>();
+  let deleted = 0;
+  let errors = 0;
+
+  for (const o of objects) {
+    const sid = scanIdFromMetadataKey(o.name);
+    if (!sid || processed.has(sid.toLowerCase())) continue;
+    processed.add(sid.toLowerCase());
+    if (importedIds.has(sid.toLowerCase())) continue;
+    if (!o.lastModified || o.lastModified.getTime() > cutoff) continue;
+
+    try {
+      await deleteSqlDumpScanObjects(sid);
+      deleted++;
+      logger.info({ scanId: sid }, 'Auto-cleanup: deleted stale SQL dump scan');
+    } catch (err) {
+      errors++;
+      logger.warn({ err, scanId: sid }, 'Auto-cleanup: failed to delete stale SQL dump scan');
+    }
+  }
+
+  return { deleted, errors, olderThanDays };
 }

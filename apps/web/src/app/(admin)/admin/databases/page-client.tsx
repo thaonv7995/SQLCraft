@@ -21,6 +21,7 @@ import {
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
 import { GoldenSnapshotErrorDialog } from '@/components/admin/golden-snapshot-error-dialog';
+import { ConfirmModal } from '@/components/ui/confirm-modal';
 
 function FilterSelect({
   value,
@@ -234,6 +235,8 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   );
   const [resumeScanId, setResumeScanId] = useState<string | null>(null);
   const [goldenErrorDb, setGoldenErrorDb] = useState<Database | null>(null);
+  const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [pendingPage, setPendingPage] = useState(1);
   const [catalogPage, setCatalogPage] = useState(1);
   const [domain, setDomain] = useState('all');
@@ -303,6 +306,22 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
   });
 
   const clearResumeScan = useCallback(() => setResumeScanId(null), []);
+
+  const deleteScanMutation = useMutation({
+    mutationFn: (scanId: string) => adminApi.deletePendingScan(scanId),
+    onSuccess: () => {
+      setConfirmDeleteScanId(null);
+      void queryClient.invalidateQueries({ queryKey: ['admin-pending-scans'] });
+    },
+  });
+
+  const cleanupScansMutation = useMutation({
+    mutationFn: () => adminApi.cleanupStalePendingScans(),
+    onSuccess: () => {
+      setConfirmCleanup(false);
+      void queryClient.invalidateQueries({ queryKey: ['admin-pending-scans'] });
+    },
+  });
 
   const databases = useMemo(() => data?.items ?? [], [data?.items]);
   const replaceCatalogMatch = useMemo(() => {
@@ -579,17 +598,26 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
               review before import.
             </p>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            className="shrink-0"
-            onClick={() => {
-              setShowImportPanel(true);
-              setResumeScanId(null);
-            }}
-          >
-            Open SQL import
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Delete all pending scans older than the configured threshold (default 7 days)"
+              onClick={() => setConfirmCleanup(true)}
+            >
+              Cleanup stale
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setShowImportPanel(true);
+                setResumeScanId(null);
+              }}
+            >
+              Open SQL import
+            </Button>
+          </div>
         </div>
         {pendingLoading ? (
           <p className="mt-4 text-xs text-on-surface-variant">Loading pending scans…</p>
@@ -605,7 +633,7 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
                     <th className="py-2 pr-3 font-medium">Scan ID</th>
                     <th className="py-2 pr-3 font-medium">Updated</th>
                     <th className="py-2 pr-3 font-medium">Status</th>
-                    <th className="py-2 text-right font-medium">Action</th>
+                    <th className="py-2 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -635,17 +663,29 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
                         )}
                       </td>
                       <td className="py-2 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={row.imported}
-                          onClick={() => {
-                            setResumeScanId(row.scanId);
-                            setShowImportPanel(true);
-                          }}
-                        >
-                          Resume
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={row.imported}
+                            onClick={() => {
+                              setResumeScanId(row.scanId);
+                              setShowImportPanel(true);
+                            }}
+                          >
+                            Resume
+                          </Button>
+                          {!row.imported ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Delete this pending scan from object storage"
+                              onClick={() => setConfirmDeleteScanId(row.scanId)}
+                            >
+                              Delete
+                            </Button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -686,6 +726,38 @@ export default function AdminDatabasesPage({ searchParams }: ClientPageProps) {
         schemaTemplateId={goldenErrorDb?.schemaTemplateId}
         error={goldenErrorDb?.sandboxGoldenError}
         onClose={() => setGoldenErrorDb(null)}
+      />
+
+      <ConfirmModal
+        open={confirmDeleteScanId !== null}
+        title="Delete scan?"
+        description={
+          <>
+            This will permanently remove the scan metadata and SQL dump file for{' '}
+            <span className="font-mono text-xs">{confirmDeleteScanId}</span> from object storage.
+            This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        icon="delete"
+        isPending={deleteScanMutation.isPending}
+        onCancel={() => setConfirmDeleteScanId(null)}
+        onConfirm={() => {
+          if (confirmDeleteScanId) deleteScanMutation.mutate(confirmDeleteScanId);
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmCleanup}
+        title="Cleanup stale scans?"
+        description="This will delete all pending (not imported) SQL dump scans that have not been updated within the configured retention period (default 7 days). This cannot be undone."
+        confirmLabel="Cleanup"
+        confirmVariant="destructive"
+        icon="auto_delete"
+        isPending={cleanupScansMutation.isPending}
+        onCancel={() => setConfirmCleanup(false)}
+        onConfirm={() => cleanupScansMutation.mutate()}
       />
     </div>
   );

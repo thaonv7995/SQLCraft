@@ -2301,6 +2301,17 @@ export const adminApi = {
       }>(`/admin/databases/schema-templates/${schemaTemplateId}/artifact-download-urls`)
       .then((r) => r.data.items),
 
+  deletePendingScan: (scanId: string) =>
+    api.delete(`/admin/databases/scans/${scanId}`).then(() => undefined),
+
+  cleanupStalePendingScans: (params?: { olderThanDays?: number }) =>
+    api
+      .post<{ deleted: number; errors: number; olderThanDays: number }>(
+        '/admin/databases/scans/cleanup-stale',
+        params ?? {},
+      )
+      .then((r) => r.data),
+
   createChallenge: (payload: AdminCreateChallengePayload) =>
     api.post<AdminCreateChallengeResult>('/admin/challenges', payload).then((r) => r.data),
 

@@ -362,6 +362,11 @@ export const SqlDumpScanIdParamsSchema = z.object({
   scanId: z.string().uuid(),
 });
 
+export const CleanupStaleScansBodySchema = z.object({
+  /** Override the default staleness threshold (days). Omit to use SQL_DUMP_SCAN_STALE_DAYS env var. */
+  olderThanDays: z.coerce.number().int().min(1).max(365).optional(),
+});
+
 export const SqlDumpUploadSessionIdParamsSchema = z.object({
   sessionId: z.string().uuid(),
 });
@@ -408,6 +413,7 @@ export type AdminConfigBody = z.infer<typeof AdminConfigSchema>;
 export type AdminIdParams = z.infer<typeof AdminIdParamsSchema>;
 export type ListPendingScansQuery = z.infer<typeof ListPendingScansQuerySchema>;
 export type SqlDumpScanIdParams = z.infer<typeof SqlDumpScanIdParamsSchema>;
+export type CleanupStaleScansBody = z.infer<typeof CleanupStaleScansBodySchema>;
 export type SqlDumpUploadSessionIdParams = z.infer<typeof SqlDumpUploadSessionIdParamsSchema>;
 export type CreateSqlDumpUploadSessionBody = z.infer<typeof CreateSqlDumpUploadSessionSchema>;
 export type PresignSqlDumpUploadPartBody = z.infer<typeof PresignSqlDumpUploadPartSchema>;

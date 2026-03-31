@@ -17,6 +17,7 @@ import type {
   CreateSqlDumpUploadSessionBody,
   PresignSqlDumpUploadPartBody,
   CompleteSqlDumpUploadSessionBody,
+  CleanupStaleScansBody,
 } from './admin.schema';
 import {
   createAdminUserHandler,
@@ -51,6 +52,8 @@ import {
   presignSqlDumpUploadPartHandler,
   completeSqlDumpUploadSessionHandler,
   abortSqlDumpUploadSessionHandler,
+  deleteSqlDumpScanHandler,
+  cleanupStaleSqlDumpScansHandler,
 } from './admin.handler';
 
 export default async function adminRouter(fastify: FastifyInstance): Promise<void> {
@@ -372,6 +375,43 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     getSqlDumpScanHandler,
+  );
+
+  fastify.delete<{ Params: SqlDumpScanIdParams }>(
+    '/v1/admin/databases/scans/:scanId',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Delete a pending (not imported) SQL dump scan from object storage',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['scanId'],
+          properties: { scanId: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    deleteSqlDumpScanHandler,
+  );
+
+  fastify.post<{ Body: CleanupStaleScansBody }>(
+    '/v1/admin/databases/scans/cleanup-stale',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Delete all pending SQL dump scans older than the configured threshold',
+        security: [{ bearerAuth: [] }],
+        body: {
+          type: 'object',
+          properties: {
+            olderThanDays: { type: 'integer', minimum: 1, maximum: 365 },
+          },
+        },
+      },
+    },
+    cleanupStaleSqlDumpScansHandler,
   );
 
   fastify.get(

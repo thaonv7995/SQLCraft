@@ -1726,3 +1726,17 @@ export async function loadStoredSqlDumpScan(scanId: string): Promise<StoredSqlDu
     return null;
   }
 }
+
+/**
+ * Delete both S3 objects for a scan (metadata JSON + SQL dump file).
+ * Evicts from in-process cache. Best-effort: errors from individual deletes are suppressed.
+ */
+export async function deleteSqlDumpScanObjects(scanId: string): Promise<void> {
+  const { deleteFile } = await import('../../lib/storage');
+  scanCache.delete(scanId);
+  scanCache.delete(scanId.toLowerCase());
+  await Promise.allSettled([
+    deleteFile(makeScanMetadataObjectName(scanId)),
+    deleteFile(makeScanSqlObjectName(scanId)),
+  ]);
+}
