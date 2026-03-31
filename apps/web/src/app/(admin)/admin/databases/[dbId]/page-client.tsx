@@ -31,6 +31,7 @@ import {
 import { cn, formatRelativeTime, formatRows } from '@/lib/utils';
 import { searchParamFirst } from '@/lib/next-app-page';
 import type { ClientPageProps } from '@/lib/page-props';
+import { toastError } from '@/lib/toast-error';
 
 type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'generation-jobs';
 
@@ -559,8 +560,9 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
 
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
+  const goldenStatus = database.sandboxGoldenStatus ?? 'none';
   const golden =
-    SANDBOX_GOLDEN_STATUS_STYLES[database.sandboxGoldenStatus ?? 'none'] ??
+    SANDBOX_GOLDEN_STATUS_STYLES[goldenStatus] ??
     SANDBOX_GOLDEN_STATUS_STYLES.none;
 
   const reviewTemplateId = database.schemaTemplateId ?? databaseId;
@@ -627,15 +629,38 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
               >
                 {difficulty.label}
               </span>
-              <span
-                className={cn(
-                  'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
-                  golden.badge,
-                )}
-                title="Sandbox golden bake (source dataset)"
-              >
-                {golden.label}
-              </span>
+              {goldenStatus === 'failed' ? (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Snapshot failed; click to view error"
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
+                    golden.badge,
+                  )}
+                  title="Snapshot failed (click to view error)"
+                  onClick={() =>
+                    toastError('Golden snapshot failed', database.sandboxGoldenError)
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    toastError('Golden snapshot failed', database.sandboxGoldenError);
+                  }}
+                >
+                  {golden.label}
+                </span>
+              ) : (
+                <span
+                  className={cn(
+                    'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
+                    golden.badge,
+                  )}
+                  title="Sandbox golden bake (source dataset)"
+                >
+                  {golden.label}
+                </span>
+              )}
               {pendingReview ? (
                 <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
                   Awaiting approval

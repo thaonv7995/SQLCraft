@@ -1027,6 +1027,8 @@ export interface Database {
   isAvailable?: boolean;
   /** Source-scale dataset golden pipeline; admin UI shows a chip. */
   sandboxGoldenStatus?: SandboxGoldenStatus;
+  /** When `sandboxGoldenStatus === 'failed'`, contains golden-bake error details (best-effort). */
+  sandboxGoldenError?: string | null;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }
@@ -1315,6 +1317,7 @@ function normalizeDatabase(database: Database): Database {
   return {
     ...database,
     sandboxGoldenStatus: database.sandboxGoldenStatus ?? 'none',
+    sandboxGoldenError: database.sandboxGoldenError ?? null,
     catalogKind: database.catalogKind ?? 'public',
     sourceScale: scaleContext.sourceScale,
     selectedScale: scaleContext.selectedScale,

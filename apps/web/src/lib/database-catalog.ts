@@ -146,18 +146,18 @@ export const SANDBOX_GOLDEN_STATUS_STYLES: Record<
 > = {
   none: {
     badge: 'bg-outline-variant/15 text-on-surface-variant',
-    label: 'Golden —',
+    label: 'Snapshot —',
   },
   pending: {
     badge: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
-    label: 'Golden pending',
+    label: 'Snapshot pending',
   },
   ready: {
-    badge: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
-    label: 'Golden ready',
+    badge: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200',
+    label: 'Snapshot ready',
   },
   failed: {
     badge: 'bg-error/15 text-error',
-    label: 'Golden failed',
+    label: 'Snapshot failed',
   },
 };

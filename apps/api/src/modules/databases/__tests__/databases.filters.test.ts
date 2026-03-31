@@ -27,6 +27,7 @@ function sampleDb(overrides: Partial<DatabaseItem> = {}): DatabaseItem {
     availableScales: ['small', 'tiny'],
     availableScaleMetadata: [],
     sandboxGoldenStatus: 'ready',
+    sandboxGoldenError: null,
     ...overrides,
   };
 }

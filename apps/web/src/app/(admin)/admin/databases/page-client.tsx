@@ -20,6 +20,7 @@ import {
   SANDBOX_GOLDEN_STATUS_STYLES,
 } from '@/lib/database-catalog';
 import { cn, formatRows } from '@/lib/utils';
+import { toastError } from '@/lib/toast-error';
 
 function FilterSelect({
   value,
@@ -63,8 +64,9 @@ function CatalogMetric({ label, value, hint }: { label: string; value: string; h
 function DatabaseCatalogCard({ database }: { database: Database }) {
   const difficulty =
     DATABASE_DIFFICULTY_STYLES[database.difficulty] ?? DATABASE_DIFFICULTY_STYLES.beginner;
+  const goldenStatus = database.sandboxGoldenStatus ?? 'none';
   const golden =
-    SANDBOX_GOLDEN_STATUS_STYLES[database.sandboxGoldenStatus ?? 'none'] ??
+    SANDBOX_GOLDEN_STATUS_STYLES[goldenStatus] ??
     SANDBOX_GOLDEN_STATUS_STYLES.none;
 
   return (
@@ -101,15 +103,41 @@ function DatabaseCatalogCard({ database }: { database: Database }) {
           >
             {difficulty.label}
           </span>
-          <span
-            className={cn(
-              'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
-              golden.badge,
-            )}
-            title="Sandbox golden snapshot bake status (source dataset)"
-          >
-            {golden.label}
-          </span>
+          {goldenStatus === 'failed' ? (
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label="Snapshot failed; click to view error"
+              className={cn(
+                'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
+                golden.badge,
+              )}
+              title="Snapshot failed (click to view error)"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toastError('Golden snapshot failed', database.sandboxGoldenError);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                e.stopPropagation();
+                toastError('Golden snapshot failed', database.sandboxGoldenError);
+              }}
+            >
+              {golden.label}
+            </span>
+          ) : (
+            <span
+              className={cn(
+                'rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider',
+                golden.badge,
+              )}
+              title="Sandbox golden snapshot bake status (source dataset)"
+            >
+              {golden.label}
+            </span>
+          )}
         </div>
       </div>
 

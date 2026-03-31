@@ -256,6 +256,7 @@ function buildDatabaseItem(
   const sourceRowCount = sourceDataset ? sumRowCounts(sourceDataset.rowCounts) : 0;
   const sandboxGoldenStatus: SandboxGoldenStatus =
     (sourceDataset?.sandboxGoldenStatus as SandboxGoldenStatus | undefined) ?? 'none';
+  const sandboxGoldenError = sourceDataset?.sandboxGoldenError ?? null;
   const description = schemaTemplate.description ?? `${schemaTemplate.name} training database`;
   const domain = inferDatabaseDomain(schemaTemplate.name, description);
 
@@ -290,6 +291,7 @@ function buildDatabaseItem(
       };
     }),
     sandboxGoldenStatus,
+    sandboxGoldenError,
     schema: tables.map((table) => ({
       name: table.name,
       role: inferTableRole(table),

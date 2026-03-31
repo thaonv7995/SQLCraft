@@ -66,6 +66,8 @@ export interface DatabaseItem {
   availableScaleMetadata: Array<{ scale: DatabaseScale; rowCount: number }>;
   /** From source-scale dataset template; drives admin golden-bake chips. */
   sandboxGoldenStatus: SandboxGoldenStatus;
+  /** When `sandboxGoldenStatus === 'failed'`, contains the golden-bake error details (best-effort). */
+  sandboxGoldenError: string | null;
   schema?: DatabaseTable[];
   relationships?: DatabaseRelationship[];
 }
