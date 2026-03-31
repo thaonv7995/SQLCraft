@@ -7,7 +7,12 @@ export const RegisterBodySchema = z.object({
     .min(3)
     .max(50)
     .regex(/^[a-zA-Z0-9_-]+$/, 'Only alphanumeric, _ and - allowed'),
-  password: z.string().min(8).max(100),
+  password: z
+    .string()
+    .min(8)
+    .max(100)
+    .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
+    .regex(/[0-9]/, 'Must contain at least one number'),
   displayName: z.string().max(100).optional(),
 });
 

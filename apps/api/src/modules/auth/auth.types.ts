@@ -35,8 +35,14 @@ export interface AuthResult {
   tokens: AuthTokens;
 }
 
+/** Returned by registration — no tokens issued until admin approves. */
+export interface RegisterResult {
+  user: UserPublic & { roles: string[] };
+}
+
 export interface TokenUser {
   id: string;
   email: string;
   username: string;
+  jwtVersion: number;
 }

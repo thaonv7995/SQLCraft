@@ -203,7 +203,7 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
           properties: {
             page: { type: 'integer', minimum: 1, default: 1 },
             limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
-            status: { type: 'string', enum: ['active', 'disabled', 'invited'] },
+            status: { type: 'string', enum: ['active', 'disabled', 'invited', 'pending'] },
             search: { type: 'string' },
             role: { type: 'string', enum: ['user', 'admin'] },
           },

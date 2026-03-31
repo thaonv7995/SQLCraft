@@ -1,12 +1,14 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { UnauthorizedError, ForbiddenError } from '../lib/errors';
+import { usersRepository } from '../db/repositories/users.repository';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   username: string;
   roles: string[];
+  jwtVersion?: number;
   iat?: number;
   exp?: number;
 }
@@ -29,8 +31,19 @@ async function authPlugin(fastify: FastifyInstance) {
       try {
         await request.jwtVerify();
         const payload = request.user as unknown as JwtPayload;
+
+        // Verify the JWT version to support instant access-token revocation.
+        // jwtVersion is included in every token since the migration; tokens
+        // issued before the migration have jwtVersion === undefined and are
+        // treated as version 0 (matches the column default).
+        const currentVersion = await usersRepository.getJwtVersion(payload.sub);
+        if ((payload.jwtVersion ?? 0) !== currentVersion) {
+          throw new UnauthorizedError('Session has been invalidated. Please sign in again.');
+        }
+
         request.user = payload;
       } catch (err: unknown) {
+        if (err instanceof UnauthorizedError) throw err;
         const error = err as Error;
         if (error.message?.includes('expired')) {
           throw new UnauthorizedError('Token has expired');
@@ -50,7 +63,13 @@ async function authPlugin(fastify: FastifyInstance) {
       }
       try {
         await request.jwtVerify();
-        request.user = request.user as unknown as JwtPayload;
+        const payload = request.user as unknown as JwtPayload;
+        const currentVersion = await usersRepository.getJwtVersion(payload.sub);
+        if ((payload.jwtVersion ?? 0) !== currentVersion) {
+          // Invalid session — treat as unauthenticated rather than throwing
+          return;
+        }
+        request.user = payload;
       } catch {
         // silently ignore - optional auth
       }

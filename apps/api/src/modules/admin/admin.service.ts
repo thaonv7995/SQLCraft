@@ -206,6 +206,16 @@ export async function updateUserStatus(
 ): Promise<UpdateUserStatusResult> {
   const updated = await usersRepository.updateStatus(id, body.status);
   if (!updated) throw new NotFoundError('User not found');
+
+  // When an account is disabled, immediately invalidate all active sessions
+  // so outstanding access tokens are rejected on the next request.
+  if (body.status === 'disabled') {
+    await Promise.all([
+      usersRepository.revokeRefreshTokensByUserId(id),
+      usersRepository.incrementJwtVersion(id),
+    ]);
+  }
+
   return updated;
 }
 

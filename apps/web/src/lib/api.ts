@@ -1672,15 +1672,12 @@ export const authApi = {
 
   register: (payload: RegisterPayload) =>
     api
-      .post<{ user: UserPayload; tokens: AuthTokens }>(
+      .post<{ user: UserPayload }>(
         '/auth/register',
         payload,
         { skipAuthRedirect: true },
       )
-      .then((r) => ({
-        ...r.data,
-        user: normalizeUser(r.data.user),
-      }) satisfies AuthResult),
+      .then((r) => ({ user: normalizeUser(r.data.user) })),
 
   logout: () => api.post('/auth/logout').then((r) => r.data),
 

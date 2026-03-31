@@ -2,14 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import toast from 'react-hot-toast';
 import { toastError } from '@/lib/toast-error';
 import { authApi } from '@/lib/api';
-import { useAuthStore } from '@/stores/auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ClientPageProps } from '@/lib/page-props';
@@ -38,9 +35,8 @@ const registerSchema = z
 type RegisterFormData = z.infer<typeof registerSchema>;
 
 export default function RegisterPage(_props: ClientPageProps) {
-  const router = useRouter();
-  const setAuth = useAuthStore((s) => s.setAuth);
   const [showPassword, setShowPassword] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
 
   const {
     register,
@@ -57,20 +53,40 @@ export default function RegisterPage(_props: ClientPageProps) {
 
   const onSubmit = async (data: RegisterFormData): Promise<void> => {
     try {
-      const { user, tokens } = await authApi.register({
+      await authApi.register({
         username: data.username,
         email: data.email,
         password: data.password,
         displayName: data.displayName,
       });
-      const hydratedUser = await authApi.me(tokens.accessToken).catch(() => user);
-      setAuth(hydratedUser, tokens);
-      toast.success('Account created! Welcome to SQLCraft.');
-      router.push('/dashboard');
+      setPendingApproval(true);
     } catch (err) {
       toastError('Registration failed', err);
     }
   };
+
+  if (pendingApproval) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+        <div className="w-full max-w-sm text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-tertiary/10 mx-auto mb-5">
+            <span className="material-symbols-outlined text-2xl text-tertiary">pending_actions</span>
+          </div>
+          <h1 className="text-xl font-semibold text-on-surface">Account created</h1>
+          <p className="mt-3 text-sm leading-6 text-on-surface-variant">
+            Your account is pending admin approval. You'll be able to sign in once an administrator
+            activates it.
+          </p>
+          <Link
+            href="/login"
+            className="mt-6 inline-block text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+          >
+            Back to sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-surface flex items-center justify-center p-4">

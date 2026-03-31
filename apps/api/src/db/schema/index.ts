@@ -15,7 +15,7 @@ import {
 import { sql } from 'drizzle-orm';
 
 // Enums
-export const userStatusEnum = pgEnum('user_status', ['active', 'disabled', 'invited']);
+export const userStatusEnum = pgEnum('user_status', ['active', 'disabled', 'invited', 'pending']);
 export const contentStatusEnum = pgEnum('content_status', ['draft', 'published', 'archived']);
 export const difficultyEnum = pgEnum('difficulty', ['beginner', 'intermediate', 'advanced']);
 export const sessionStatusEnum = pgEnum('session_status', [
@@ -78,6 +78,7 @@ export const users = pgTable(
     provider: varchar('provider', { length: 50 }).default('email'),
     providerId: varchar('provider_id', { length: 255 }),
     lastLoginAt: timestamp('last_login_at'),
+    jwtVersion: integer('jwt_version').notNull().default(0),
     createdAt: timestamp('created_at').notNull().default(sql`now()`),
     updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
   },

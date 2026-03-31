@@ -62,6 +62,34 @@ export class UsersRepository {
     return row;
   }
 
+  /**
+   * Atomically create a user and assign a role in a single transaction.
+   * Callers must catch DB error code '23505' and convert to ConflictError.
+   */
+  async createUserWithRoleInTransaction(data: InsertUser, roleId: string): Promise<UserRow> {
+    return this.db.transaction(async (tx) => {
+      const [user] = await tx.insert(schema.users).values(data).returning();
+      await tx.insert(schema.userRoles).values({ userId: user.id, roleId });
+      return user;
+    });
+  }
+
+  async getJwtVersion(userId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ jwtVersion: schema.users.jwtVersion })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    return row?.jwtVersion ?? 0;
+  }
+
+  async incrementJwtVersion(userId: string): Promise<void> {
+    await this.db
+      .update(schema.users)
+      .set({ jwtVersion: sql`${schema.users.jwtVersion} + 1`, updatedAt: new Date() })
+      .where(eq(schema.users.id, userId));
+  }
+
   async update(id: string, data: Partial<InsertUser>): Promise<UserRow | null> {
     const [row] = await this.db
       .update(schema.users)
@@ -138,7 +166,7 @@ export class UsersRepository {
     page: number,
     limit: number,
     options?: {
-      status?: 'active' | 'disabled' | 'invited';
+      status?: 'active' | 'disabled' | 'invited' | 'pending';
       search?: string;
       role?: string;
     },
@@ -343,7 +371,7 @@ export class UsersRepository {
     await this.assignRole(userId, role.id);
   }
 
-  async updateStatus(id: string, status: 'active' | 'disabled' | 'invited'): Promise<Pick<UserRow, 'id' | 'email' | 'username' | 'status' | 'updatedAt'> | null> {
+  async updateStatus(id: string, status: 'active' | 'disabled' | 'invited' | 'pending'): Promise<Pick<UserRow, 'id' | 'email' | 'username' | 'status' | 'updatedAt'> | null> {
     const [row] = await this.db
       .update(schema.users)
       .set({ status, updatedAt: new Date() })

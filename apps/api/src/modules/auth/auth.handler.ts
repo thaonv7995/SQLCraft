@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { success, created, MESSAGES } from '../../lib/response';
+import { clientIpForAudit, clientUserAgentForAudit } from '../../lib/request-audit';
 import type { JwtPayload } from '../../plugins/auth';
 import type { RegisterBody, LoginBody, RefreshBody, LogoutBody } from './auth.schema';
 import { registerUser, loginUser, logoutUser, refreshTokens, getMe } from './auth.service';
@@ -8,7 +9,10 @@ export async function registerHandler(
   request: FastifyRequest<{ Body: RegisterBody }>,
   reply: FastifyReply,
 ): Promise<void> {
-  const result = await registerUser(request.server, request.body);
+  const result = await registerUser(request.server, request.body, {
+    ipAddress: clientIpForAudit(request),
+    userAgent: clientUserAgentForAudit(request),
+  });
   reply.status(201).send(created(result, MESSAGES.REGISTER_SUCCESS));
 }
 

@@ -12,10 +12,22 @@ import {
 import { DEFAULT_USER_ROLE_NAME } from '../../lib/roles';
 import { config } from '../../lib/config';
 import { resolvePublicAvatarUrl } from '../../lib/storage';
-import type { AuthTokens, AuthResult, TokenUser, UserProfile } from './auth.types';
+import { recordAuditLog } from '../admin/admin.service';
+import type { AuthTokens, AuthResult, RegisterResult, TokenUser, UserProfile } from './auth.types';
 
 const ACCESS_TOKEN_TTL = config.JWT_EXPIRES_IN;
 const REFRESH_TOKEN_TTL_DAYS = config.REFRESH_TOKEN_EXPIRES_DAYS;
+
+/** Convert a raw DB unique-violation error into the constraint name, or null. */
+function uniqueConstraint(err: unknown): string | null {
+  const e = (
+    typeof err === 'object' && err !== null && 'cause' in err
+      ? (err as { cause: unknown }).cause
+      : err
+  ) as Record<string, unknown>;
+  if (e?.code !== '23505') return null;
+  return (e?.constraint as string) ?? null;
+}
 
 export async function generateTokens(
   fastify: FastifyInstance,
@@ -28,6 +40,7 @@ export async function generateTokens(
       email: user.email,
       username: user.username,
       roles,
+      jwtVersion: user.jwtVersion,
     },
     { expiresIn: ACCESS_TOKEN_TTL },
   );
@@ -48,26 +61,15 @@ export async function generateTokens(
 }
 
 export async function registerUser(
-  fastify: FastifyInstance,
+  _fastify: FastifyInstance,
   data: {
     email: string;
     username: string;
     password: string;
     displayName?: string;
   },
-): Promise<AuthResult> {
-  const [emailTaken, usernameTaken] = await Promise.all([
-    usersRepository.emailExists(data.email),
-    usersRepository.usernameExists(data.username),
-  ]);
-
-  if (emailTaken) {
-    throw new ConflictError('Email already registered');
-  }
-  if (usernameTaken) {
-    throw new ConflictError('Username already taken');
-  }
-
+  context?: { ipAddress?: string | null; userAgent?: string | null },
+): Promise<RegisterResult> {
   const defaultRole = await usersRepository.findRoleByName(DEFAULT_USER_ROLE_NAME);
   if (!defaultRole) {
     throw new ValidationError(`Role '${DEFAULT_USER_ROLE_NAME}' is not configured`);
@@ -75,18 +77,38 @@ export async function registerUser(
 
   const passwordHash = await bcrypt.hash(data.password, 12);
 
-  const newUser = await usersRepository.create({
-    email: data.email,
-    username: data.username,
-    passwordHash,
-    displayName: data.displayName ?? data.username,
-    provider: 'email',
-  });
-
-  await usersRepository.setUserRole(newUser.id, DEFAULT_USER_ROLE_NAME);
+  let newUser;
+  try {
+    newUser = await usersRepository.createUserWithRoleInTransaction(
+      {
+        email: data.email,
+        username: data.username,
+        passwordHash,
+        displayName: data.displayName ?? data.username,
+        provider: 'email',
+        status: 'pending', // awaiting admin approval
+      },
+      defaultRole.id,
+    );
+  } catch (err) {
+    const constraint = uniqueConstraint(err);
+    if (constraint === 'users_email_idx') throw new ConflictError('Email already registered');
+    if (constraint === 'users_username_idx') throw new ConflictError('Username already taken');
+    throw err;
+  }
 
   const roles = await usersRepository.getRoleNames(newUser.id);
-  const tokens = await generateTokens(fastify, newUser, roles);
+
+  // Fire-and-forget — never blocks the response
+  void recordAuditLog({
+    userId: newUser.id,
+    action: 'auth.register',
+    resourceType: 'user',
+    resourceId: newUser.id,
+    payload: { email: newUser.email, username: newUser.username },
+    ipAddress: context?.ipAddress ?? null,
+    userAgent: context?.userAgent ?? null,
+  });
 
   return {
     user: {
@@ -99,7 +121,6 @@ export async function registerUser(
       createdAt: newUser.createdAt,
       roles,
     },
-    tokens,
   };
 }
 
@@ -118,6 +139,12 @@ export async function loginUser(
     throw new InvalidCredentialsError();
   }
 
+  if (user.status === 'pending') {
+    throw new UnauthorizedError('Account is pending admin approval');
+  }
+  if (user.status === 'disabled') {
+    throw new InvalidCredentialsError('Account has been disabled');
+  }
   if (user.status !== 'active') {
     throw new InvalidCredentialsError('Account is not active');
   }
@@ -144,9 +171,18 @@ export async function loginUser(
   };
 }
 
-export async function logoutUser(refreshToken: string): Promise<void> {
-  const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-  await usersRepository.revokeRefreshTokenByHash(tokenHash);
+export async function logoutUser(rawRefreshToken: string): Promise<void> {
+  const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+  const tokenRow = await usersRepository.findRefreshTokenByHash(tokenHash);
+
+  if (!tokenRow || tokenRow.revokedAt) return; // silently ignore invalid/already-revoked tokens
+
+  // Revoke every refresh token for this user and bump the JWT version so
+  // any outstanding access tokens are rejected on next request.
+  await Promise.all([
+    usersRepository.revokeRefreshTokensByUserId(tokenRow.userId),
+    usersRepository.incrementJwtVersion(tokenRow.userId),
+  ]);
 }
 
 export async function refreshTokens(
@@ -162,6 +198,9 @@ export async function refreshTokens(
   }
 
   if (tokenRow.revokedAt) {
+    // Reuse of a revoked token is a potential theft signal — invalidate the
+    // entire token family (all active refresh tokens for this user).
+    await usersRepository.revokeRefreshTokensByUserId(tokenRow.userId);
     throw new TokenInvalidError('Refresh token has been revoked');
   }
 
@@ -175,6 +214,7 @@ export async function refreshTokens(
     throw new UnauthorizedError('User not found or inactive');
   }
 
+  // Rotate: revoke old token atomically before issuing the new one
   await usersRepository.revokeRefreshTokenById(tokenRow.id);
 
   const roles = await usersRepository.getRoleNames(user.id);

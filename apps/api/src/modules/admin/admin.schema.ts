@@ -81,7 +81,7 @@ export const CreateChallengeSchema = z
 export const ListUsersQuerySchema = z.object({
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
-  status: z.enum(['active', 'disabled', 'invited']).optional(),
+  status: z.enum(['active', 'disabled', 'invited', 'pending']).optional(),
   search: z.string().optional(),
   role: z.enum(['user', 'admin']).optional(),
 });
