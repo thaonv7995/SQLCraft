@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { User } from '@/lib/api';
+import { notificationsApi, type InAppNotificationItem, type User } from '@/lib/api';
 import { useMounted } from '@/hooks/use-mounted';
 import { useAuthStore } from '@/stores/auth';
 import { generateInitials } from '@/lib/utils';
@@ -124,6 +124,146 @@ function UserAvatar({
   );
 }
 
+function NotificationsBell() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<InAppNotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const refreshUnread = useCallback(async () => {
+    try {
+      const { unreadCount: n } = await notificationsApi.unreadCount();
+      setUnreadCount(n);
+    } catch {
+      /* ignore — badge is best-effort */
+    }
+  }, []);
+
+  const loadList = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await notificationsApi.list({ page: 1, limit: 15, unreadOnly: false });
+      setItems(res.items);
+      setUnreadCount(res.unreadCount);
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshUnread();
+  }, [refreshUnread]);
+
+  useEffect(() => {
+    if (open) void loadList();
+  }, [open, loadList]);
+
+  const onMarkRead = async (id: string) => {
+    try {
+      await notificationsApi.markRead(id);
+      await loadList();
+      await refreshUnread();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onMarkAllRead = async () => {
+    try {
+      await notificationsApi.markAllRead();
+      await loadList();
+      await refreshUnread();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors relative"
+        aria-label="Notifications"
+        aria-expanded={open}
+      >
+        <span className="material-symbols-outlined text-lg">notifications</span>
+        {unreadCount > 0 ? (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-error text-[10px] font-bold text-on-error flex items-center justify-center leading-none">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        ) : null}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
+          <div
+            className="absolute right-0 top-full mt-1 z-20 w-[min(100vw-1.5rem,22rem)] max-h-[min(24rem,70vh)] flex flex-col rounded-xl border border-outline-variant/40 bg-surface-container-high shadow-xl shadow-black/40 overflow-hidden"
+            role="dialog"
+            aria-label="Notification list"
+          >
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/30 bg-surface-container-highest/40">
+              <span className="text-sm font-semibold text-on-surface">Notifications</span>
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void onMarkAllRead()}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Mark all read
+                </button>
+              )}
+            </div>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              {loading ? (
+                <p className="px-3 py-6 text-center text-sm text-on-surface-variant">Loading…</p>
+              ) : items.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-on-surface-variant">No notifications yet</p>
+              ) : (
+                <ul className="py-1">
+                  {items.map((n) => (
+                    <li key={n.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!n.read) void onMarkRead(n.id);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-surface-container-highest/80 ${
+                          n.read ? 'opacity-90' : 'bg-primary/8'
+                        }`}
+                      >
+                        <p className="font-medium text-on-surface line-clamp-2">{n.title}</p>
+                        {n.body && (
+                          <p className="mt-0.5 text-xs text-on-surface-variant line-clamp-2">{n.body}</p>
+                        )}
+                        <p className="mt-1 text-[10px] text-outline">
+                          {new Date(n.createdAt).toLocaleString()}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="border-t border-outline-variant/30 px-3 py-2 bg-surface-container-highest/30">
+              <Link
+                href="/settings"
+                className="block text-center text-xs font-medium text-primary hover:underline"
+                onClick={() => setOpen(false)}
+              >
+                View all in Settings
+              </Link>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -167,13 +307,7 @@ export function Navbar() {
             ) : null}
 
             {/* Notifications */}
-            <button
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors relative"
-              aria-label="Notifications"
-            >
-              <span className="material-symbols-outlined text-lg">notifications</span>
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-on-surface-variant" />
-            </button>
+            <NotificationsBell />
 
             {user && (
               <UserAvatar
