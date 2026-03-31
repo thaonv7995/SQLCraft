@@ -5,6 +5,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { notificationsApi, type InAppNotificationItem, type User } from '@/lib/api';
+import {
+  NotificationDetailModal,
+  truncatePreview,
+} from '@/components/notifications/notification-detail-modal';
 import { useMounted } from '@/hooks/use-mounted';
 import { useAuthStore } from '@/stores/auth';
 import { generateInitials } from '@/lib/utils';
@@ -126,6 +130,7 @@ function UserAvatar({
 
 function NotificationsBell() {
   const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<InAppNotificationItem | null>(null);
   const [items, setItems] = useState<InAppNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -217,12 +222,17 @@ function NotificationsBell() {
                     <li key={n.id}>
                       <button
                         type="button"
+                        onClick={() => setDetail(n)}
                         className="w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-surface-container-highest/80 opacity-90"
                       >
-                        <p className="font-medium text-on-surface line-clamp-2">{n.title}</p>
-                        {n.body && (
-                          <p className="mt-0.5 text-xs text-on-surface-variant line-clamp-2">{n.body}</p>
-                        )}
+                        <p className="font-medium text-on-surface line-clamp-1" title={n.title}>
+                          {truncatePreview(n.title, 72)}
+                        </p>
+                        {n.body ? (
+                          <p className="mt-0.5 text-xs text-on-surface-variant line-clamp-2" title={n.body}>
+                            {truncatePreview(n.body, 140)}
+                          </p>
+                        ) : null}
                         <p className="mt-1 text-[10px] text-outline">
                           {new Date(n.createdAt).toLocaleString()}
                         </p>
@@ -244,6 +254,8 @@ function NotificationsBell() {
           </div>
         </>
       )}
+
+      <NotificationDetailModal notification={detail} onClose={() => setDetail(null)} />
     </div>
   );
 }

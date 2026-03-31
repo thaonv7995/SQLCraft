@@ -129,10 +129,12 @@ async function notifyOwnerGoldenSnapshotOutcome(
     ownerUserId: string | null;
     name: string;
     schemaTemplateId: string;
+    catalogAnchorId: string | null;
   }>(
     `SELECT st.created_by AS "ownerUserId",
             dt.name,
-            dt.schema_template_id AS "schemaTemplateId"
+            dt.schema_template_id AS "schemaTemplateId",
+            st.catalog_anchor_id AS "catalogAnchorId"
        FROM dataset_templates dt
        INNER JOIN schema_templates st ON st.id = dt.schema_template_id
       WHERE dt.id = $1`,
@@ -145,6 +147,9 @@ async function notifyOwnerGoldenSnapshotOutcome(
     datasetTemplateId,
     schemaTemplateId: row.schemaTemplateId,
   };
+  if (row.catalogAnchorId) {
+    metadata.databaseId = row.catalogAnchorId;
+  }
 
   if (outcome === 'ready') {
     await mainDb.query(

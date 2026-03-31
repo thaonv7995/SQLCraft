@@ -8,6 +8,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { toastError } from '@/lib/toast-error';
+import {
+  NotificationDetailModal,
+  truncatePreview,
+} from '@/components/notifications/notification-detail-modal';
 import { notificationsApi, usersApi, type InAppNotificationItem } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -327,6 +331,7 @@ function PasswordSection() {
 // ─── Notifications Section ────────────────────────────────────────────────────
 
 function NotificationsSection() {
+  const [detail, setDetail] = useState<InAppNotificationItem | null>(null);
   const [items, setItems] = useState<InAppNotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -411,15 +416,34 @@ function NotificationsSection() {
               }`}
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium text-on-surface">{n.title}</p>
-                  {n.body && <p className="mt-0.5 whitespace-pre-wrap text-on-surface-variant">{n.body}</p>}
+                <button
+                  type="button"
+                  onClick={() => setDetail(n)}
+                  className="min-w-0 flex-1 text-left rounded-lg -m-1 p-1 hover:bg-surface-container-high/80 transition-colors"
+                >
+                  <p className="font-medium text-on-surface" title={n.title}>
+                    {truncatePreview(n.title, 100)}
+                  </p>
+                  {n.body ? (
+                    <p className="mt-0.5 text-on-surface-variant line-clamp-2" title={n.body}>
+                      {truncatePreview(n.body, 220)}
+                    </p>
+                  ) : null}
                   <p className="mt-1 text-xs text-outline">
                     {new Date(n.createdAt).toLocaleString()} · <span className="font-mono">{n.type}</span>
                   </p>
-                </div>
+                </button>
                 {!n.read && (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => void onMarkRead(n.id)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void onMarkRead(n.id);
+                    }}
+                  >
                     Read
                   </Button>
                 )}
@@ -428,6 +452,8 @@ function NotificationsSection() {
           ))}
         </ul>
       )}
+
+      <NotificationDetailModal notification={detail} onClose={() => setDetail(null)} />
     </section>
   );
 }

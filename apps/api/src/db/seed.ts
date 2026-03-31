@@ -384,7 +384,12 @@ async function seed() {
       type: NotificationType.GOLDEN_READY,
       title: 'Golden snapshot ready',
       body: 'Sandbox restores for “Ecommerce Tiny” can use the golden snapshot.',
-      metadata: { seed: true, datasetTemplateId: randomUUID(), schemaTemplateId: ecommerceSchema.id },
+      metadata: {
+        seed: true,
+        databaseId: demoDatasetId,
+        datasetTemplateId: randomUUID(),
+        schemaTemplateId: ecommerceSchema.id,
+      },
       readAt: null,
     },
     {
@@ -392,7 +397,12 @@ async function seed() {
       type: NotificationType.GOLDEN_FAILED,
       title: 'Golden snapshot failed',
       body: 'Timeout while restoring artifact (demo seed).',
-      metadata: { seed: true, error: 'demo seed', datasetTemplateId: randomUUID() },
+      metadata: {
+        seed: true,
+        databaseId: demoDatasetId,
+        error: 'demo seed',
+        datasetTemplateId: randomUUID(),
+      },
       readAt: null,
     },
   ]);
