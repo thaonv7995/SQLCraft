@@ -336,13 +336,17 @@ function NotificationsSection() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
-  const load = useCallback(async () => {
+  const loadFirstPage = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await notificationsApi.list({ page: 1, limit: 50, unreadOnly });
+      const res = await notificationsApi.list({ page: 1, limit: 20, unreadOnly });
       setItems(res.items);
       setUnreadCount(res.unreadCount);
+      setPage(1);
+      setTotalPages(res.totalPages);
     } catch (err) {
       toastError('Could not load notifications', err);
     } finally {
@@ -351,13 +355,14 @@ function NotificationsSection() {
   }, [unreadOnly]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadFirstPage();
+  }, [loadFirstPage]);
 
   const onMarkRead = async (id: string) => {
     try {
       await notificationsApi.markRead(id);
-      await load();
+      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      setUnreadCount((n) => Math.max(0, n - 1));
     } catch (err) {
       toastError('Could not mark as read', err);
     }
@@ -367,9 +372,27 @@ function NotificationsSection() {
     try {
       const { marked } = await notificationsApi.markAllRead();
       if (marked > 0) toast.success(`Marked ${marked} as read`);
-      await load();
+      setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+      setUnreadCount(0);
     } catch (err) {
       toastError('Could not mark all as read', err);
+    }
+  };
+
+  const onLoadMore = async () => {
+    const nextPage = page + 1;
+    if (loading || nextPage > totalPages) return;
+    setLoading(true);
+    try {
+      const res = await notificationsApi.list({ page: nextPage, limit: 20, unreadOnly });
+      setItems((prev) => [...prev, ...res.items]);
+      setUnreadCount(res.unreadCount);
+      setPage(nextPage);
+      setTotalPages(res.totalPages);
+    } catch (err) {
+      toastError('Could not load more notifications', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -407,21 +430,20 @@ function NotificationsSection() {
           {unreadOnly ? 'No unread notifications.' : 'No notifications yet.'}
         </p>
       ) : (
-        <ul className="mt-4 space-y-3">
+        <ul className="mt-4 divide-y divide-outline-variant/15 rounded-xl border border-outline-variant/30 bg-surface-container/30">
           {items.map((n) => (
-            <li
-              key={n.id}
-              className={`rounded-xl border px-3 py-2.5 text-sm ${
-                n.read ? 'border-outline-variant/60 bg-surface-container/40' : 'border-primary/30 bg-primary/5'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
+            <li key={n.id} className="text-sm">
+              <div className="flex items-start gap-2 px-3 py-2.5">
+                <span
+                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read ? 'bg-outline/40' : 'bg-primary'}`}
+                  aria-hidden
+                />
                 <button
                   type="button"
                   onClick={() => setDetail(n)}
-                  className="min-w-0 flex-1 text-left rounded-lg -m-1 p-1 hover:bg-surface-container-high/80 transition-colors"
+                  className="min-w-0 flex-1 text-left rounded-lg -m-1 p-1 hover:bg-surface-container-high/70 transition-colors"
                 >
-                  <p className="font-medium text-on-surface" title={n.title}>
+                  <p className={`font-medium ${n.read ? 'text-on-surface-variant' : 'text-on-surface'}`} title={n.title}>
                     {truncatePreview(n.title, 100)}
                   </p>
                   {n.body ? (
@@ -452,6 +474,14 @@ function NotificationsSection() {
           ))}
         </ul>
       )}
+
+      {items.length > 0 && page < totalPages ? (
+        <div className="mt-3 flex justify-center">
+          <Button type="button" variant="secondary" size="sm" loading={loading} onClick={() => void onLoadMore()}>
+            Load more
+          </Button>
+        </div>
+      ) : null}
 
       <NotificationDetailModal notification={detail} onClose={() => setDetail(null)} />
     </section>
