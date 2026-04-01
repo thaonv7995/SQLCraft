@@ -545,7 +545,9 @@ bootstrap_stack() {
 
   headline "Running migrations + bootstrap"
   run_compose run --rm --entrypoint sh api -lc \
-    "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:bootstrap"
+    "pnpm --filter @sqlcraft/api exec drizzle-kit migrate && pnpm --filter @sqlcraft/api db:bootstrap" \
+    2>&1 | sed -E \
+      '/^(drizzle-(kit|orm):|No config path|Reading config file|Using .pg. driver|> @sqlcraft|> tsx |Bootstrapping database\.\.\.|Creating (roles|admin user)\.\.\.|  Created (admin|learner|contributor) role$|  Created admin user:|First admin credentials:|  (email|username|password):)/d; /^[[:space:]]*$/d'
 
   headline "Starting API + Web + Worker + Worker-query"
   run_compose up -d api web worker worker-query
