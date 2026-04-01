@@ -62,11 +62,37 @@ function isDockerExecBinaryMissing(error: unknown): boolean {
 }
 
 const DOCKER_OUTPUT_CAP_BYTES = 64 * 1024;
+const SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS = Math.max(
+  5_000,
+  Number(process.env.SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS) || 60_000,
+);
 
 function appendCapped(existing: string, chunk: string, cap: number): string {
   if (existing.length >= cap) return existing;
   const remaining = cap - existing.length;
   return existing + (chunk.length <= remaining ? chunk : chunk.slice(0, remaining));
+}
+
+async function waitForChildCloseWithin(
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number,
+  label: string,
+): Promise<number> {
+  const closePromise = once(child, 'close').then(([code]) => Number(code));
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      closePromise,
+      new Promise<number>((_, reject) => {
+        timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`${label} did not exit within ${Math.round(timeoutMs / 1000)}s after stdin completed`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /** When false, omit sqlcmd `-b` so a single batch error does not abort the whole restore (sandbox/teaching). */
@@ -866,8 +892,6 @@ export async function runSqlcmdInSandboxContainerStreaming(params: {
     stdout = appendCapped(stdout, chunk, DOCKER_OUTPUT_CAP_BYTES);
   });
 
-  const closePromise = once(child, 'close').then(([code]) => Number(code));
-
   child.stdin.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code !== 'EPIPE') {
       child.kill('SIGKILL');
@@ -883,18 +907,30 @@ export async function runSqlcmdInSandboxContainerStreaming(params: {
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e?.code === 'EPIPE') {
-      const code = await closePromise;
+      const code = await waitForChildCloseWithin(
+        child,
+        SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+        'sqlcmd restore process',
+      ).catch(() => null);
       const base =
         'write EPIPE (sqlcmd closed stdin — usually a T-SQL error or batch abort; see stderr below). If stderr shows Msg and you need a best-effort restore, set SANDBOX_SQLCMD_BATCH_ABORT_ON_ERROR=0 to omit sqlcmd -b';
       throw new Error(formatSqlcmdStreamFailure(stderr, stdout, code, base));
     }
     child.kill('SIGKILL');
-    await closePromise.catch(() => {});
+    await waitForChildCloseWithin(
+      child,
+      SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+      'sqlcmd restore process',
+    ).catch(() => {});
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(formatSqlcmdStreamFailure(stderr, stdout, null, base));
   }
 
-  const code = await closePromise;
+  const code = await waitForChildCloseWithin(
+    child,
+    SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+    'sqlcmd restore process',
+  );
   if (code !== 0) {
     throw new Error(
       formatSqlcmdStreamFailure(
@@ -941,8 +977,6 @@ export async function runMysqlInSandboxContainerStreaming(params: {
     stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
   });
 
-  const closePromise = once(child, 'close').then(([code]) => Number(code));
-
   const pipelinePromise = gzip
     ? pipeline(source, createGunzip(), child.stdin)
     : pipeline(source, child.stdin);
@@ -951,7 +985,11 @@ export async function runMysqlInSandboxContainerStreaming(params: {
     await pipelinePromise;
   } catch (err) {
     child.kill('SIGKILL');
-    await closePromise.catch(() => {});
+    await waitForChildCloseWithin(
+      child,
+      SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+      'mysql restore process',
+    ).catch(() => {});
     const detail = stderr.trim().slice(0, 2000);
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -961,7 +999,11 @@ export async function runMysqlInSandboxContainerStreaming(params: {
     );
   }
 
-  const code = await closePromise;
+  const code = await waitForChildCloseWithin(
+    child,
+    SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+    'mysql restore process',
+  );
   if (code !== 0) {
     const detail = stderr.trim().slice(0, 2000);
     throw new Error(`mysql restore failed with code ${code}: ${detail || '(no stderr)'}`);
@@ -1158,8 +1200,6 @@ export async function runPsqlInSandboxContainerStreaming(params: {
     stderr = appendCapped(stderr, chunk, DOCKER_OUTPUT_CAP_BYTES);
   });
 
-  const closePromise = once(child, 'close').then(([code]) => Number(code));
-
   const pipelinePromise = gzip
     ? pipeline(source, createGunzip(), child.stdin)
     : pipeline(source, child.stdin);
@@ -1168,7 +1208,11 @@ export async function runPsqlInSandboxContainerStreaming(params: {
     await pipelinePromise;
   } catch (err) {
     child.kill('SIGKILL');
-    await closePromise.catch(() => {});
+    await waitForChildCloseWithin(
+      child,
+      SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+      'psql restore process',
+    ).catch(() => {});
     const detail = stderr.trim().slice(0, 2000);
     const base = err instanceof Error ? err.message : String(err);
     throw new Error(
@@ -1178,7 +1222,11 @@ export async function runPsqlInSandboxContainerStreaming(params: {
     );
   }
 
-  const code = await closePromise;
+  const code = await waitForChildCloseWithin(
+    child,
+    SANDBOX_RESTORE_PROCESS_CLOSE_TIMEOUT_MS,
+    'psql restore process',
+  );
   if (code !== 0) {
     const detail = stderr.trim().slice(0, 2000);
     throw new Error(`psql restore failed with code ${code}: ${detail || '(no stderr)'}`);
