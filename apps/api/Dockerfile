@@ -8,6 +8,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY packages/types/package.json ./packages/types/
 COPY packages/config/package.json ./packages/config/
 COPY packages/sandbox-schema-diff/package.json ./packages/sandbox-schema-diff/
+COPY packages/sql-dump-parser/package.json ./packages/sql-dump-parser/
 COPY apps/api/package.json ./apps/api/
 RUN pnpm install --frozen-lockfile
 
@@ -20,6 +21,7 @@ COPY apps/api ./apps/api
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @sqlcraft/types build
 RUN pnpm --filter @sqlcraft/sandbox-schema-diff build
+RUN pnpm --filter @sqlcraft/sql-dump-parser build
 RUN pnpm --filter @sqlcraft/api build
 
 FROM base AS runner
