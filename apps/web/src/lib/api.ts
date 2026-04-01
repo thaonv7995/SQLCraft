@@ -1515,6 +1515,12 @@ const api: AxiosInstance = axios.create({
 
 let refreshInFlight: Promise<AuthTokens> | null = null;
 
+// Injected by auth store to avoid circular import: api.ts ← auth.ts ← api.ts
+let onTokensRefreshed: ((tokens: AuthTokens) => void) | null = null;
+export function registerTokensRefreshedCallback(cb: (tokens: AuthTokens) => void) {
+  onTokensRefreshed = cb;
+}
+
 function readStoredTokens(): AuthTokens | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -1562,6 +1568,7 @@ async function refreshAccessToken(): Promise<AuthTokens> {
         { skipAuthRedirect: true, skipAuthRefresh: true },
       );
       writeStoredTokens(r.data);
+      onTokensRefreshed?.(r.data);
       return r.data;
     } catch (e) {
       localStorage.removeItem('sqlcraft-auth');

@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AuthTokens, User } from '@/lib/api';
-import { authApi } from '@/lib/api';
+import { authApi, registerTokensRefreshedCallback } from '@/lib/api';
 
 interface AuthState {
   user: User | null;
   tokens: AuthTokens | null;
+  _hasHydrated: boolean;
   setAuth: (user: User, tokens: AuthTokens) => void;
   clearAuth: () => void;
   isAuthenticated: () => boolean;
@@ -19,6 +20,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       tokens: null,
+      _hasHydrated: false,
 
       setAuth: (user, tokens) => set({ user, tokens }),
 
@@ -53,6 +55,16 @@ export const useAuthStore = create<AuthState>()(
           ? { ...state.user, avatarUrl: null }
           : null,
       }),
+      onRehydrateStorage: () => () => {
+        useAuthStore.setState({ _hasHydrated: true });
+      },
     }
   )
 );
+
+registerTokensRefreshedCallback((tokens) => {
+  useAuthStore.setState((state) => ({
+    tokens,
+    user: state.user,
+  }));
+});

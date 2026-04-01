@@ -9,14 +9,16 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const mounted = useMounted();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const hasHydrated = useAuthStore((s) => s._hasHydrated);
+  const authReady = hasHydrated || isAuthenticated();
 
   useEffect(() => {
-    if (mounted && !isAuthenticated()) {
+    if (mounted && authReady && !isAuthenticated()) {
       router.replace('/login');
     }
-  }, [isAuthenticated, mounted, router]);
+  }, [authReady, isAuthenticated, mounted, router]);
 
-  if (!mounted || !isAuthenticated()) return null;
+  if (!mounted || !authReady || !isAuthenticated()) return null;
 
   return <>{children}</>;
 }
@@ -31,9 +33,11 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const mounted = useMounted();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const hasHydrated = useAuthStore((s) => s._hasHydrated);
+  const authReady = hasHydrated || isAuthenticated();
 
   useEffect(() => {
-    if (!mounted) {
+    if (!mounted || !authReady) {
       return;
     }
 
@@ -42,9 +46,9 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     } else if (user && !isAdminUser(user)) {
       router.replace('/dashboard');
     }
-  }, [isAuthenticated, mounted, user, router]);
+  }, [authReady, isAuthenticated, mounted, user, router]);
 
-  if (!mounted || !isAuthenticated() || !isAdminUser(user)) return null;
+  if (!mounted || !authReady || !isAuthenticated() || !isAdminUser(user)) return null;
 
   return <>{children}</>;
 }

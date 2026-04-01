@@ -18,6 +18,29 @@ import type { AuthTokens, AuthResult, RegisterResult, TokenUser, UserProfile } f
 const ACCESS_TOKEN_TTL = config.JWT_EXPIRES_IN;
 const REFRESH_TOKEN_TTL_DAYS = config.REFRESH_TOKEN_EXPIRES_DAYS;
 
+function parseJwtExpiresInToSeconds(value: string): number {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d+)([smhd])$/i);
+  if (!match) {
+    return 15 * 60;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2].toLowerCase();
+  switch (unit) {
+    case 's':
+      return amount;
+    case 'm':
+      return amount * 60;
+    case 'h':
+      return amount * 60 * 60;
+    case 'd':
+      return amount * 60 * 60 * 24;
+    default:
+      return 15 * 60;
+  }
+}
+
 /** Convert a raw DB unique-violation error into the constraint name, or null. */
 function uniqueConstraint(err: unknown): string | null {
   const e = (
@@ -56,7 +79,7 @@ export async function generateTokens(
   return {
     accessToken,
     refreshToken: rawRefreshToken,
-    expiresIn: 15 * 60,
+    expiresIn: parseJwtExpiresInToSeconds(ACCESS_TOKEN_TTL),
   };
 }
 
