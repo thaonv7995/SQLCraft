@@ -14,7 +14,14 @@ const queryServiceMocks = vi.hoisted(() => ({
   getSandboxStatus: vi.fn(),
 }));
 
+const usersRepositoryMocks = vi.hoisted(() => ({
+  getJwtVersion: vi.fn(),
+}));
+
 vi.mock('../queries.service', () => queryServiceMocks);
+vi.mock('../../../db/repositories/users.repository', () => ({
+  usersRepository: usersRepositoryMocks,
+}));
 
 import queriesRouter from '../queries.router';
 
@@ -22,6 +29,7 @@ describe('queries router HTTP contracts', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    usersRepositoryMocks.getJwtVersion.mockResolvedValue(0);
     queryServiceMocks.submitQuery.mockResolvedValue({
       blocked: false,
       data: {

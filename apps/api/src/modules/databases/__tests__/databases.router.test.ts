@@ -12,7 +12,15 @@ const databaseServiceMocks = vi.hoisted(() => ({
   createDatabaseSession: vi.fn(),
 }));
 
+const usersRepositoryMocks = vi.hoisted(() => ({
+  getJwtVersion: vi.fn(),
+}));
+
 vi.mock('../databases.service', () => databaseServiceMocks);
+vi.mock('../../../db/repositories/users.repository', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../db/repositories/users.repository')>();
+  return { ...actual, usersRepository: usersRepositoryMocks };
+});
 
 import databasesRouter from '../databases.router';
 
@@ -20,6 +28,7 @@ describe('databases router HTTP contracts', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    usersRepositoryMocks.getJwtVersion.mockResolvedValue(0);
     databaseServiceMocks.listDatabases.mockResolvedValue({
       items: [],
       total: 0,

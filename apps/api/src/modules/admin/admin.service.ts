@@ -64,9 +64,9 @@ import type {
   SqlDumpScanResult,
 } from './admin.types';
 import {
+  buildAsyncSqlDumpBaseScan,
   createStoredSqlDumpScan,
   loadStoredSqlDumpScan,
-  parseSqlDumpBufferArtifactOnly,
   toSqlDumpScanResult,
 } from './sql-dump-scan';
 import {
@@ -1171,7 +1171,9 @@ export async function scanSqlDumpFromUploadedFile(
     const headLen = Math.min(12 * 1024 * 1024, normalized.byteSize);
     const head = await readLocalHeadBytes(normalized.filePath, normalized.byteSize, headLen);
     const baseScan = {
-      ...parseSqlDumpBufferArtifactOnly(head, normalized.effectiveFileName, scanId),
+      ...buildAsyncSqlDumpBaseScan(head, normalized.effectiveFileName, scanId, {
+        artifactOnly,
+      }),
       artifactObjectName,
       artifactUrl,
     };

@@ -17,7 +17,14 @@ const usersServiceMocks = vi.hoisted(() => ({
   searchUsersForInvite: vi.fn(),
 }));
 
+const usersRepositoryMocks = vi.hoisted(() => ({
+  getJwtVersion: vi.fn(),
+}));
+
 vi.mock('../users.service', () => usersServiceMocks);
+vi.mock('../../../db/repositories/users.repository', () => ({
+  usersRepository: usersRepositoryMocks,
+}));
 
 import usersRouter from '../users.router';
 
@@ -25,6 +32,7 @@ describe('users router HTTP contracts', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    usersRepositoryMocks.getJwtVersion.mockResolvedValue(0);
     usersServiceMocks.getUserProfile.mockResolvedValue({
       id: 'user-123',
       email: 'user@example.com',

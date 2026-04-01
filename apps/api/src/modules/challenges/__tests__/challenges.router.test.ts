@@ -28,7 +28,14 @@ const challengeServiceMocks = vi.hoisted(() => ({
   reviewChallengeVersion: vi.fn(),
 }));
 
+const usersRepositoryMocks = vi.hoisted(() => ({
+  getJwtVersion: vi.fn(),
+}));
+
 vi.mock('../challenges.service', () => challengeServiceMocks);
+vi.mock('../../../db/repositories/users.repository', () => ({
+  usersRepository: usersRepositoryMocks,
+}));
 
 import challengesRouter from '../challenges.router';
 
@@ -36,6 +43,7 @@ describe('challenges router HTTP contracts', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    usersRepositoryMocks.getJwtVersion.mockResolvedValue(0);
     challengeServiceMocks.submitAttempt.mockResolvedValue({
       id: '33333333-3333-4333-8333-333333333333',
       status: 'accepted',

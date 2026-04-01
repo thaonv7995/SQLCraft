@@ -12,6 +12,7 @@
   "dependencies": {
     "@sqlcraft/sandbox-schema-diff": "workspace:*",
     "@sqlcraft/mysql-explain": "workspace:*",
+    "@sqlcraft/sql-dump-parser": "workspace:*",
     "@sqlcraft/types": "workspace:*",
     "bullmq": "^5.7.0",
     "dotenv": "^16.4.5",

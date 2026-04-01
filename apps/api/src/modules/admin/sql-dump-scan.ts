@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { buildDefinitionTables, parseSqlSchemaFromText } from '@sqlcraft/sql-dump-parser';
 import type { DatasetSize, SchemaSqlDialect } from '@sqlcraft/types';
 import { config } from '../../lib/config';
 import { classifyDatasetScaleFromTotalRows } from '../../lib/dataset-scales';
@@ -129,7 +130,6 @@ interface ParsedTable {
     name: string;
     columns: string[];
   }>;
-  /** Table- and column-level FKs; composite keys use multiple `localColumns` / `referencedColumns`. */
   foreignKeyConstraints?: Array<{
     localColumns: string[];
     referencedTable: string;
@@ -1228,128 +1228,56 @@ export function parseSqlDumpBuffer(
   const utf8 = buffer.toString('utf8').replace(/^\uFEFF/, '');
   const { inferredDialect, dialectConfidence } = inferSqlDialectFromDump(utf8);
   const inferredEngineVersion = inferEngineVersionFromDump(utf8, inferredDialect);
-  const rawSql = normalizeSql(utf8);
-  let statements = splitStatementsForDump(rawSql, inferredDialect);
-  let tables = statements
-    .map((statement) => parseCreateTable(statement))
-    .filter((table): table is ParsedTable => table !== null);
-
-  if (tables.length === 0 && /\bcreate\s+table\b/i.test(rawSql)) {
-    statements = splitStatementsForDump(rawSql, 'sqlserver');
-    tables = statements
-      .map((statement) => parseCreateTable(statement))
-      .filter((table): table is ParsedTable => table !== null);
-  }
-
-  if (tables.length === 0) {
-    throw new ValidationError('No CREATE TABLE statements were detected in the SQL dump');
-  }
-
-  const tableByName = new Map(tables.map((table) => [table.name, table]));
-  for (const statement of statements) {
-    if (!mightBeAlterTableStatement(statement)) {
-      continue;
-    }
-    applyAlterTableConstraints(statement, tableByName);
-  }
-
-  const rowCounts = tables.reduce<Record<string, number>>((acc, table) => {
-    acc[table.name] = 0;
+  const schema = parseSqlSchemaFromText(utf8, inferredDialect);
+  const inferredScale = schema.totalRows > 0 ? classifyDatasetScaleFromTotalRows(schema.totalRows) : null;
+  const inferredDomain = inferDomain(
+    schema.databaseName ?? fileName.replace(/\.sql$/i, ''),
+    schema.tables.map((table) => table.name).join(' '),
+  );
+  const scannedAt = new Date().toISOString();
+  const artifactObjectName = makeScanSqlObjectName(scanId);
+  const rowCounts = schema.tables.reduce<Record<string, number>>((acc, table) => {
+    acc[table.name] = table.rowCount;
     return acc;
   }, {});
-
-  for (const statement of statements) {
-    if (!mightBeInsertForRowCount(statement)) {
-      continue;
-    }
-    const cleanedInsert = stripLeadingSqlJunkForDdlStatement(statement);
-    // T-SQL / SSMS samples (e.g. InstPubs) use `INSERT authors` without `INTO`; PostgreSQL/MySQL use `INSERT INTO`.
-    const insertMatch = cleanedInsert.match(/^insert\s+(?:into\s+)?([^\s(]+)/i);
-    if (!insertMatch) {
-      continue;
-    }
-
-    const tableName = parseQualifiedIdentifier(insertMatch[1]).name;
-    rowCounts[tableName] = (rowCounts[tableName] ?? 0) + countInsertValueGroups(cleanedInsert);
-  }
-
-  collectCopyRowCounts(rawSql, rowCounts);
-
-  const totalRows = Object.values(rowCounts).reduce((sum, count) => sum + count, 0);
-  const columnCount = tables.reduce((sum, table) => sum + table.columns.length, 0);
-  const detectedPrimaryKeys = tables.reduce(
-    (sum, table) => sum + table.columns.filter((column) => column.isPrimary).length,
-    0,
-  );
-  const detectedForeignKeys = tables.reduce(
-    (sum, table) => sum + table.columns.filter((column) => column.isForeign).length,
-    0,
-  );
-  const databaseName = detectDatabaseName(rawSql);
-  const schemaName = detectSchemaName(tables);
-  const inferredScale = totalRows > 0 ? classifyDatasetScaleFromTotalRows(totalRows) : null;
-  const inferredDomain = inferDomain(
-    databaseName ?? fileName.replace(/\.sql$/i, ''),
-    tables.map((table) => table.name).join(' '),
-  );
-
-  const scannedAt = new Date().toISOString();
-  const summaryTables = tables.map((table) => ({
-    name: table.name,
-    rowCount: rowCounts[table.name] ?? 0,
-    columnCount: table.columns.length,
-    columns: table.columns.map((column) => ({
-      name: column.name,
-      type: column.baseType,
-      nullable: column.nullable,
-      isPrimary: column.isPrimary || undefined,
-      isForeign: column.isForeign || undefined,
-    })),
-  }));
-
-  const artifactObjectName = makeScanSqlObjectName(scanId);
 
   return {
     scanId,
     fileName,
-    databaseName,
-    schemaName,
+    databaseName: schema.databaseName,
+    schemaName: schema.schemaName,
     domain: inferredDomain,
     inferredScale,
     inferredDialect,
     dialectConfidence,
     inferredEngineVersion,
-    totalTables: tables.length,
-    totalRows,
-    columnCount,
-    detectedPrimaryKeys,
-    detectedForeignKeys,
-    tables: summaryTables,
+    totalTables: schema.totalTables,
+    totalRows: schema.totalRows,
+    columnCount: schema.columnCount,
+    detectedPrimaryKeys: schema.detectedPrimaryKeys,
+    detectedForeignKeys: schema.detectedForeignKeys,
+    tables: schema.tables.map((table) => ({
+      name: table.name,
+      rowCount: table.rowCount,
+      columnCount: table.columnCount,
+      columns: table.columns,
+    })),
     rowCounts,
     artifactObjectName,
     artifactUrl: '',
     definition: {
-      tables: tables.map((table) => ({
-        name: table.name,
-        columns: table.columns.map((column) => ({
-          name: column.name,
-          type: formatDefinitionType(column),
-        })),
-        ...(table.foreignKeyConstraints?.length
-          ? { foreignKeyConstraints: table.foreignKeyConstraints }
-          : {}),
-      })),
-      indexes: collectDefinitionIndexes(tables),
+      tables: buildDefinitionTables(schema),
+      indexes: schema.indexes,
       metadata: {
         source: 'sql_dump',
         fileName,
-        databaseName,
-        schemaName,
-        totalRows,
-        totalTables: tables.length,
-        columnCount,
-        detectedPrimaryKeys,
-        detectedForeignKeys,
+        databaseName: schema.databaseName,
+        schemaName: schema.schemaName,
+        totalRows: schema.totalRows,
+        totalTables: schema.totalTables,
+        columnCount: schema.columnCount,
+        detectedPrimaryKeys: schema.detectedPrimaryKeys,
+        detectedForeignKeys: schema.detectedForeignKeys,
         inferredDomain,
         inferredScale,
         inferredDialect,
@@ -1365,16 +1293,17 @@ export function parseSqlDumpBuffer(
  * Persist the raw dump without strict CREATE TABLE parsing. Dialect/version heuristics still run.
  * Catalog schema graph stays empty until a future parser or manual definition; sandbox restores the file.
  */
-export function parseSqlDumpBufferArtifactOnly(
+function buildInferenceOnlySqlDumpScan(
   buffer: Buffer,
   fileName: string,
-  scanId: string = randomUUID(),
+  scanId: string,
+  options?: { artifactOnly?: boolean },
 ): StoredSqlDumpScan {
   if (buffer.length === 0) {
     throw new ValidationError('Uploaded SQL dump is empty');
   }
 
-  const utf8 = buffer.toString('utf8');
+  const utf8 = buffer.toString('utf8').replace(/^\uFEFF/, '');
   const { inferredDialect, dialectConfidence } = inferSqlDialectFromDump(utf8);
   const inferredEngineVersion = inferEngineVersionFromDump(utf8, inferredDialect);
   const rawSql = normalizeSql(utf8);
@@ -1384,6 +1313,7 @@ export function parseSqlDumpBufferArtifactOnly(
   const scannedAt = new Date().toISOString();
   const artifactObjectName = makeScanSqlObjectName(scanId);
   const placeholderKey = SQL_DUMP_ARTIFACT_ONLY_PLACEHOLDER_TABLE;
+  const artifactOnly = Boolean(options?.artifactOnly);
 
   return {
     scanId,
@@ -1396,15 +1326,15 @@ export function parseSqlDumpBufferArtifactOnly(
     dialectConfidence,
     inferredEngineVersion,
     totalTables: 0,
-    totalRows: 1,
+    totalRows: artifactOnly ? 1 : 0,
     columnCount: 0,
     detectedPrimaryKeys: 0,
     detectedForeignKeys: 0,
     tables: [],
-    rowCounts: { [placeholderKey]: 1 },
+    rowCounts: artifactOnly ? { [placeholderKey]: 1 } : {},
     artifactObjectName,
     artifactUrl: '',
-    artifactOnly: true,
+    ...(artifactOnly ? { artifactOnly: true } : {}),
     definition: {
       tables: [],
       indexes: [],
@@ -1413,7 +1343,7 @@ export function parseSqlDumpBufferArtifactOnly(
         fileName,
         databaseName,
         schemaName: null,
-        totalRows: 1,
+        totalRows: artifactOnly ? 1 : 0,
         totalTables: 0,
         columnCount: 0,
         detectedPrimaryKeys: 0,
@@ -1424,10 +1354,137 @@ export function parseSqlDumpBufferArtifactOnly(
         dialectConfidence,
         inferredEngineVersion,
         scannedAt,
-        artifactOnly: true,
+        ...(artifactOnly ? { artifactOnly: true } : {}),
       },
     },
   };
+}
+
+export function parseSqlDumpBufferForAsyncBase(
+  buffer: Buffer,
+  fileName: string,
+  scanId: string = randomUUID(),
+): StoredSqlDumpScan {
+  try {
+    const parsed = parseSqlDumpBuffer(buffer, fileName, scanId);
+    return {
+      ...parsed,
+      totalRows: 0,
+      rowCounts: parsed.tables.reduce<Record<string, number>>((acc, table) => {
+        acc[table.name] = 0;
+        return acc;
+      }, {}),
+      tables: parsed.tables.map((table) => ({
+        ...table,
+        rowCount: 0,
+      })),
+      definition: {
+        ...parsed.definition,
+        metadata: {
+          ...parsed.definition.metadata,
+          totalRows: 0,
+          inferredScale: null,
+        },
+      },
+      inferredScale: null,
+    };
+  } catch {
+    return buildInferenceOnlySqlDumpScan(buffer, fileName, scanId);
+  }
+}
+
+export function parseSqlDumpBufferArtifactOnly(
+  buffer: Buffer,
+  fileName: string,
+  scanId: string = randomUUID(),
+): StoredSqlDumpScan {
+  return buildInferenceOnlySqlDumpScan(buffer, fileName, scanId, { artifactOnly: true });
+}
+
+export function mergeSqlDumpScanWithRowCounts(
+  base: StoredSqlDumpScan,
+  rowCounts: Record<string, number>,
+  totalRows: number,
+): StoredSqlDumpScan {
+  const nextTables = base.tables.map((table) => ({
+    ...table,
+    rowCount: rowCounts[table.name] ?? 0,
+  }));
+  const inferredScale = totalRows > 0 ? classifyDatasetScaleFromTotalRows(totalRows) : null;
+
+  return {
+    ...base,
+    totalRows,
+    inferredScale,
+    rowCounts,
+    tables: nextTables,
+    definition: {
+      ...base.definition,
+      metadata: {
+        ...base.definition.metadata,
+        totalRows,
+        inferredScale,
+      },
+    },
+  };
+}
+
+export function parseSqlDumpHeadFromArtifactHead(
+  buffer: Buffer,
+  fileName: string,
+  scanId: string = randomUUID(),
+): StoredSqlDumpScan | null {
+  try {
+    return parseSqlDumpBufferForAsyncBase(buffer, fileName, scanId);
+  } catch {
+    return null;
+  }
+}
+
+export function isSqlDumpArtifactOnlyScan(scan: StoredSqlDumpScan | null | undefined): boolean {
+  if (!scan) return false;
+  return Boolean(scan.artifactOnly) || Boolean(scan.definition?.metadata?.artifactOnly);
+}
+
+export function coerceStoredSqlDumpScan(input: unknown): StoredSqlDumpScan | null {
+  if (!input || typeof input !== 'object') return null;
+  return input as StoredSqlDumpScan;
+}
+
+export function mergeSqlDumpScans(base: StoredSqlDumpScan, override: StoredSqlDumpScan): StoredSqlDumpScan {
+  return {
+    ...base,
+    ...override,
+    artifactObjectName: base.artifactObjectName,
+    artifactUrl: base.artifactUrl,
+    rowCounts: base.rowCounts,
+  };
+}
+
+export function extractSqlDumpStoredSummary(scan: StoredSqlDumpScan): Pick<
+  StoredSqlDumpScan,
+  'totalTables' | 'columnCount' | 'detectedPrimaryKeys' | 'detectedForeignKeys' | 'tables' | 'definition'
+> {
+  return {
+    totalTables: scan.totalTables,
+    columnCount: scan.columnCount,
+    detectedPrimaryKeys: scan.detectedPrimaryKeys,
+    detectedForeignKeys: scan.detectedForeignKeys,
+    tables: scan.tables,
+    definition: scan.definition,
+  };
+}
+
+export function buildAsyncSqlDumpBaseScan(
+  buffer: Buffer,
+  fileName: string,
+  scanId: string = randomUUID(),
+  options?: { artifactOnly?: boolean },
+): StoredSqlDumpScan {
+  if (options?.artifactOnly) {
+    return parseSqlDumpBufferArtifactOnly(buffer, fileName, scanId);
+  }
+  return parseSqlDumpBufferForAsyncBase(buffer, fileName, scanId);
 }
 
 export interface CreateStoredSqlDumpScanOptions {

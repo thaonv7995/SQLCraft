@@ -17,7 +17,14 @@ const sessionServiceMocks = vi.hoisted(() => ({
   revertSessionSchemaDiffChange: vi.fn(),
 }));
 
+const usersRepositoryMocks = vi.hoisted(() => ({
+  getJwtVersion: vi.fn(),
+}));
+
 vi.mock('../sessions.service', () => sessionServiceMocks);
+vi.mock('../../../db/repositories/users.repository', () => ({
+  usersRepository: usersRepositoryMocks,
+}));
 
 import sessionsRouter from '../sessions.router';
 
@@ -25,6 +32,7 @@ describe('sessions router HTTP contracts', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    usersRepositoryMocks.getJwtVersion.mockResolvedValue(0);
     sessionServiceMocks.listUserSessions.mockResolvedValue([]);
     sessionServiceMocks.createSession.mockResolvedValue({
       session: {

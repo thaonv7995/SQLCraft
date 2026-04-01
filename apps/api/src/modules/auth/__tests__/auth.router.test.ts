@@ -14,7 +14,14 @@ const authServiceMocks = vi.hoisted(() => ({
   getMe: vi.fn(),
 }));
 
+const usersRepositoryMocks = vi.hoisted(() => ({
+  getJwtVersion: vi.fn(),
+}));
+
 vi.mock('../auth.service', () => authServiceMocks);
+vi.mock('../../../db/repositories/users.repository', () => ({
+  usersRepository: usersRepositoryMocks,
+}));
 
 import authRouter from '../auth.router';
 
@@ -22,6 +29,7 @@ describe('auth router HTTP contracts', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
+    usersRepositoryMocks.getJwtVersion.mockResolvedValue(0);
     authServiceMocks.registerUser.mockResolvedValue({
       user: {
         id: 'user-123',
@@ -91,7 +99,14 @@ describe('auth router HTTP contracts', () => {
     });
 
     expect(response.statusCode).toBe(201);
-    expect(authServiceMocks.registerUser).toHaveBeenCalledWith(expect.anything(), payload);
+    expect(authServiceMocks.registerUser).toHaveBeenCalledWith(
+      expect.anything(),
+      payload,
+      expect.objectContaining({
+        ipAddress: '127.0.0.1',
+        userAgent: 'lightMyRequest',
+      }),
+    );
     expect(response.json()).toEqual({
       success: true,
       code: ApiCode.CREATED,

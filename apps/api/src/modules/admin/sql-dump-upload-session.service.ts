@@ -22,7 +22,7 @@ import type {
   SqlDumpScanResult,
   SqlDumpUploadPresignPartResult,
 } from './admin.types';
-import { parseSqlDumpBufferArtifactOnly, type StoredSqlDumpScan } from './sql-dump-scan';
+import { buildAsyncSqlDumpBaseScan, type StoredSqlDumpScan } from './sql-dump-scan';
 import { isAllowedSqlDumpUpload } from './sql-dump-upload-format';
 import { enqueueSqlDumpScan } from '../../lib/queue';
 
@@ -269,7 +269,9 @@ export async function completeSqlDumpUploadSession(
   const headLen = Math.min(12 * 1024 * 1024, stat.size);
   const head = await readObjectRange(artifactObjectName, 0, headLen);
   const baseScan: StoredSqlDumpScan = {
-    ...parseSqlDumpBufferArtifactOnly(head, row.fileName, scanId),
+    ...buildAsyncSqlDumpBaseScan(head, row.fileName, scanId, {
+      artifactOnly: row.artifactOnly,
+    }),
     artifactObjectName,
     artifactUrl,
   };
