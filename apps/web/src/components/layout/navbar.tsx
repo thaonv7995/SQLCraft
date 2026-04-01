@@ -128,6 +128,8 @@ function UserAvatar({
   );
 }
 
+let unreadCountWarmupAt = 0;
+
 function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<InAppNotificationItem | null>(null);
@@ -158,6 +160,11 @@ function NotificationsBell() {
   }, []);
 
   useEffect(() => {
+    const now = Date.now();
+    if (now - unreadCountWarmupAt < 1_000) {
+      return;
+    }
+    unreadCountWarmupAt = now;
     void refreshUnread();
   }, [refreshUnread]);
 

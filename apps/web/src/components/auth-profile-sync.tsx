@@ -15,13 +15,21 @@ export function AuthProfileSync() {
   const pathname = usePathname();
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
   const lastVisibilityRefetchAt = useRef(0);
+  const previousPathnameRef = useRef<string | null>(null);
 
   useEffect(() => {
-    void refreshProfile();
-  }, [refreshProfile]);
+    const previousPathname = previousPathnameRef.current;
+    previousPathnameRef.current = pathname;
 
-  useEffect(() => {
-    if (pathname === '/dashboard' || pathname === '/profile') {
+    if (!previousPathname) {
+      void refreshProfile();
+      return;
+    }
+
+    if (
+      pathname !== previousPathname &&
+      (pathname === '/dashboard' || pathname === '/profile')
+    ) {
       void refreshProfile();
     }
   }, [pathname, refreshProfile]);
