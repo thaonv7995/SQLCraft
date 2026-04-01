@@ -1,15 +1,21 @@
 # SQLCraft — nginx TLS reverse proxy (snippets).
 # Use with certbot (`certbot --nginx`) or your own TLS certificates.
 # Replace sqlcraft.example.com, ports, and bucket name (sqlcraft) if needed.
+#
+# IMPORTANT: install.sh auto-adjusts ports when defaults are busy on the host.
+# Verify actual ports before editing this file:
+#   grep -E 'WEB_PORT|API_PORT|MINIO_API_PORT' .env.production
+#   docker ps --format 'table {{.Names}}\t{{.Ports}}'
+# Use the host-side port shown there (e.g. MINIO_API_PORT=9002 → server 127.0.0.1:9002).
 
 upstream sqlcraft_web {
-	server 127.0.0.1:13029;
+	server 127.0.0.1:13029;  # WEB_PORT
 }
 upstream sqlcraft_api {
-	server 127.0.0.1:4000;
+	server 127.0.0.1:4000;   # API_PORT
 }
 upstream sqlcraft_minio {
-	server 127.0.0.1:9000;
+	server 127.0.0.1:9000;   # MINIO_API_PORT (not the console port)
 }
 
 server {
@@ -19,7 +25,7 @@ server {
 	# ssl_certificate /etc/letsencrypt/live/sqlcraft.example.com/fullchain.pem;
 	# ssl_certificate_key /etc/letsencrypt/live/sqlcraft.example.com/privkey.pem;
 
-	client_max_body_size 256m;
+	client_max_body_size 16m;  # covers avatar (5 MB) and small API payloads; /sqlcraft/ overrides to 0
 
 	location /v1/ {
 		proxy_pass http://sqlcraft_api;
@@ -30,7 +36,11 @@ server {
 		proxy_set_header X-Forwarded-Proto $scheme;
 	}
 
-	# Presigned object URLs — bucket path must match STORAGE_BUCKET (default sqlcraft)
+	# Presigned object URLs — bucket path must match STORAGE_BUCKET (default sqlcraft).
+	# Used for avatar downloads (GET) and SQL dump multipart uploads (PUT).
+	# client_max_body_size 0 disables nginx body-size limit; MinIO enforces its own.
+	# proxy_request_buffering off streams PUT data directly to MinIO instead of
+	# buffering the entire part in nginx memory/disk first (required for large uploads).
 	location /sqlcraft/ {
 		proxy_pass http://sqlcraft_minio;
 		proxy_http_version 1.1;
@@ -38,6 +48,8 @@ server {
 		proxy_set_header X-Real-IP $remote_addr;
 		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 		proxy_set_header X-Forwarded-Proto $scheme;
+		client_max_body_size 0;
+		proxy_request_buffering off;
 	}
 
 	location / {

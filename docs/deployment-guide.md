@@ -58,6 +58,14 @@ Browsers should talk to **HTTPS** on **443**. The Compose stack still binds **we
 2. **`/v1/*`** → API (`API_PORT`, default `4000`). Keep the `/v1` prefix when forwarding (the app uses `NEXT_PUBLIC_API_URL=/v1`).
 3. **`/<STORAGE_BUCKET>/*`** (default bucket `sqlcraft`) → MinIO API (`MINIO_API_PORT`, default `9000`). This path must be **above** the catch-all `/` so presigned URLs from `STORAGE_PUBLIC_URL=https://your-domain` work.
 
+> **Port conflict auto-adjustment:** `install.sh` automatically reassigns any port that is already in use on the host. After install, verify the actual ports before configuring your reverse proxy:
+> ```bash
+> grep -E 'MINIO_API_PORT|API_PORT|WEB_PORT' .env.production
+> # or check live container bindings:
+> docker ps --format 'table {{.Names}}\t{{.Ports}}'
+> ```
+> Use whatever `MINIO_API_PORT` and `API_PORT` values appear there — they may differ from the defaults above.
+
 **Copy-paste examples:**
 
 - [Caddy 2](examples/caddy/Caddyfile.example) — automatic Let’s Encrypt.

@@ -66,7 +66,13 @@ The installer will:
 6. Run **migrations** + **seed** inside the API image.
 7. Start **api**, **web**, **worker**.
 
-Default host ports (adjustable in `.env.production`): web **13029**, API **4000**, MinIO API **9000**, console **9001**.
+Default host ports: web **13029**, API **4000**, MinIO API **9000**, console **9001**. If any port is already in use the installer **automatically picks the next free port** — check actual values before configuring a reverse proxy:
+
+```bash
+grep -E 'WEB_PORT|API_PORT|MINIO_API_PORT|MINIO_CONSOLE_PORT' .env.production
+# or live container bindings:
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+```
 
 ## After install
 
@@ -85,7 +91,24 @@ The API container **runs migrations on each start** (`apps/api/docker-entrypoint
 For a **real domain**, `install.sh` alone does **not** configure TLS or firewall. After install:
 
 1. Point **DNS** at the server.
-2. Add a **reverse proxy** (TLS) — routes: **`/v1/*`** → API, **`/<STORAGE_BUCKET>/*`** → MinIO (default bucket `sqlcraft`), **`/`** → web. Details: **[docs/deployment-guide.md](docs/deployment-guide.md)** §7–10 and **[docs/examples/](docs/examples/)** (Caddy / nginx).
+2. Add a **reverse proxy** (TLS) with these routes (use ports from `.env.production`, not the defaults, if they were auto-adjusted):
+   - **`/<STORAGE_BUCKET>/*`** → MinIO API (`MINIO_API_PORT`) — **must be above the catch-all** so presigned avatar/upload URLs work. Add the following to your nginx config:
+     ```nginx
+     location /sqlcraft/ {
+         proxy_pass http://127.0.0.1:9000;  # use MINIO_API_PORT
+         proxy_http_version 1.1;
+         proxy_set_header Host $host;
+         proxy_set_header X-Real-IP $remote_addr;
+         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+         proxy_set_header X-Forwarded-Proto $scheme;
+         client_max_body_size 0;
+         proxy_request_buffering off;
+     }
+     ```
+   - **`/v1/*`** → API (`API_PORT`)
+   - **`/`** → web (`WEB_PORT`)
+
+   Ready-to-use examples: **[docs/examples/](docs/examples/)** (Caddy / nginx). Full details: **[docs/deployment-guide.md](docs/deployment-guide.md)** §7–10.
 3. Open firewall **80/443** (and SSH); avoid exposing Postgres, Redis, or MinIO console publicly unless required.
 4. **Private GHCR images:** `docker login ghcr.io` before pull (see deployment guide §10).
 
@@ -139,6 +162,12 @@ Installer env knobs: `USE_PREBUILT_IMAGES`, `SQLCRAFT_GHCR_OWNER`, `SQLCRAFT_VER
 - Ensure `SANDBOX_DOCKER_NETWORK=<STACK_NAME>-prod` in `.env.production`.
 - Logs:  
   `docker compose --env-file .env.production -f docker-compose.prod.yml logs -f worker worker-query`
+
+**Avatar or SQL dump upload fails (404 / 413 via reverse proxy)**
+
+- **404 "Resource not found"** — the `/sqlcraft/` location block is missing from nginx/Caddy. Presigned MinIO URLs use this path; add a proxy rule for `/<STORAGE_BUCKET>/` → `MINIO_API_PORT`.
+- **413 Content Too Large** — nginx is rejecting the upload body. Add to the `/sqlcraft/` location: `client_max_body_size 0; proxy_request_buffering off;`
+- Both fixes are included in [docs/examples/nginx/sqlcraft.conf.example](docs/examples/nginx/sqlcraft.conf.example).
 
 **Compose / pull**
 
