@@ -2297,7 +2297,7 @@ export const adminApi = {
 
   deleteDatabase: (databaseId: string) =>
     api
-      .delete<DeleteDatabaseResult>(`/admin/databases/${databaseId}`)
+      .delete<DeleteDatabaseResult>(`/admin/databases/${databaseId}`, { timeout: 120_000 })
       .then((r) => r.data),
 
   listPendingSchemaTemplateReviews: () =>
@@ -2618,7 +2618,7 @@ export const databasesApi = {
 
   importFromScan: (payload: SqlDumpImportPayload) =>
     api
-      .post<SqlDumpImportResult>('/admin/databases/import', payload)
+      .post<SqlDumpImportResult>('/admin/databases/import', payload, { timeout: 600_000 })
       .then((r) => normalizeSqlDumpImportResult(r.data)),
 
   listPendingScans: (params?: { page?: number; limit?: number }) =>

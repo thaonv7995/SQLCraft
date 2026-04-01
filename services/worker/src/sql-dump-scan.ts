@@ -14,7 +14,7 @@ type DdlSummary = {
   columnCount: number;
   detectedPrimaryKeys: number;
   detectedForeignKeys: number;
-  tables: Array<{ name: string; columnCount: number; detectedPrimaryKeys: number; detectedForeignKeys: number }>;
+  tables: Array<{ name: string; columnCount: number; detectedPrimaryKeys: number; detectedForeignKeys: number; columns: string[] }>;
 };
 
 function normalizeTableName(raw: string): string {
@@ -156,39 +156,37 @@ class RowCountTransform extends Transform {
   }
 }
 
-function countColumnsInCreateTableBody(body: string): { columns: number; pk: number; fk: number } {
-  // Very lightweight heuristic:
-  // - split top-level comma list within (...) and treat entries that start with identifier as columns
-  // - pk: inline PRIMARY KEY or table constraint PRIMARY KEY
-  // - fk: inline REFERENCES or FOREIGN KEY constraint
+function unquoteColumnIdentifier(raw: string): string {
+  const s = raw.trim();
+  if (s.startsWith('`') && s.endsWith('`')) return s.slice(1, -1);
+  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1).replace(/""/g, '"');
+  if (s.startsWith('[') && s.endsWith(']')) return s.slice(1, -1);
+  return s;
+}
+
+function parseCreateTableBody(body: string): { columns: number; pk: number; fk: number; columnNames: string[] } {
+  // Split top-level comma-separated segments, then classify each as column vs constraint.
+  // Extracts actual column names instead of generating placeholders.
   const parts: string[] = [];
   let cur = '';
   let depth = 0;
   let inSingle = false;
   let inDouble = false;
+  let inBacktick = false;
   for (let i = 0; i < body.length; i++) {
     const ch = body[i]!;
-    if (ch === "'" && !inDouble) {
-      if (inSingle && body[i + 1] === "'") {
-        cur += "''";
-        i += 1;
-        continue;
-      }
-      inSingle = !inSingle;
-      cur += ch;
-      continue;
+    if (!inDouble && !inBacktick && ch === "'") {
+      if (inSingle && body[i + 1] === "'") { cur += "''"; i += 1; continue; }
+      inSingle = !inSingle; cur += ch; continue;
     }
-    if (ch === '"' && !inSingle) {
-      if (inDouble && body[i + 1] === '"') {
-        cur += '""';
-        i += 1;
-        continue;
-      }
-      inDouble = !inDouble;
-      cur += ch;
-      continue;
+    if (!inSingle && !inBacktick && ch === '"') {
+      if (inDouble && body[i + 1] === '"') { cur += '""'; i += 1; continue; }
+      inDouble = !inDouble; cur += ch; continue;
     }
-    if (!inSingle && !inDouble) {
+    if (!inSingle && !inDouble && ch === '`') {
+      inBacktick = !inBacktick; cur += ch; continue;
+    }
+    if (!inSingle && !inDouble && !inBacktick) {
       if (ch === '(') depth += 1;
       if (ch === ')') depth = Math.max(0, depth - 1);
       if (ch === ',' && depth === 0) {
@@ -206,6 +204,7 @@ function countColumnsInCreateTableBody(body: string): { columns: number; pk: num
   let cols = 0;
   let pk = 0;
   let fk = 0;
+  const columnNames: string[] = [];
 
   for (const p of parts) {
     const t = p.trim();
@@ -218,8 +217,12 @@ function countColumnsInCreateTableBody(body: string): { columns: number; pk: num
       lower.startsWith('key ') ||
       lower.startsWith('index ');
     if (!isConstraint) {
-      // likely a column definition
       cols += 1;
+      // Extract column name: first token (possibly quoted)
+      const firstTokenMatch = t.match(/^(`[^`]*`|"(?:[^"]|"")*"|\[[^\]]*\]|\S+)/);
+      if (firstTokenMatch) {
+        columnNames.push(unquoteColumnIdentifier(firstTokenMatch[1]!));
+      }
       if (/\bprimary\s+key\b/i.test(t)) pk += 1;
       if (/\breferences\b/i.test(t)) fk += 1;
       continue;
@@ -228,7 +231,7 @@ function countColumnsInCreateTableBody(body: string): { columns: number; pk: num
     if (/\bforeign\s+key\b/i.test(t) || /\breferences\b/i.test(t)) fk += 1;
   }
 
-  return { columns: cols, pk, fk };
+  return { columns: cols, pk, fk, columnNames };
 }
 
 function extractCreateTableBodies(text: string): Array<{ name: string; body: string }> {
@@ -348,7 +351,7 @@ async function ddlOnlyScanFromArtifactHead(params: {
   const tables = extractCreateTableBodies(text);
 
   for (const t of tables) {
-    const counts = countColumnsInCreateTableBody(t.body);
+    const counts = parseCreateTableBody(t.body);
     base.totalTables += 1;
     base.columnCount += counts.columns;
     base.detectedPrimaryKeys += counts.pk;
@@ -358,6 +361,7 @@ async function ddlOnlyScanFromArtifactHead(params: {
       columnCount: counts.columns,
       detectedPrimaryKeys: counts.pk,
       detectedForeignKeys: counts.fk,
+      columns: counts.columnNames,
     });
     if (base.totalTables >= 4000) break; // safety guard
   }
@@ -476,16 +480,13 @@ export async function runSqlDumpScanJob(
       ddlTables && ddlTables.length
         ? ddlTables.map((t) => {
             const rowCount = rowCounter.rowCounts[t.name] ?? 0;
-            const columns = Array.from({ length: t.columnCount }, (_, idx) => {
-              const i = idx + 1;
-              return {
-                name: `col_${i}`,
-                type: '—',
-                nullable: true,
-                isPrimary: idx < t.detectedPrimaryKeys,
-                isForeign: idx < t.detectedForeignKeys,
-              };
-            });
+            const columns = Array.from({ length: t.columnCount }, (_, idx) => ({
+              name: t.columns[idx] ?? `col_${idx + 1}`,
+              type: '—',
+              nullable: true,
+              isPrimary: idx < t.detectedPrimaryKeys,
+              isForeign: idx < t.detectedForeignKeys,
+            }));
             return {
               name: t.name,
               rowCount,
@@ -496,25 +497,16 @@ export async function runSqlDumpScanJob(
         : [];
 
     // Also populate `definition.tables` so downstream import uses the schema graph
-    // (row apportionment + catalog persistence). We only have counts here, so we
-    // generate stable placeholder column definitions.
+    // (row apportionment + catalog persistence).
     const definitionTablesOut =
       ddlTables && ddlTables.length
         ? ddlTables.map((t) => {
             const columns = Array.from({ length: t.columnCount }, (_, idx) => {
-              const i = idx + 1;
-              const name = `col_${i}`;
+              const name = t.columns[idx] ?? `col_${idx + 1}`;
               const isPk = idx < t.detectedPrimaryKeys;
-              return {
-                name,
-                type: isPk ? 'INT PRIMARY KEY' : 'INT',
-              };
+              return { name, type: isPk ? 'INT PRIMARY KEY' : 'INT' };
             });
-            return {
-              name: t.name,
-              columns,
-              foreignKeyConstraints: [],
-            };
+            return { name: t.name, columns, foreignKeyConstraints: [] };
           })
         : [];
 
