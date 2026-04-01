@@ -1579,6 +1579,11 @@ async function refreshAccessToken(): Promise<AuthTokens> {
 api.interceptors.request.use((config) => {
   const nextConfig = config as ApiInternalRequestConfig;
 
+  // Skip if Authorization is already set (e.g. retry after token refresh)
+  if (nextConfig.headers.Authorization) {
+    return nextConfig;
+  }
+
   if (typeof window !== 'undefined') {
     try {
       const raw = localStorage.getItem('sqlcraft-auth');
@@ -1619,6 +1624,7 @@ api.interceptors.response.use(
       if (anyConfig._authRefreshRetried) {
         localStorage.removeItem('sqlcraft-auth');
         window.location.assign('/login');
+        return Promise.reject(error);
       } else {
         anyConfig._authRefreshRetried = true;
         const storedTokens = readStoredTokens();
