@@ -238,6 +238,21 @@ export function rewriteInsertIntegerBooleansForPg(insertSql: string, schema: Sch
   return `${prefix}${newValues}${tailSemi}`;
 }
 
+/**
+ * Append ON CONFLICT DO NOTHING to INSERT...VALUES statements so that duplicate rows
+ * in teaching dataset dumps (e.g. duplicate email addresses in sample data) are silently
+ * skipped instead of crashing the restore with a unique constraint violation.
+ * Idempotent: no-op if the clause is already present or if it's not a VALUES insert.
+ */
+function addOnConflictDoNothing(sql: string): string {
+  const trimmed = sql.trimEnd();
+  if (!/\bVALUES\b/i.test(trimmed)) return sql;
+  if (/\bON\s+CONFLICT\b/i.test(trimmed)) return sql;
+  const hasSemi = trimmed.endsWith(';');
+  const base = hasSemi ? trimmed.slice(0, -1).trimEnd() : trimmed;
+  return base + (hasSemi ? ' ON CONFLICT DO NOTHING;' : ' ON CONFLICT DO NOTHING');
+}
+
 function rewriteInsertsInChunk(sql: string, schema: SchemaDefinition | null): string {
   if (!schema?.tables?.length) return sql;
 
@@ -289,6 +304,11 @@ export function sanitizePostgresDumpForPsql(
   if (schema) {
     joined = rewriteInsertsInChunk(joined, schema);
   }
+  // Rewrite single-line INSERT...VALUES to include ON CONFLICT DO NOTHING
+  joined = joined
+    .split('\n')
+    .map((line) => (/^\s*INSERT\s+/i.test(line) ? addOnConflictDoNothing(line) : line))
+    .join('\n');
   return Buffer.from(joined, 'utf8');
 }
 
@@ -317,10 +337,11 @@ export function createPostgresSanitizeTransform(
 
   function flushInsertBuffer(lines: string[]): string {
     const joined = lines.join('\n');
-    if (schema && /\bVALUES\b/i.test(joined) && joined.includes(';')) {
-      return rewriteInsertIntegerBooleansForPg(joined, schema);
+    let out = joined;
+    if (schema && /\bVALUES\b/i.test(out) && out.includes(';')) {
+      out = rewriteInsertIntegerBooleansForPg(out, schema);
     }
-    return joined;
+    return addOnConflictDoNothing(out);
   }
 
   return new Transform({
@@ -362,15 +383,15 @@ export function createPostgresSanitizeTransform(
         const kept = processLine(rawLine);
         if (kept === null) continue;
 
-        // Start buffering INSERT for boolean rewrite if schema is available
-        if (schema?.tables?.length && /^\s*INSERT\s+INTO\b/i.test(kept)) {
+        // Start buffering INSERT for boolean rewrite / ON CONFLICT injection
+        if (/^\s*INSERT\s+INTO\b/i.test(kept)) {
           if (/;\s*$/.test(kept.trim())) {
             // Single-line INSERT: rewrite immediately
-            if (/\bVALUES\b/i.test(kept)) {
-              output.push(rewriteInsertIntegerBooleansForPg(kept, schema));
-            } else {
-              output.push(kept);
+            let out = kept;
+            if (schema?.tables?.length && /\bVALUES\b/i.test(out)) {
+              out = rewriteInsertIntegerBooleansForPg(out, schema);
             }
+            output.push(addOnConflictDoNothing(out));
           } else {
             // Multi-line INSERT: start buffering
             insertBuffer = [kept];

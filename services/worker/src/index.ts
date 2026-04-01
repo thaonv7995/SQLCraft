@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Worker, Queue, type Job } from 'bullmq';
+import { Worker, Queue, UnrecoverableError, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import pino from 'pino';
 import {
@@ -669,6 +669,23 @@ const sandboxResetWorker = sandboxQueuesEnabled
 
 // ─── Worker: dataset_golden_bake ────────────────────────────────────────────────
 
+/**
+ * Returns true for errors caused by the artifact content itself (bad SQL syntax,
+ * unique/FK violations, etc.). These are deterministic — retrying will always fail
+ * with the same error, so we wrap them in UnrecoverableError to stop BullMQ retries.
+ */
+function isDeterministicRestoreError(message: string): boolean {
+  return (
+    /Msg \d+, Level 1[5-9]/i.test(message) ||
+    /Incorrect syntax near/i.test(message) ||
+    /duplicate key value violates unique constraint/i.test(message) ||
+    /violates not-null constraint/i.test(message) ||
+    /violates foreign key constraint/i.test(message) ||
+    /psql restore stream failed/i.test(message) ||
+    /sqlcmd restore stream failed/i.test(message)
+  );
+}
+
 const datasetGoldenBakeWorker = sandboxQueuesEnabled
   ? new Worker(
       QUEUES.DATASET_SANDBOX_GOLDEN_BAKE,
@@ -679,6 +696,9 @@ const datasetGoldenBakeWorker = sandboxQueuesEnabled
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           await updateDatasetGoldenBakeFailed(datasetTemplateId, message);
+          if (isDeterministicRestoreError(message)) {
+            throw new UnrecoverableError(message);
+          }
           throw err;
         }
       },

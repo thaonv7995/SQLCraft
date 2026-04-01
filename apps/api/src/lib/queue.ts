@@ -101,7 +101,7 @@ export async function enqueueResetSandbox(data: ResetSandboxJobData): Promise<vo
 export async function enqueueDatasetGoldenBake(data: DatasetGoldenBakeJobData): Promise<void> {
   await datasetGoldenBakeQueue.add('dataset_golden_bake', data, {
     jobId: `golden-bake-${data.datasetTemplateId}`,
-    attempts: 3,
+    attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
     removeOnComplete: true,
   });

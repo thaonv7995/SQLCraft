@@ -94,12 +94,12 @@ export function quoteUnquotedIsoDatesOutsideStringsAndComments(sql: string): str
     const rest = sql.slice(pos);
 
     const iso = rest.match(
-      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
+      /^(\d{4}-\d{1,2}-\d{1,2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (iso) return { len: iso[1].length, text: `'${iso[1]}'` };
 
     const slash = rest.match(
-      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
+      /^(\d{4}\/\d{1,2}\/\d{1,2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
 
@@ -352,6 +352,12 @@ function sanitizeLineLevel(line: string): string {
 
   let s = line;
 
+  // Strip MySQL integer display widths and UNSIGNED/ZEROFILL (invalid in T-SQL)
+  // e.g. TINYINT(4) → TINYINT, INT(11) UNSIGNED → INT
+  s = s.replace(/\b(TINYINT|SMALLINT|MEDIUMINT|INT|BIGINT)\s*\(\s*\d+\s*\)(\s+(?:UNSIGNED|ZEROFILL))+/gi, '$1');
+  s = s.replace(/\b(TINYINT|SMALLINT|MEDIUMINT|INT|BIGINT)\s*\(\s*\d+\s*\)/gi, '$1');
+  s = s.replace(/\b(TINYINT|SMALLINT|MEDIUMINT|INT|BIGINT)\b(\s+(?:UNSIGNED|ZEROFILL))+/gi, '$1');
+
   // MySQL backticks → brackets
   s = mysqlBackticksToBrackets(s);
 
@@ -412,12 +418,12 @@ function quoteDatesAndBoolsInLine(
 
     // `$`: this line is the only context in streaming mode; `)` may be on the next line.
     const iso = rest.match(
-      /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
+      /^(\d{4}-\d{1,2}-\d{1,2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (iso) return { len: iso[1].length, text: `'${iso[1]}'` };
 
     const slash = rest.match(
-      /^(\d{4}\/\d{2}\/\d{2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
+      /^(\d{4}\/\d{1,2}\/\d{1,2}(?:[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)?)(?=\s*(?:[,);]|$))/i,
     );
     if (slash) return { len: slash[1].length, text: `'${slash[1]}'` };
 
