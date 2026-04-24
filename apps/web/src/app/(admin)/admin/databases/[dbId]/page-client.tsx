@@ -517,64 +517,88 @@ function GoldenSnapshotsTab({ schemaTemplateId }: { schemaTemplateId: string }) 
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Promote failed'),
   });
 
+  const activeVersion = versions.find((version) => version.status === 'active');
+  const candidates = versions.filter((version) => version.status === 'candidate');
+
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div className="space-y-4">
+      <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+        <Card className="border border-outline-variant/10">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-outline">Current Golden Snapshot</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xl font-semibold text-on-surface">{activeVersion ? `v${activeVersion.versionNo}` : 'No active version'}</span>
+                {activeVersion ? <StatusBadge status={activeVersion.validationStatus} /> : null}
+              </div>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                {activeVersion ? `${activeVersion.datasetName} · updated ${formatRelativeTime(activeVersion.promotedAt ?? activeVersion.createdAt)}` : 'Create or retrigger a golden bake before promoting candidates.'}
+              </p>
+            </div>
+            <div className="rounded-lg bg-surface-container px-3 py-2 text-xs text-on-surface-variant">
+              New lab sessions use the active snapshot.
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-outline-variant/10 lg:w-[28rem]">
+          <CardContent className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-semibold text-on-surface">Create Candidate</p>
+                <p className="text-xs text-on-surface-variant">Index/statistics SQL only.</p>
+              </div>
+              <span className="material-symbols-outlined text-primary">add_task</span>
+            </div>
+            <Input value={changeNote} onChange={(event) => setChangeNote(event.target.value)} placeholder="Change note" />
+            <textarea
+              value={migrationSql}
+              onChange={(event) => setMigrationSql(event.target.value)}
+              placeholder={'CREATE INDEX idx_orders_customer_id ON orders(customer_id);'}
+              className="min-h-28 w-full rounded-xl border border-outline-variant/20 bg-surface-container px-3 py-2 font-mono text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary"
+            />
+            <Button className="w-full" variant="primary" loading={createMutation.isPending} onClick={() => createMutation.mutate()} disabled={!migrationSql.trim()}>
+              Create & bake
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card className="border border-outline-variant/10">
-        <CardHeader>
-          <CardTitle>Golden Snapshot Versions</CardTitle>
-          <CardDescription>Versioned root snapshots used by new SQL Lab sessions. Candidates are baked by a worker, then can be promoted after validation passes.</CardDescription>
+        <CardHeader className="flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle>Candidate Versions</CardTitle>
+            <CardDescription>Promote only after the bake status is passed.</CardDescription>
+          </div>
+          <span className="rounded-full bg-surface-container px-2 py-1 text-xs text-on-surface-variant">{candidates.length} candidate{candidates.length === 1 ? '' : 's'}</span>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Version</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Validation</TableHead>
-                <TableHead>Dataset</TableHead>
+                <TableHead>Bake</TableHead>
+                <TableHead>Change</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? <TableSkeleton cols={6} rows={3} /> : null}
-              {!isLoading && versions.length === 0 ? <TableEmpty colSpan={6} message="No golden snapshot versions yet." /> : null}
-              {!isLoading ? versions.map((version) => (
+              {isLoading ? <TableSkeleton cols={5} rows={3} /> : null}
+              {!isLoading && candidates.length === 0 ? <TableEmpty colSpan={5} message="No candidate versions." /> : null}
+              {!isLoading ? candidates.map((version) => (
                 <TableRow key={version.id}>
                   <TableCell className="font-medium">v{version.versionNo}</TableCell>
-                  <TableCell><StatusBadge status={version.status} /></TableCell>
                   <TableCell><StatusBadge status={version.validationStatus} /></TableCell>
-                  <TableCell>{version.datasetName} · {version.datasetSize}</TableCell>
+                  <TableCell className="max-w-[28rem] truncate text-on-surface-variant">{version.changeNote || version.normalizedStatements[0] || 'Index update'}</TableCell>
                   <TableCell>{formatRelativeTime(version.createdAt)}</TableCell>
                   <TableCell className="text-right">
-                    {version.status === 'candidate' ? (
-                      <Button size="sm" variant="ghost" loading={promoteMutation.isPending} disabled={version.validationStatus !== 'passed'} onClick={() => promoteMutation.mutate(version)}>Promote</Button>
-                    ) : null}
+                    <Button size="sm" variant="ghost" loading={promoteMutation.isPending} disabled={version.validationStatus !== 'passed'} onClick={() => promoteMutation.mutate(version)}>Promote</Button>
                   </TableCell>
                 </TableRow>
               )) : null}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
-
-      <Card className="border border-outline-variant/10">
-        <CardHeader>
-          <CardTitle>Create Candidate</CardTitle>
-          <CardDescription>Paste index/statistics SQL only. Destructive DDL/DML is blocked server-side.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Input value={changeNote} onChange={(event) => setChangeNote(event.target.value)} placeholder="Change note, e.g. add order lookup indexes" />
-          <textarea
-            value={migrationSql}
-            onChange={(event) => setMigrationSql(event.target.value)}
-            placeholder={'CREATE INDEX idx_orders_customer_id ON orders(customer_id);'}
-            className="min-h-44 w-full rounded-xl border border-outline-variant/20 bg-surface-container px-3 py-2 font-mono text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary"
-          />
-          <p className="text-xs text-on-surface-variant">Allowed: CREATE INDEX, DROP INDEX, REINDEX, CREATE STATISTICS. The worker will restore the source dataset, apply this SQL, export a candidate snapshot, then enable Promote when validation passes.</p>
-          <Button className="w-full" variant="primary" loading={createMutation.isPending} onClick={() => createMutation.mutate()} disabled={!migrationSql.trim()}>
-            Create & bake candidate
-          </Button>
         </CardContent>
       </Card>
     </div>
