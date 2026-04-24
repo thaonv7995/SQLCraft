@@ -148,8 +148,8 @@ export function AiProviderSettingsSection({ scope = 'user' }: AiProviderSettings
 
   const title = isSystem ? 'System AI Provider' : 'AI Provider';
   const description = isSystem
-    ? 'Admin config used by all users who do not set their own AI provider. Only one system provider is active.'
-    : 'Configure your personal AI provider. If you leave this empty, SQLForge uses the admin system provider when available.';
+    ? 'Admin config used when a user has no personal provider or their personal provider fails. Only one system provider is active.'
+    : 'Configure your personal AI provider. It is always tried first; SQLForge falls back to the admin system provider only when this is missing or fails.';
 
   return (
     <section className="section-card card-padding">
@@ -171,7 +171,7 @@ export function AiProviderSettingsSection({ scope = 'user' }: AiProviderSettings
           <p className="text-sm text-on-surface-variant">Loading AI provider…</p>
         ) : !setting ? (
           <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container-low p-5 text-sm text-on-surface-variant">
-            {isSystem ? 'No system AI provider configured yet.' : 'No personal AI provider. Admin fallback will be used if configured.'}
+            {isSystem ? 'No system AI provider configured yet.' : 'No personal AI provider yet. SQLForge will use the admin system provider if configured.'}
           </div>
         ) : (
           <div className="rounded-xl border border-outline-variant/15 bg-surface-container-low p-4">
@@ -189,7 +189,7 @@ export function AiProviderSettingsSection({ scope = 'user' }: AiProviderSettings
               <div className="flex flex-wrap gap-2">
                 <Button variant="ghost" size="sm" loading={testMutation.isPending} onClick={() => testMutation.mutate(setting.id)}>Test</Button>
                 <Button variant="ghost" size="sm" onClick={() => { setForm(toForm(setting)); setIsEditing(true); }}>Edit</Button>
-                <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(setting.id)}>{isSystem ? 'Remove' : 'Use admin fallback'}</Button>
+                <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(setting.id)}>{isSystem ? 'Remove' : 'Delete personal provider'}</Button>
               </div>
             </div>
           </div>
