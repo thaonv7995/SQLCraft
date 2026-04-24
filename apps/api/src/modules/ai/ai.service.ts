@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '../../db';
 import { NotFoundError, ValidationError } from '../../lib/errors';
 import crypto from 'node:crypto';
@@ -8,6 +8,7 @@ import type { AiChatBody, CreateAiProviderSettingBody, UpdateAiProviderSettingBo
 import { appendAiMessages, getAiMemoryContext, resolveAiChatSessionForMessage, type AiChatSessionDto } from './ai.memory';
 
 type AiProviderSettingRow = typeof schema.aiProviderSettings.$inferSelect;
+type AiProviderSettingScope = 'user' | 'system';
 
 export interface AiProviderSettingDto {
   id: string;
@@ -16,6 +17,7 @@ export interface AiProviderSettingDto {
   baseUrl: string | null;
   model: string;
   apiKeyMasked: string;
+  scope: AiProviderSettingScope;
   isEnabled: boolean;
   isDefault: boolean;
   lastTestStatus: string | null;
@@ -39,6 +41,7 @@ function toDto(row: AiProviderSettingRow): AiProviderSettingDto {
     baseUrl: row.baseUrl,
     model: row.model,
     apiKeyMasked,
+    scope: row.scope,
     isEnabled: row.isEnabled,
     isDefault: row.isDefault,
     lastTestStatus: row.lastTestStatus,
@@ -59,88 +62,122 @@ function defaultName(provider: string): string {
   return labels[provider] ?? provider;
 }
 
-async function clearDefault(userId: string, exceptId?: string): Promise<void> {
-  const db = getDb();
-  const rows = await db.select().from(schema.aiProviderSettings).where(eq(schema.aiProviderSettings.userId, userId));
-  await Promise.all(
-    rows
-      .filter((row) => row.isDefault && row.id !== exceptId)
-      .map((row) => db.update(schema.aiProviderSettings).set({ isDefault: false, updatedAt: new Date() }).where(eq(schema.aiProviderSettings.id, row.id))),
-  );
+function scopePredicate(scope: AiProviderSettingScope, userId?: string) {
+  return scope === 'system'
+    ? and(eq(schema.aiProviderSettings.scope, 'system'), isNull(schema.aiProviderSettings.userId))
+    : and(eq(schema.aiProviderSettings.scope, 'user'), eq(schema.aiProviderSettings.userId, userId!));
+}
+
+async function getScopedSettings(scope: AiProviderSettingScope, userId?: string): Promise<AiProviderSettingRow[]> {
+  return getDb()
+    .select()
+    .from(schema.aiProviderSettings)
+    .where(scopePredicate(scope, userId))
+    .orderBy(desc(schema.aiProviderSettings.updatedAt));
 }
 
 export async function listAiProviderSettings(userId: string): Promise<AiProviderSettingDto[]> {
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(schema.aiProviderSettings)
-    .where(eq(schema.aiProviderSettings.userId, userId))
-    .orderBy(desc(schema.aiProviderSettings.isDefault), desc(schema.aiProviderSettings.updatedAt));
-  return rows.map(toDto);
+  const rows = await getScopedSettings('user', userId);
+  return rows.slice(0, 1).map(toDto);
 }
 
-export async function createAiProviderSetting(userId: string, body: CreateAiProviderSettingBody): Promise<AiProviderSettingDto> {
-  if (body.provider === 'openai-compatible' && !body.baseUrl?.trim()) {
+export async function listSystemAiProviderSettings(): Promise<AiProviderSettingDto[]> {
+  const rows = await getScopedSettings('system');
+  return rows.slice(0, 1).map(toDto);
+}
+
+async function saveSingleAiProviderSetting(
+  scope: AiProviderSettingScope,
+  userId: string | null,
+  body: CreateAiProviderSettingBody | UpdateAiProviderSettingBody,
+): Promise<AiProviderSettingDto> {
+  const existing = (await getScopedSettings(scope, userId ?? undefined))[0];
+  const provider = body.provider ?? existing?.provider ?? 'openai';
+  if (provider === 'openai-compatible' && !(body.baseUrl ?? existing?.baseUrl)?.trim()) {
     throw new ValidationError('Base URL is required for OpenAI-compatible providers.');
   }
+  const baseUrl = body.baseUrl !== undefined ? body.baseUrl?.trim() || defaultBaseUrl(provider) || null : existing?.baseUrl ?? defaultBaseUrl(provider) ?? null;
+  const model = body.model?.trim() || existing?.model;
+  if (!model) throw new ValidationError('Model is required.');
+
   const db = getDb();
-  const existing = await db.select().from(schema.aiProviderSettings).where(eq(schema.aiProviderSettings.userId, userId));
-  const shouldDefault = body.isDefault ?? existing.length === 0;
-  if (shouldDefault) await clearDefault(userId);
+  if (existing) {
+    const [row] = await db
+      .update(schema.aiProviderSettings)
+      .set({
+        scope,
+        userId,
+        provider,
+        name: body.name?.trim() || defaultName(provider),
+        baseUrl,
+        model,
+        encryptedApiKey: body.apiKey ? encryptSecret(body.apiKey) : existing.encryptedApiKey,
+        isEnabled: body.isEnabled ?? true,
+        isDefault: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.aiProviderSettings.id, existing.id))
+      .returning();
+    return toDto(row);
+  }
+
+  if (!body.apiKey?.trim()) throw new ValidationError('API key is required.');
   const [row] = await db
     .insert(schema.aiProviderSettings)
     .values({
+      scope,
       userId,
-      provider: body.provider,
-      name: body.name?.trim() || defaultName(body.provider),
-      baseUrl: body.baseUrl?.trim() || defaultBaseUrl(body.provider) || null,
-      model: body.model.trim(),
+      provider,
+      name: body.name?.trim() || defaultName(provider),
+      baseUrl,
+      model,
       encryptedApiKey: encryptSecret(body.apiKey),
       isEnabled: body.isEnabled ?? true,
-      isDefault: shouldDefault,
+      isDefault: true,
     })
     .returning();
   return toDto(row);
 }
 
-async function getOwnedSetting(userId: string, id: string): Promise<AiProviderSettingRow> {
-  const db = getDb();
-  const [row] = await db
+export async function createAiProviderSetting(userId: string, body: CreateAiProviderSettingBody): Promise<AiProviderSettingDto> {
+  return saveSingleAiProviderSetting('user', userId, body);
+}
+
+export async function createSystemAiProviderSetting(body: CreateAiProviderSettingBody): Promise<AiProviderSettingDto> {
+  return saveSingleAiProviderSetting('system', null, body);
+}
+
+async function getScopedSetting(scope: AiProviderSettingScope, id: string, userId?: string): Promise<AiProviderSettingRow> {
+  const [row] = await getDb()
     .select()
     .from(schema.aiProviderSettings)
-    .where(and(eq(schema.aiProviderSettings.id, id), eq(schema.aiProviderSettings.userId, userId)))
+    .where(and(eq(schema.aiProviderSettings.id, id), scopePredicate(scope, userId)))
     .limit(1);
   if (!row) throw new NotFoundError('AI provider setting not found');
   return row;
 }
 
+async function getOwnedSetting(userId: string, id: string): Promise<AiProviderSettingRow> {
+  return getScopedSetting('user', id, userId);
+}
+
 export async function updateAiProviderSetting(userId: string, id: string, body: UpdateAiProviderSettingBody): Promise<AiProviderSettingDto> {
-  const existing = await getOwnedSetting(userId, id);
-  const provider = body.provider ?? existing.provider;
-  if (provider === 'openai-compatible' && !(body.baseUrl ?? existing.baseUrl)?.trim()) {
-    throw new ValidationError('Base URL is required for OpenAI-compatible providers.');
-  }
-  if (body.isDefault) await clearDefault(userId, id);
-  const db = getDb();
-  const [row] = await db
-    .update(schema.aiProviderSettings)
-    .set({
-      provider,
-      name: body.name?.trim() || existing.name,
-      baseUrl: body.baseUrl !== undefined ? body.baseUrl?.trim() || defaultBaseUrl(provider) || null : existing.baseUrl,
-      model: body.model?.trim() || existing.model,
-      encryptedApiKey: body.apiKey ? encryptSecret(body.apiKey) : existing.encryptedApiKey,
-      isEnabled: body.isEnabled ?? existing.isEnabled,
-      isDefault: body.isDefault ?? existing.isDefault,
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.aiProviderSettings.id, id))
-    .returning();
-  return toDto(row);
+  await getOwnedSetting(userId, id);
+  return saveSingleAiProviderSetting('user', userId, body);
+}
+
+export async function updateSystemAiProviderSetting(id: string, body: UpdateAiProviderSettingBody): Promise<AiProviderSettingDto> {
+  await getScopedSetting('system', id);
+  return saveSingleAiProviderSetting('system', null, body);
 }
 
 export async function deleteAiProviderSetting(userId: string, id: string): Promise<void> {
   await getOwnedSetting(userId, id);
+  await getDb().delete(schema.aiProviderSettings).where(eq(schema.aiProviderSettings.id, id));
+}
+
+export async function deleteSystemAiProviderSetting(id: string): Promise<void> {
+  await getScopedSetting('system', id);
   await getDb().delete(schema.aiProviderSettings).where(eq(schema.aiProviderSettings.id, id));
 }
 
@@ -157,8 +194,7 @@ async function runProviderCall(row: AiProviderSettingRow, prompt: string) {
   });
 }
 
-export async function testAiProviderSetting(userId: string, id: string): Promise<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSettingDto }> {
-  const row = await getOwnedSetting(userId, id);
+async function testAiProviderRow(row: AiProviderSettingRow): Promise<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSettingDto }> {
   const started = Date.now();
   let ok = false;
   let message = 'Connection failed';
@@ -172,27 +208,36 @@ export async function testAiProviderSetting(userId: string, id: string): Promise
   const [updated] = await getDb()
     .update(schema.aiProviderSettings)
     .set({ lastTestStatus: ok ? 'success' : 'failed', lastTestMessage: message, lastTestedAt: new Date(), updatedAt: new Date() })
-    .where(eq(schema.aiProviderSettings.id, id))
+    .where(eq(schema.aiProviderSettings.id, row.id))
     .returning();
   return { ok, message, latencyMs: Date.now() - started, setting: toDto(updated) };
 }
 
+export async function testAiProviderSetting(userId: string, id: string): Promise<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSettingDto }> {
+  return testAiProviderRow(await getOwnedSetting(userId, id));
+}
+
+export async function testSystemAiProviderSetting(id: string): Promise<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSettingDto }> {
+  return testAiProviderRow(await getScopedSetting('system', id));
+}
+
 async function resolveChatSetting(userId: string, settingId?: string): Promise<AiProviderSettingRow> {
   if (settingId) return getOwnedSetting(userId, settingId);
-  const [row] = await getDb()
+  const [userSetting] = await getDb()
     .select()
     .from(schema.aiProviderSettings)
-    .where(and(eq(schema.aiProviderSettings.userId, userId), eq(schema.aiProviderSettings.isDefault, true), eq(schema.aiProviderSettings.isEnabled, true)))
-    .limit(1);
-  if (row) return row;
-  const [fallback] = await getDb()
-    .select()
-    .from(schema.aiProviderSettings)
-    .where(and(eq(schema.aiProviderSettings.userId, userId), eq(schema.aiProviderSettings.isEnabled, true)))
+    .where(and(eq(schema.aiProviderSettings.scope, 'user'), eq(schema.aiProviderSettings.userId, userId), eq(schema.aiProviderSettings.isEnabled, true)))
     .orderBy(desc(schema.aiProviderSettings.updatedAt))
     .limit(1);
-  if (!fallback) throw new ValidationError('No enabled AI provider configured. Add one in Settings → AI Providers.');
-  return fallback;
+  if (userSetting) return userSetting;
+  const [systemSetting] = await getDb()
+    .select()
+    .from(schema.aiProviderSettings)
+    .where(and(eq(schema.aiProviderSettings.scope, 'system'), isNull(schema.aiProviderSettings.userId), eq(schema.aiProviderSettings.isEnabled, true)))
+    .orderBy(desc(schema.aiProviderSettings.updatedAt))
+    .limit(1);
+  if (!systemSetting) throw new ValidationError('No enabled AI provider configured. Add one in Settings → AI Providers, or ask an admin to configure the system provider.');
+  return systemSetting;
 }
 
 function buildPrompt(body: AiChatBody): string {

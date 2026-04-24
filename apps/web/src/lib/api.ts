@@ -2094,6 +2094,7 @@ export interface AiProviderSetting {
   baseUrl: string | null;
   model: string;
   apiKeyMasked: string;
+  scope: 'user' | 'system';
   isEnabled: boolean;
   isDefault: boolean;
   lastTestStatus: string | null;
@@ -2112,6 +2113,7 @@ export interface AiProviderSettingPayload {
   isEnabled?: boolean;
   isDefault?: boolean;
 }
+
 
 
 export interface AiChatSession {
@@ -2153,15 +2155,27 @@ export interface AiChatResult {
 
 export const aiApi = {
   listSettings: () => api.get<AiProviderSetting[]>('/ai/settings').then((r) => r.data),
+  listSystemSettings: () => api.get<AiProviderSetting[]>('/admin/ai/settings').then((r) => r.data),
   createSetting: (payload: AiProviderSettingPayload & { apiKey: string }) =>
     api.post<AiProviderSetting>('/ai/settings', payload).then((r) => r.data),
+  createSystemSetting: (payload: AiProviderSettingPayload & { apiKey: string }) =>
+    api.post<AiProviderSetting>('/admin/ai/settings', payload).then((r) => r.data),
   updateSetting: (id: string, payload: Partial<AiProviderSettingPayload>) =>
     api.patch<AiProviderSetting>(`/ai/settings/${id}`, payload).then((r) => r.data),
+  updateSystemSetting: (id: string, payload: Partial<AiProviderSettingPayload>) =>
+    api.patch<AiProviderSetting>(`/admin/ai/settings/${id}`, payload).then((r) => r.data),
   deleteSetting: (id: string) => api.delete(`/ai/settings/${id}`).then((r) => r.data),
+  deleteSystemSetting: (id: string) => api.delete(`/admin/ai/settings/${id}`).then((r) => r.data),
   testSetting: (id: string) =>
     api
       .post<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSetting }>(
         `/ai/settings/${id}/test`,
+      )
+      .then((r) => r.data),
+  testSystemSetting: (id: string) =>
+    api
+      .post<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSetting }>(
+        `/admin/ai/settings/${id}/test`,
       )
       .then((r) => r.data),
   listChatSessions: (learningSessionId: string) =>

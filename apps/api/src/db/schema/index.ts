@@ -284,6 +284,8 @@ export const sandboxGoldenStatusValues = ['none', 'pending', 'ready', 'failed'] 
 
 export const aiProviderValues = ['openai', 'anthropic', 'gemini', 'openai-compatible'] as const;
 export const aiProviderEnum = pgEnum('ai_provider', aiProviderValues);
+export const aiProviderSettingScopeValues = ['user', 'system'] as const;
+export const aiProviderSettingScopeEnum = pgEnum('ai_provider_setting_scope', aiProviderSettingScopeValues);
 export const aiChatSessionStatusEnum = pgEnum('ai_chat_session_status', ['active', 'archived', 'deleted']);
 
 export const datasetTemplates = pgTable(
@@ -325,9 +327,8 @@ export const aiProviderSettings = pgTable(
   'ai_provider_settings',
   {
     id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    scope: aiProviderSettingScopeEnum('scope').notNull().default('user'),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
     provider: aiProviderEnum('provider').notNull(),
     name: varchar('name', { length: 100 }).notNull(),
     baseUrl: text('base_url'),
@@ -342,6 +343,7 @@ export const aiProviderSettings = pgTable(
     updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
   },
   (table) => ({
+    scopeIdx: index('ai_provider_settings_scope_idx').on(table.scope),
     userIdx: index('ai_provider_settings_user_idx').on(table.userId),
     userDefaultIdx: index('ai_provider_settings_user_default_idx').on(table.userId, table.isDefault),
   }),

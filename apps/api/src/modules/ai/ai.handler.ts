@@ -5,10 +5,15 @@ import { AiChatSchema, CreateAiChatSessionSchema, ListAiChatSessionsQuerySchema,
 import {
   chatWithAi,
   createAiProviderSetting,
+  createSystemAiProviderSetting,
   deleteAiProviderSetting,
+  deleteSystemAiProviderSetting,
   listAiProviderSettings,
+  listSystemAiProviderSettings,
   testAiProviderSetting,
+  testSystemAiProviderSetting,
   updateAiProviderSetting,
+  updateSystemAiProviderSetting,
 } from './ai.service';
 import { createAiChatSession, listAiChatSessions, readAiChatMessages } from './ai.memory';
 
@@ -56,4 +61,28 @@ export async function createAiChatSessionHandler(request: FastifyRequest, reply:
 
 export async function listAiChatMessagesHandler(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
   reply.send(success(await readAiChatMessages(userId(request), request.params.id), 'AI chat messages retrieved'));
+}
+
+
+export async function listSystemAiSettingsHandler(_request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  reply.send(success(await listSystemAiProviderSettings(), 'System AI provider settings retrieved'));
+}
+
+export async function createSystemAiSettingHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const body = CreateAiProviderSettingSchema.parse(request.body);
+  reply.status(201).send(created(await createSystemAiProviderSetting(body), 'System AI provider setting created'));
+}
+
+export async function updateSystemAiSettingHandler(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
+  const body = UpdateAiProviderSettingSchema.parse(request.body);
+  reply.send(success(await updateSystemAiProviderSetting(request.params.id, body), 'System AI provider setting updated'));
+}
+
+export async function deleteSystemAiSettingHandler(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
+  await deleteSystemAiProviderSetting(request.params.id);
+  reply.send(success(null, 'System AI provider setting deleted'));
+}
+
+export async function testSystemAiSettingHandler(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
+  reply.send(success(await testSystemAiProviderSetting(request.params.id), 'System AI provider setting tested'));
 }

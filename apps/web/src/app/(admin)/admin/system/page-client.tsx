@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { adminApi } from '@/lib/api';
 import { AdminConfigPanel } from '@/components/admin/admin-config-panel';
+import { AiProviderSettingsSection } from '@/components/ai-provider-settings';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -575,7 +576,12 @@ export default function AdminSystemPage({ searchParams }: ClientPageProps) {
         </section>
       ) : null}
 
-      {activeTab === 'config' ? <AdminConfigPanel /> : null}
+      {activeTab === 'config' ? (
+        <div className="space-y-6">
+          <AiProviderSettingsSection scope="system" />
+          <AdminConfigPanel />
+        </div>
+      ) : null}
     </div>
   );
 }
