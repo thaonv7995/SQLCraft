@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/table';
 import { DatabaseImportPanel } from '@/components/admin/database-import-panel';
 import { GoldenSnapshotErrorDialog } from '@/components/admin/golden-snapshot-error-dialog';
-import { adminApi, databasesApi, type Database } from '@/lib/api';
+import { adminApi, databasesApi, type Database, type GoldenSnapshotVersion } from '@/lib/api';
 import {
   DATABASE_DIFFICULTY_STYLES,
   DATABASE_DOMAIN_LABELS,
@@ -33,11 +33,12 @@ import { cn, formatRelativeTime, formatRows } from '@/lib/utils';
 import { searchParamFirst } from '@/lib/next-app-page';
 import type { ClientPageProps } from '@/lib/page-props';
 
-type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'generation-jobs';
+type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'golden-snapshots' | 'generation-jobs';
 
 const DETAIL_TABS: Array<{ id: DatabaseDetailTab; label: string }> = [
   { id: 'schema-template', label: 'Schema Template' },
   { id: 'dataset-templates', label: 'Dataset Templates' },
+  { id: 'golden-snapshots', label: 'Golden Snapshots' },
   { id: 'generation-jobs', label: 'Generation Jobs' },
 ];
 
@@ -485,6 +486,101 @@ function DetailSkeleton() {
   );
 }
 
+
+function GoldenSnapshotsTab({ schemaTemplateId }: { schemaTemplateId: string }) {
+  const queryClient = useQueryClient();
+  const [migrationSql, setMigrationSql] = useState('');
+  const [changeNote, setChangeNote] = useState('');
+  const { data: versions = [], isLoading } = useQuery({
+    queryKey: ['admin-golden-snapshots', schemaTemplateId],
+    queryFn: () => adminApi.listGoldenSnapshots(schemaTemplateId),
+    enabled: Boolean(schemaTemplateId),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: () => adminApi.createGoldenSnapshotCandidate(schemaTemplateId, { migrationSql, changeNote: changeNote || undefined }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin-golden-snapshots', schemaTemplateId] });
+      setMigrationSql('');
+      setChangeNote('');
+      toast.success('Golden candidate created');
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to create golden candidate'),
+  });
+
+  const promoteMutation = useMutation({
+    mutationFn: (version: GoldenSnapshotVersion) => adminApi.promoteGoldenSnapshot(version.id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin-golden-snapshots', schemaTemplateId] });
+      toast.success('Golden snapshot promoted');
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Promote failed'),
+  });
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <Card className="border border-outline-variant/10">
+        <CardHeader>
+          <CardTitle>Golden Snapshot Versions</CardTitle>
+          <CardDescription>Versioned root snapshots used by new SQL Lab sessions. Current MVP creates guarded candidates; bake/apply validation is the next worker step.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Version</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Validation</TableHead>
+                <TableHead>Dataset</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? <TableSkeleton cols={6} rows={3} /> : null}
+              {!isLoading && versions.length === 0 ? <TableEmpty colSpan={6} message="No golden snapshot versions yet." /> : null}
+              {!isLoading ? versions.map((version) => (
+                <TableRow key={version.id}>
+                  <TableCell className="font-medium">v{version.versionNo}</TableCell>
+                  <TableCell><StatusBadge status={version.status} /></TableCell>
+                  <TableCell><StatusBadge status={version.validationStatus} /></TableCell>
+                  <TableCell>{version.datasetName} · {version.datasetSize}</TableCell>
+                  <TableCell>{formatRelativeTime(version.createdAt)}</TableCell>
+                  <TableCell className="text-right">
+                    {version.status === 'candidate' ? (
+                      <Button size="sm" variant="ghost" loading={promoteMutation.isPending} onClick={() => promoteMutation.mutate(version)}>Promote</Button>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              )) : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card className="border border-outline-variant/10">
+        <CardHeader>
+          <CardTitle>Create Candidate</CardTitle>
+          <CardDescription>Paste index/statistics SQL only. Destructive DDL/DML is blocked server-side.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Input value={changeNote} onChange={(event) => setChangeNote(event.target.value)} placeholder="Change note, e.g. add order lookup indexes" />
+          <textarea
+            value={migrationSql}
+            onChange={(event) => setMigrationSql(event.target.value)}
+            placeholder={'CREATE INDEX idx_orders_customer_id ON orders(customer_id);'}
+            className="min-h-44 w-full rounded-xl border border-outline-variant/20 bg-surface-container px-3 py-2 font-mono text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary"
+          />
+          <p className="text-xs text-on-surface-variant">Allowed: CREATE INDEX, DROP INDEX, REINDEX, CREATE STATISTICS. Promote is blocked until a baked snapshot is attached by the worker pipeline.</p>
+          <Button className="w-full" variant="primary" loading={createMutation.isPending} onClick={() => createMutation.mutate()} disabled={!migrationSql.trim()}>
+            Create guarded candidate
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AdminDatabaseDetailPage({ params, searchParams }: ClientPageProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -810,6 +906,9 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
       ) : null}
       {activeTab === 'dataset-templates' ? (
         <DatasetTemplatesTab database={database} reviewDraft={pendingReview} />
+      ) : null}
+      {activeTab === 'golden-snapshots' ? (
+        <GoldenSnapshotsTab schemaTemplateId={database.schemaTemplateId ?? database.id} />
       ) : null}
       {activeTab === 'generation-jobs' ? (
         <GenerationJobsTab

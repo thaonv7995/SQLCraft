@@ -2314,6 +2314,40 @@ export type ChallengeValidatorConfigPayload = {
 };
 
 /** POST /admin/challenges — creates a draft challenge and version 1 (admin-only). */
+export interface GoldenSnapshotVersion {
+  id: string;
+  schemaTemplateId: string;
+  datasetTemplateId: string;
+  datasetName: string;
+  datasetSize: string;
+  versionNo: number;
+  status: string;
+  validationStatus: string;
+  changeNote: string | null;
+  migrationSql: string | null;
+  normalizedStatements: string[];
+  warnings: string[];
+  snapshotUrl: string | null;
+  schemaSnapshotUrl: string | null;
+  snapshotBytes: number | null;
+  snapshotChecksum: string | null;
+  createdBy: string | null;
+  promotedBy: string | null;
+  promotedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GoldenSnapshotValidationRun {
+  id: string;
+  goldenSnapshotVersionId: string;
+  status: string;
+  summary: string | null;
+  details: Record<string, unknown>;
+  createdBy: string | null;
+  createdAt: string;
+}
+
 export interface AdminCreateChallengePayload {
   databaseId: string;
   slug: string;
@@ -2453,6 +2487,22 @@ export const adminApi = {
         `/admin/databases/schema-templates/${schemaTemplateId}/retrigger-golden-bake`,
       )
       .then((r) => r.data),
+
+  listGoldenSnapshots: (schemaTemplateId: string) =>
+    api
+      .get<GoldenSnapshotVersion[]>(`/admin/databases/schema-templates/${schemaTemplateId}/golden-snapshots`)
+      .then((r) => r.data),
+
+  createGoldenSnapshotCandidate: (schemaTemplateId: string, payload: { migrationSql: string; changeNote?: string }) =>
+    api
+      .post<GoldenSnapshotVersion>(`/admin/databases/schema-templates/${schemaTemplateId}/golden-snapshots/candidates`, payload)
+      .then((r) => r.data),
+
+  promoteGoldenSnapshot: (versionId: string) =>
+    api.post<GoldenSnapshotVersion>(`/admin/golden-snapshots/${versionId}/promote`).then((r) => r.data),
+
+  listGoldenSnapshotValidationRuns: (versionId: string) =>
+    api.get<GoldenSnapshotValidationRun[]>(`/admin/golden-snapshots/${versionId}/validation-runs`).then((r) => r.data),
 
   getArtifactDownloadUrls: (schemaTemplateId: string) =>
     api

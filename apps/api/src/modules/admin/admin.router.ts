@@ -17,6 +17,7 @@ import type {
   CreateSqlDumpUploadSessionBody,
   PresignSqlDumpUploadPartBody,
   CompleteSqlDumpUploadSessionBody,
+  CreateGoldenSnapshotCandidateBody,
   CleanupStaleScansBody,
 } from './admin.schema';
 import {
@@ -46,6 +47,10 @@ import {
   approveSchemaTemplateReviewHandler,
   rejectSchemaTemplateReviewHandler,
   retriggerGoldenBakeHandler,
+  listGoldenSnapshotVersionsHandler,
+  createGoldenSnapshotCandidateHandler,
+  promoteGoldenSnapshotVersionHandler,
+  listGoldenSnapshotValidationRunsHandler,
   getDatasetArtifactDownloadUrlsHandler,
   updateAdminConfigHandler,
   createSqlDumpUploadSessionHandler,
@@ -497,6 +502,80 @@ export default async function adminRouter(fastify: FastifyInstance): Promise<voi
       },
     },
     retriggerGoldenBakeHandler,
+  );
+
+
+
+  fastify.get<{ Params: AdminIdParams }>(
+    '/v1/admin/databases/schema-templates/:id/golden-snapshots',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List golden snapshot versions for a schema template',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    listGoldenSnapshotVersionsHandler,
+  );
+
+  fastify.post<{ Params: AdminIdParams; Body: CreateGoldenSnapshotCandidateBody }>(
+    '/v1/admin/databases/schema-templates/:id/golden-snapshots/candidates',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Create a golden snapshot candidate from index/statistics SQL',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    createGoldenSnapshotCandidateHandler,
+  );
+
+  fastify.post<{ Params: AdminIdParams }>(
+    '/v1/admin/golden-snapshots/:id/promote',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'Promote a validated golden snapshot candidate',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    promoteGoldenSnapshotVersionHandler,
+  );
+
+  fastify.get<{ Params: AdminIdParams }>(
+    '/v1/admin/golden-snapshots/:id/validation-runs',
+    {
+      onRequest: adminGuard,
+      schema: {
+        tags: ['Admin'],
+        summary: 'List golden snapshot validation runs',
+        security: [{ bearerAuth: [] }],
+        params: {
+          type: 'object',
+          required: ['id'],
+          properties: { id: { type: 'string', format: 'uuid' } },
+        },
+      },
+    },
+    listGoldenSnapshotValidationRunsHandler,
   );
 
   fastify.get<{ Params: AdminIdParams }>(

@@ -29,6 +29,7 @@ import type {
   PresignSqlDumpUploadPartBody,
   CompleteSqlDumpUploadSessionBody,
   CleanupStaleScansBody,
+  CreateGoldenSnapshotCandidateBody,
 } from './admin.schema';
 import {
   AdminConfigSchema,
@@ -43,6 +44,7 @@ import {
   ListPendingScansQuerySchema,
   PresignSqlDumpUploadPartSchema,
   UpdateAdminUserSchema,
+  CreateGoldenSnapshotCandidateSchema,
 } from './admin.schema';
 import {
   clearStaleSessions,
@@ -85,6 +87,12 @@ import {
   presignSqlDumpUploadPart,
 } from './sql-dump-upload-session.service';
 import { getDatabaseItemForAdminPendingReview } from '../databases/databases.service';
+import {
+  createGoldenSnapshotCandidate,
+  listGoldenSnapshotValidationRuns,
+  listGoldenSnapshotVersions,
+  promoteGoldenSnapshotVersion,
+} from './golden-snapshots.service';
 
 // ─── Challenges ───────────────────────────────────────────────────────────────
 
@@ -475,4 +483,36 @@ export async function cleanupStaleSqlDumpScansHandler(
   const days = body.olderThanDays ?? config.SQL_DUMP_SCAN_STALE_DAYS;
   const result = await cleanupStalePendingSqlDumpScans(days);
   reply.send(success(result, `Cleanup complete: ${result.deleted} scan(s) deleted`));
+}
+
+
+export async function listGoldenSnapshotVersionsHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  reply.send(success(await listGoldenSnapshotVersions(request.params.id), 'Golden snapshot versions retrieved'));
+}
+
+export async function createGoldenSnapshotCandidateHandler(
+  request: FastifyRequest<{ Params: AdminIdParams; Body: CreateGoldenSnapshotCandidateBody }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const body = CreateGoldenSnapshotCandidateSchema.parse(request.body);
+  const jwtUser = request.user as JwtPayload;
+  reply.status(201).send(created(await createGoldenSnapshotCandidate(request.params.id, jwtUser.sub, body), 'Golden snapshot candidate created'));
+}
+
+export async function promoteGoldenSnapshotVersionHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  const jwtUser = request.user as JwtPayload;
+  reply.send(success(await promoteGoldenSnapshotVersion(request.params.id, jwtUser.sub), 'Golden snapshot promoted'));
+}
+
+export async function listGoldenSnapshotValidationRunsHandler(
+  request: FastifyRequest<{ Params: AdminIdParams }>,
+  reply: FastifyReply,
+): Promise<void> {
+  reply.send(success(await listGoldenSnapshotValidationRuns(request.params.id), 'Golden snapshot validation runs retrieved'));
 }

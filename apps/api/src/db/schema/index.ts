@@ -282,6 +282,51 @@ export const schemaTemplateInvites = pgTable(
 /** none | pending | ready | failed — public catalog uses ready (with published) per golden snapshot plan */
 export const sandboxGoldenStatusValues = ['none', 'pending', 'ready', 'failed'] as const;
 
+
+export const goldenSnapshotVersions = pgTable(
+  'golden_snapshot_versions',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    schemaTemplateId: uuid('schema_template_id').notNull().references(() => schemaTemplates.id, { onDelete: 'cascade' }),
+    datasetTemplateId: uuid('dataset_template_id').notNull().references(() => datasetTemplates.id, { onDelete: 'cascade' }),
+    versionNo: integer('version_no').notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('candidate'),
+    validationStatus: varchar('validation_status', { length: 32 }).notNull().default('pending'),
+    changeNote: text('change_note'),
+    migrationSql: text('migration_sql'),
+    normalizedStatements: jsonb('normalized_statements').notNull().default(sql`'[]'::jsonb`),
+    warnings: jsonb('warnings').notNull().default(sql`'[]'::jsonb`),
+    snapshotUrl: text('snapshot_url'),
+    schemaSnapshotUrl: text('schema_snapshot_url'),
+    snapshotBytes: bigint('snapshot_bytes', { mode: 'number' }),
+    snapshotChecksum: text('snapshot_checksum'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    promotedBy: uuid('promoted_by').references(() => users.id, { onDelete: 'set null' }),
+    promotedAt: timestamp('promoted_at'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    schemaIdx: index('golden_snapshot_versions_schema_idx').on(table.schemaTemplateId, table.status, table.createdAt),
+  }),
+);
+
+export const goldenSnapshotValidationRuns = pgTable(
+  'golden_snapshot_validation_runs',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    goldenSnapshotVersionId: uuid('golden_snapshot_version_id').notNull().references(() => goldenSnapshotVersions.id, { onDelete: 'cascade' }),
+    status: varchar('status', { length: 32 }).notNull(),
+    summary: text('summary'),
+    details: jsonb('details').notNull().default(sql`'{}'::jsonb`),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    versionIdx: index('golden_snapshot_validation_runs_version_idx').on(table.goldenSnapshotVersionId, table.createdAt),
+  }),
+);
+
 export const aiProviderValues = ['openai', 'anthropic', 'gemini', 'openai-compatible'] as const;
 export const aiProviderEnum = pgEnum('ai_provider', aiProviderValues);
 export const aiProviderSettingScopeValues = ['user', 'system'] as const;

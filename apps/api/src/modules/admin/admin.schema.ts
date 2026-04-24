@@ -418,3 +418,12 @@ export type SqlDumpUploadSessionIdParams = z.infer<typeof SqlDumpUploadSessionId
 export type CreateSqlDumpUploadSessionBody = z.infer<typeof CreateSqlDumpUploadSessionSchema>;
 export type PresignSqlDumpUploadPartBody = z.infer<typeof PresignSqlDumpUploadPartSchema>;
 export type CompleteSqlDumpUploadSessionBody = z.infer<typeof CompleteSqlDumpUploadSessionSchema>;
+
+// ─── Golden snapshot versions ────────────────────────────────────────────────
+
+export const CreateGoldenSnapshotCandidateSchema = z.object({
+  migrationSql: z.string().min(1).max(50_000),
+  changeNote: z.string().max(1_000).optional(),
+});
+
+export type CreateGoldenSnapshotCandidateBody = z.infer<typeof CreateGoldenSnapshotCandidateSchema>;
