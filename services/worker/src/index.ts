@@ -31,6 +31,10 @@ import {
   updateDatasetGoldenBakeFailed,
   updateDatasetGoldenBakeFailedIfPending,
   fetchDatasetTemplateIdsPendingGoldenBake,
+  fetchGoldenSnapshotCandidate,
+  markGoldenSnapshotCandidateBaking,
+  updateGoldenSnapshotCandidateSuccess,
+  updateGoldenSnapshotCandidateFailed,
 } from './db';
 import { normalizeSchemaSqlEngine, type SchemaSqlEngine } from '@sqlcraft/types';
 import {
@@ -60,6 +64,7 @@ import { sandboxDbNameFromInstanceId } from './sandbox-naming';
 import { applySchemaAndDatasetToContainer } from './sandbox-apply-dataset';
 import { waitForSandboxDbReady } from './sandbox-wait-ready';
 import { runDatasetGoldenBake } from './dataset-golden-bake';
+import { runGoldenBakeSnapshotPipeline } from './golden-bake-snapshot';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -168,6 +173,7 @@ const QUEUES = {
   QUERY_EXECUTION: 'query-execution',
   DATASET_SANDBOX_GOLDEN_BAKE: 'dataset-sandbox-golden-bake',
   SQL_DUMP_SCAN: 'sql-dump-scan',
+  GOLDEN_SNAPSHOT_CANDIDATE_BAKE: 'golden-snapshot-candidate-bake',
 } as const;
 
 // Queue client used by the expiry scanner to enqueue cleanup jobs
@@ -177,6 +183,7 @@ const queueOptions = queuePrefix ? { connection: conn, prefix: queuePrefix } : {
 const cleanupQueue = new Queue(QUEUES.SANDBOX_CLEANUP, queueOptions);
 const queryExecutionQueueClient = new Queue(QUEUES.QUERY_EXECUTION, queueOptions);
 const goldenBakeQueue = new Queue(QUEUES.DATASET_SANDBOX_GOLDEN_BAKE, queueOptions);
+const goldenSnapshotCandidateBakeQueue = new Queue(QUEUES.GOLDEN_SNAPSHOT_CANDIDATE_BAKE, queueOptions);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -706,6 +713,37 @@ const datasetGoldenBakeWorker = sandboxQueuesEnabled
     )
   : null;
 
+
+
+const goldenSnapshotCandidateBakeWorker = sandboxQueuesEnabled
+  ? new Worker(
+      QUEUES.GOLDEN_SNAPSHOT_CANDIDATE_BAKE,
+      async (job: Job) => {
+        const { goldenSnapshotVersionId } = job.data as { goldenSnapshotVersionId: string };
+        const candidate = await fetchGoldenSnapshotCandidate(goldenSnapshotVersionId);
+        if (!candidate) throw new UnrecoverableError('Golden snapshot candidate not found');
+        try {
+          await markGoldenSnapshotCandidateBaking(goldenSnapshotVersionId);
+          const snapshot = await runGoldenBakeSnapshotPipeline({
+            datasetTemplateId: candidate.datasetTemplateId,
+            logger,
+            sandboxUser,
+            sandboxPassword,
+            mssqlSaPassword,
+            migrationSql: candidate.migrationSql,
+            objectKeyPrefix: `golden-snapshots/${candidate.datasetTemplateId}/versions/${candidate.id}`,
+          });
+          await updateGoldenSnapshotCandidateSuccess(goldenSnapshotVersionId, snapshot);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          await updateGoldenSnapshotCandidateFailed(goldenSnapshotVersionId, message);
+          throw err;
+        }
+      },
+      longJobOpts,
+    )
+  : null;
+
 // ─── Worker: sql_dump_scan (async upload scan) ────────────────────────────────
 
 const sqlDumpScanWorker = sandboxQueuesEnabled
@@ -1098,6 +1136,7 @@ if (sandboxResetWorker) {
 }
 if (datasetGoldenBakeWorker) {
   workers.push({ name: QUEUES.DATASET_SANDBOX_GOLDEN_BAKE, worker: datasetGoldenBakeWorker });
+if (goldenSnapshotCandidateBakeWorker) workers.push({ name: QUEUES.GOLDEN_SNAPSHOT_CANDIDATE_BAKE, worker: goldenSnapshotCandidateBakeWorker });
 }
 if (queryExecutionWorker) {
   workers.push({ name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker });
@@ -1139,6 +1178,7 @@ async function shutdown(signal: string): Promise<void> {
   await cleanupQueue.close();
   await queryExecutionQueueClient.close();
   await goldenBakeQueue.close();
+  await goldenSnapshotCandidateBakeQueue.close();
   await connection.quit();
   await mainDb.end();
 

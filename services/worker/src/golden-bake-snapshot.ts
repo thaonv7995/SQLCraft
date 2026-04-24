@@ -27,6 +27,7 @@ import {
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
 import { sandboxDbNameFromInstanceId } from './sandbox-naming';
 import { applySchemaAndDatasetToContainer } from './sandbox-apply-dataset';
+import { executeSqlOnTarget } from './query-executor';
 import { waitForSandboxDbReady } from './sandbox-wait-ready';
 
 const GOLDEN_BAKE_RESTORE_TIMEOUT_MS = Math.max(
@@ -154,6 +155,8 @@ export async function runGoldenBakeSnapshotPipeline(params: {
   sandboxUser: string;
   sandboxPassword: string;
   mssqlSaPassword: string;
+  migrationSql?: string | null;
+  objectKeyPrefix?: string | null;
 }): Promise<GoldenBakeSnapshotResult> {
   const { datasetTemplateId, logger, sandboxUser, sandboxPassword, mssqlSaPassword } = params;
 
@@ -240,6 +243,24 @@ export async function runGoldenBakeSnapshotPipeline(params: {
       'golden-bake applySchemaAndDataset',
     );
 
+    if (params.migrationSql?.trim()) {
+      await executeSqlOnTarget(
+        {
+          engine: spec.engine,
+          host: containerRef,
+          port: spec.internalPort,
+          user: spec.engine === 'sqlserver' ? 'sa' : sandboxUser,
+          password: spec.engine === 'sqlserver' ? mssqlSaPassword : sandboxPassword,
+          database: dbName,
+        },
+        params.migrationSql,
+        GOLDEN_BAKE_RESTORE_TIMEOUT_MS,
+        1,
+      );
+      logger.info({ datasetTemplateId }, 'Golden candidate migration SQL applied');
+    }
+
+    const objectKeyPrefix = params.objectKeyPrefix?.trim() || `golden-snapshots/${datasetTemplateId}`;
     let schemaSnapshotUrl: string | null = null;
     try {
       const snap = await fetchSandboxSchemaSnapshotForEngine(spec.engine, {
@@ -250,7 +271,7 @@ export async function runGoldenBakeSnapshotPipeline(params: {
         database: dbName,
       });
       const bucket = resolveStorageBucket();
-      const schemaKey = `golden-snapshots/${datasetTemplateId}/schema-snapshot.json`;
+      const schemaKey = `${objectKeyPrefix}/schema-snapshot.json`;
       await uploadBufferToS3ViaMinio({
         bucket,
         objectKey: schemaKey,
@@ -302,7 +323,7 @@ export async function runGoldenBakeSnapshotPipeline(params: {
     }
 
     const bucket = resolveStorageBucket();
-    const key = `golden-snapshots/${datasetTemplateId}/dataset.${ext}`;
+    const key = `${objectKeyPrefix}/dataset.${ext}`;
     const snapshotUrl = `s3://${bucket}/${key}`;
 
     const { checksumSha256, byteCount } = await uploadFileToS3ViaMinioStreaming({

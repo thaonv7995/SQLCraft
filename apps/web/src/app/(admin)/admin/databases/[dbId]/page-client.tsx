@@ -522,7 +522,7 @@ function GoldenSnapshotsTab({ schemaTemplateId }: { schemaTemplateId: string }) 
       <Card className="border border-outline-variant/10">
         <CardHeader>
           <CardTitle>Golden Snapshot Versions</CardTitle>
-          <CardDescription>Versioned root snapshots used by new SQL Lab sessions. Current MVP creates guarded candidates; bake/apply validation is the next worker step.</CardDescription>
+          <CardDescription>Versioned root snapshots used by new SQL Lab sessions. Candidates are baked by a worker, then can be promoted after validation passes.</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -548,7 +548,7 @@ function GoldenSnapshotsTab({ schemaTemplateId }: { schemaTemplateId: string }) 
                   <TableCell>{formatRelativeTime(version.createdAt)}</TableCell>
                   <TableCell className="text-right">
                     {version.status === 'candidate' ? (
-                      <Button size="sm" variant="ghost" loading={promoteMutation.isPending} onClick={() => promoteMutation.mutate(version)}>Promote</Button>
+                      <Button size="sm" variant="ghost" loading={promoteMutation.isPending} disabled={version.validationStatus !== 'passed'} onClick={() => promoteMutation.mutate(version)}>Promote</Button>
                     ) : null}
                   </TableCell>
                 </TableRow>
@@ -571,9 +571,9 @@ function GoldenSnapshotsTab({ schemaTemplateId }: { schemaTemplateId: string }) 
             placeholder={'CREATE INDEX idx_orders_customer_id ON orders(customer_id);'}
             className="min-h-44 w-full rounded-xl border border-outline-variant/20 bg-surface-container px-3 py-2 font-mono text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary"
           />
-          <p className="text-xs text-on-surface-variant">Allowed: CREATE INDEX, DROP INDEX, REINDEX, CREATE STATISTICS. Promote is blocked until a baked snapshot is attached by the worker pipeline.</p>
+          <p className="text-xs text-on-surface-variant">Allowed: CREATE INDEX, DROP INDEX, REINDEX, CREATE STATISTICS. The worker will restore the source dataset, apply this SQL, export a candidate snapshot, then enable Promote when validation passes.</p>
           <Button className="w-full" variant="primary" loading={createMutation.isPending} onClick={() => createMutation.mutate()} disabled={!migrationSql.trim()}>
-            Create guarded candidate
+            Create & bake candidate
           </Button>
         </CardContent>
       </Card>

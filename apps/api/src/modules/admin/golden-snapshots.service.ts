@@ -208,7 +208,7 @@ export async function createGoldenSnapshotCandidate(
       datasetTemplateId: dataset.id,
       versionNo: Number(nextVersionNo ?? 1),
       status: 'candidate',
-      validationStatus: 'guard_passed',
+      validationStatus: 'queued',
       changeNote: body.changeNote?.trim() || null,
       migrationSql: body.migrationSql.trim(),
       normalizedStatements: guard.statements,
@@ -219,11 +219,14 @@ export async function createGoldenSnapshotCandidate(
 
   await getDb().insert(schema.goldenSnapshotValidationRuns).values({
     goldenSnapshotVersionId: row.id,
-    status: 'guard_passed',
-    summary: 'SQL guard passed. Candidate bake/apply worker is required before promotion.',
+    status: 'queued',
+    summary: 'SQL guard passed. Candidate bake queued.',
     details: { statements: guard.statements, warnings: guard.warnings },
     createdBy: userId,
   });
+
+  const { enqueueGoldenSnapshotCandidateBake } = await import('../../lib/queue');
+  await enqueueGoldenSnapshotCandidateBake({ goldenSnapshotVersionId: row.id });
 
   return (await listGoldenSnapshotVersions(schemaTemplateId)).find((item) => item.id === row.id)!;
 }

@@ -181,6 +181,85 @@ async function notifyOwnerGoldenSnapshotOutcome(
   );
 }
 
+
+export interface GoldenSnapshotCandidateJob {
+  id: string;
+  datasetTemplateId: string;
+  migrationSql: string;
+  versionNo: number;
+}
+
+export async function fetchGoldenSnapshotCandidate(versionId: string): Promise<GoldenSnapshotCandidateJob | null> {
+  const result = await mainDb.query<GoldenSnapshotCandidateJob>(
+    `SELECT id,
+            dataset_template_id AS "datasetTemplateId",
+            migration_sql AS "migrationSql",
+            version_no AS "versionNo"
+       FROM golden_snapshot_versions
+      WHERE id = $1 AND status = 'candidate'`,
+    [versionId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function markGoldenSnapshotCandidateBaking(versionId: string): Promise<void> {
+  await mainDb.query(
+    `UPDATE golden_snapshot_versions
+        SET validation_status = 'baking', updated_at = now()
+      WHERE id = $1`,
+    [versionId],
+  );
+  await mainDb.query(
+    `INSERT INTO golden_snapshot_validation_runs (golden_snapshot_version_id, status, summary, details)
+     VALUES ($1, 'baking', 'Candidate bake started', '{}'::jsonb)`,
+    [versionId],
+  );
+}
+
+export async function updateGoldenSnapshotCandidateSuccess(
+  versionId: string,
+  params: { snapshotUrl: string | null; snapshotBytes: number | null; snapshotChecksumSha256: string | null; schemaSnapshotUrl: string | null },
+): Promise<void> {
+  await mainDb.query(
+    `UPDATE golden_snapshot_versions
+        SET validation_status = 'passed',
+            snapshot_url = $2,
+            snapshot_bytes = $3,
+            snapshot_checksum = $4,
+            schema_snapshot_url = $5,
+            updated_at = now()
+      WHERE id = $1`,
+    [versionId, params.snapshotUrl, params.snapshotBytes, params.snapshotChecksumSha256, params.schemaSnapshotUrl],
+  );
+  await mainDb.query(
+    `INSERT INTO golden_snapshot_validation_runs (golden_snapshot_version_id, status, summary, details)
+     VALUES ($1, 'passed', 'Candidate migration applied and snapshot exported', $2::jsonb)`,
+    [
+      versionId,
+      JSON.stringify({
+        snapshotUrl: params.snapshotUrl,
+        snapshotBytes: params.snapshotBytes,
+        snapshotChecksumSha256: params.snapshotChecksumSha256,
+        schemaSnapshotUrl: params.schemaSnapshotUrl,
+      }),
+    ],
+  );
+}
+
+export async function updateGoldenSnapshotCandidateFailed(versionId: string, errorMessage: string): Promise<void> {
+  await mainDb.query(
+    `UPDATE golden_snapshot_versions
+        SET validation_status = 'failed', updated_at = now()
+      WHERE id = $1`,
+    [versionId],
+  );
+  await mainDb.query(
+    `INSERT INTO golden_snapshot_validation_runs (golden_snapshot_version_id, status, summary, details)
+     VALUES ($1, 'failed', $2, $3::jsonb)`,
+    [versionId, errorMessage.slice(0, 2000), JSON.stringify({ error: errorMessage })],
+  );
+}
+
 /** Golden bake succeeded: fingerprint + engine image + optional snapshot object in object storage. */
 export async function updateDatasetGoldenBakeSuccess(
   datasetTemplateId: string,
