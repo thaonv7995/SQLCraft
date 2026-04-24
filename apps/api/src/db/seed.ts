@@ -176,6 +176,7 @@ async function seed() {
         rowCounts: ds.rowCounts,
         requestedRowCounts: null,
         status: 'published',
+        sandboxGoldenStatus: 'ready',
       });
       console.log(`  Created ${ds.size} dataset template`);
       continue;
@@ -187,6 +188,7 @@ async function seed() {
         name: `Ecommerce ${ds.size.charAt(0).toUpperCase() + ds.size.slice(1)}`,
         rowCounts: ds.rowCounts,
         status: 'published',
+        sandboxGoldenStatus: 'ready',
       })
       .where(eq(schema.datasetTemplates.id, existing.id));
     console.log(`  Updated ${ds.size} dataset template`);
