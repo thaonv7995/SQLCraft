@@ -1,9 +1,11 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb, schema } from '../../db';
 import { NotFoundError, ValidationError } from '../../lib/errors';
+import crypto from 'node:crypto';
 import { decryptSecret, encryptSecret, maskSecret } from './ai.crypto';
 import { callAiProvider, defaultBaseUrl } from './ai.providers';
 import type { AiChatBody, CreateAiProviderSettingBody, UpdateAiProviderSettingBody } from './ai.schema';
+import { appendAiMessages, getAiMemoryContext, resolveAiChatSessionForMessage, type AiChatSessionDto } from './ai.memory';
 
 type AiProviderSettingRow = typeof schema.aiProviderSettings.$inferSelect;
 
@@ -207,16 +209,69 @@ Context:
 ${body.context || 'No extra context.'}`;
 }
 
-export async function chatWithAi(userId: string, body: AiChatBody) {
+export async function chatWithAi(userId: string, body: AiChatBody): Promise<{
+  content: string;
+  provider: string;
+  model: string;
+  settingId: string;
+  latencyMs: number;
+  usage: Record<string, unknown> | null;
+  chatSession: AiChatSessionDto | null;
+}> {
   const row = await resolveChatSetting(userId, body.settingId);
+  let chatSession = null as Awaited<ReturnType<typeof resolveAiChatSessionForMessage>> | null;
+  let memoryPrompt = buildPrompt(body);
+
+  if (body.learningSessionId) {
+    chatSession = await resolveAiChatSessionForMessage(userId, body.learningSessionId, body.chatSessionId, body.prompt);
+    const memory = await getAiMemoryContext(chatSession);
+    const recentText = memory.recent
+      .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+      .join('\n\n');
+    memoryPrompt = [
+      memory.summary ? `Conversation memory summary:\n${memory.summary}` : null,
+      recentText ? `Recent conversation messages:\n${recentText}` : null,
+      `Current turn:\n${buildPrompt(body)}`,
+    ].filter(Boolean).join('\n\n---\n\n');
+  }
+
   const started = Date.now();
-  const result = await runProviderCall(row, buildPrompt(body));
+  const result = await runProviderCall(row, memoryPrompt);
+  const latencyMs = Date.now() - started;
+  let chatSessionDto: AiChatSessionDto | null = null;
+
+  if (chatSession) {
+    chatSessionDto = await appendAiMessages(chatSession, [
+      {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: body.prompt,
+        actionId: body.actionId ?? null,
+        actionLabel: body.actionLabel ?? null,
+        contextKeys: body.contextKeys ?? [],
+        contextSnapshot: body.context ?? null,
+        createdAt: new Date(started).toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: result.content,
+        model: result.model,
+        provider: row.provider,
+        usage: result.usage ?? null,
+        latencyMs,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
   return {
     content: result.content,
     provider: row.provider,
     model: result.model,
     settingId: row.id,
-    latencyMs: Date.now() - started,
+    latencyMs,
     usage: result.usage ?? null,
+    chatSession: chatSessionDto,
   };
 }

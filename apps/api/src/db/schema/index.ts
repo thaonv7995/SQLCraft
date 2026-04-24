@@ -284,6 +284,7 @@ export const sandboxGoldenStatusValues = ['none', 'pending', 'ready', 'failed'] 
 
 export const aiProviderValues = ['openai', 'anthropic', 'gemini', 'openai-compatible'] as const;
 export const aiProviderEnum = pgEnum('ai_provider', aiProviderValues);
+export const aiChatSessionStatusEnum = pgEnum('ai_chat_session_status', ['active', 'archived', 'deleted']);
 
 export const datasetTemplates = pgTable(
   'dataset_templates',
@@ -343,6 +344,29 @@ export const aiProviderSettings = pgTable(
   (table) => ({
     userIdx: index('ai_provider_settings_user_idx').on(table.userId),
     userDefaultIdx: index('ai_provider_settings_user_default_idx').on(table.userId, table.isDefault),
+  }),
+
+);
+
+export const aiChatSessions = pgTable(
+  'ai_chat_sessions',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    learningSessionId: uuid('learning_session_id').notNull().references(() => learningSessions.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 160 }).notNull().default('AI Chat'),
+    status: aiChatSessionStatusEnum('status').notNull().default('active'),
+    storageKey: text('storage_key').notNull(),
+    summary: text('summary'),
+    messageCount: integer('message_count').notNull().default(0),
+    lastMessageAt: timestamp('last_message_at'),
+    expiresAt: timestamp('expires_at'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    sessionStatusIdx: index('ai_chat_sessions_session_status_idx').on(table.learningSessionId, table.status, table.updatedAt),
+    userSessionIdx: index('ai_chat_sessions_user_session_idx').on(table.userId, table.learningSessionId),
   }),
 );
 

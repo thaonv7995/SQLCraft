@@ -123,6 +123,15 @@ export async function deleteFile(objectName: string): Promise<void> {
   await client.removeObject(config.STORAGE_BUCKET, objectName);
 }
 
+export async function deleteObjectsWithPrefix(prefix: string): Promise<number> {
+  await ensureBucket();
+  const client = getClient();
+  const objects = await listObjectsWithPrefix(prefix, { recursive: true, maxKeys: 10_000 });
+  if (objects.length === 0) return 0;
+  await client.removeObjects(config.STORAGE_BUCKET, objects.map((object) => object.name));
+  return objects.length;
+}
+
 export interface StorageObjectInfo {
   name: string;
   lastModified: Date | null;

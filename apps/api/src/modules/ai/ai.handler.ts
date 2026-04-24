@@ -1,7 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { created, success } from '../../lib/response';
 import type { JwtPayload } from '../../plugins/auth';
-import { AiChatSchema, CreateAiProviderSettingSchema, UpdateAiProviderSettingSchema } from './ai.schema';
+import { AiChatSchema, CreateAiChatSessionSchema, ListAiChatSessionsQuerySchema, CreateAiProviderSettingSchema, UpdateAiProviderSettingSchema } from './ai.schema';
 import {
   chatWithAi,
   createAiProviderSetting,
@@ -10,6 +10,7 @@ import {
   testAiProviderSetting,
   updateAiProviderSetting,
 } from './ai.service';
+import { createAiChatSession, listAiChatSessions, readAiChatMessages } from './ai.memory';
 
 function userId(request: FastifyRequest): string {
   return (request.user as JwtPayload).sub;
@@ -41,4 +42,18 @@ export async function testAiSettingHandler(request: FastifyRequest<{ Params: { i
 export async function aiChatHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const body = AiChatSchema.parse(request.body);
   reply.send(success(await chatWithAi(userId(request), body), 'AI response generated'));
+}
+
+export async function listAiChatSessionsHandler(request: FastifyRequest<{ Querystring: { learningSessionId: string } }>, reply: FastifyReply): Promise<void> {
+  const query = ListAiChatSessionsQuerySchema.parse(request.query);
+  reply.send(success(await listAiChatSessions(userId(request), query.learningSessionId), 'AI chat sessions retrieved'));
+}
+
+export async function createAiChatSessionHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const body = CreateAiChatSessionSchema.parse(request.body);
+  reply.status(201).send(created(await createAiChatSession(userId(request), body.learningSessionId, body.title), 'AI chat session created'));
+}
+
+export async function listAiChatMessagesHandler(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply): Promise<void> {
+  reply.send(success(await readAiChatMessages(userId(request), request.params.id), 'AI chat messages retrieved'));
 }

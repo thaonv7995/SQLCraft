@@ -1,8 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import {
   aiChatHandler,
+  createAiChatSessionHandler,
   createAiSettingHandler,
   deleteAiSettingHandler,
+  listAiChatMessagesHandler,
+  listAiChatSessionsHandler,
   listAiSettingsHandler,
   testAiSettingHandler,
   updateAiSettingHandler,
@@ -16,5 +19,8 @@ export default async function aiRouter(fastify: FastifyInstance): Promise<void> 
   fastify.patch<{ Params: { id: string } }>('/v1/ai/settings/:id', auth(fastify), updateAiSettingHandler);
   fastify.delete<{ Params: { id: string } }>('/v1/ai/settings/:id', auth(fastify), deleteAiSettingHandler);
   fastify.post<{ Params: { id: string } }>('/v1/ai/settings/:id/test', auth(fastify), testAiSettingHandler);
+  fastify.get<{ Querystring: { learningSessionId: string } }>('/v1/ai/chat-sessions', auth(fastify), listAiChatSessionsHandler);
+  fastify.post('/v1/ai/chat-sessions', auth(fastify), createAiChatSessionHandler);
+  fastify.get<{ Params: { id: string } }>('/v1/ai/chat-sessions/:id/messages', auth(fastify), listAiChatMessagesHandler);
   fastify.post('/v1/ai/chat', auth(fastify), aiChatHandler);
 }

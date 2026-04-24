@@ -2113,6 +2113,34 @@ export interface AiProviderSettingPayload {
   isDefault?: boolean;
 }
 
+
+export interface AiChatSession {
+  id: string;
+  learningSessionId: string;
+  title: string;
+  status: string;
+  messageCount: number;
+  summary: string | null;
+  lastMessageAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  actionId?: string | null;
+  actionLabel?: string | null;
+  contextKeys?: string[];
+  contextSnapshot?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  usage?: Record<string, unknown> | null;
+  latencyMs?: number | null;
+  createdAt: string;
+}
+
 export interface AiChatResult {
   content: string;
   provider: AiProvider;
@@ -2120,6 +2148,7 @@ export interface AiChatResult {
   settingId: string;
   latencyMs: number;
   usage: Record<string, unknown> | null;
+  chatSession: AiChatSession | null;
 }
 
 export const aiApi = {
@@ -2135,8 +2164,19 @@ export const aiApi = {
         `/ai/settings/${id}/test`,
       )
       .then((r) => r.data),
+  listChatSessions: (learningSessionId: string) =>
+    api.get<AiChatSession[]>('/ai/chat-sessions', { params: { learningSessionId } }).then((r) => r.data),
+  createChatSession: (payload: { learningSessionId: string; title?: string }) =>
+    api.post<AiChatSession>('/ai/chat-sessions', payload).then((r) => r.data),
+  listChatMessages: (chatSessionId: string) =>
+    api.get<AiChatMessage[]>(`/ai/chat-sessions/${chatSessionId}/messages`).then((r) => r.data),
   chat: (payload: {
     settingId?: string;
+    learningSessionId?: string;
+    chatSessionId?: string;
+    actionId?: string;
+    actionLabel?: string;
+    contextKeys?: string[];
     feature?: 'sql-explain' | 'query-optimize' | 'general';
     prompt: string;
     sql?: string;

@@ -55,6 +55,7 @@ import {
   type DatasetScale,
   type LearningSession,
   type QueryExecution,
+  type AiChatMessage,
   type QueryResultColumn,
   type SessionProvisioningEstimate,
   type SessionSchemaDiffResponse,
@@ -279,6 +280,49 @@ const AI_CONTEXT_OPTIONS: AiContextOption[] = [
   { id: 'execution-plan', label: 'Plan', icon: 'account_tree' },
 ];
 
+type AiTimelineMessage = Pick<AiChatMessage, 'role' | 'content'> & { pending?: boolean };
+
+function cleanUserVisibleAiText(content: string): string {
+  const userRequestMatch = content.match(/User request:\s*([\s\S]*)$/i);
+  const text = userRequestMatch?.[1] ?? content;
+  return text
+    .replace(/^Reply only:\s*/i, '')
+    .replace(/^User request:\s*/i, '')
+    .trim();
+}
+
+function AiTypingDots() {
+  return (
+    <div className="flex items-center gap-1 py-1" aria-label="AI is typing">
+      {[0, 1, 2].map((dot) => (
+        <span
+          key={dot}
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/45"
+          style={{ animationDelay: `${dot * 120}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function InlineMarkdown({ text }: { text: string }) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (!part) return null;
+        if (part.startsWith('`') && part.endsWith('`')) {
+          return <code key={index} className="rounded bg-black/25 px-1 py-0.5 font-mono text-[0.92em] text-white/85">{part.slice(1, -1)}</code>;
+        }
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={index} className="font-semibold text-white/90">{part.slice(2, -2)}</strong>;
+        }
+        return <span key={index}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 function FormattedAiMessage({
   content,
   onAddSql,
@@ -325,7 +369,7 @@ function FormattedAiMessage({
         }
         return (
           <div key={index} className="whitespace-pre-wrap leading-relaxed">
-            {part.trim()}
+            <InlineMarkdown text={part.trim()} />
           </div>
         );
       })}
@@ -513,12 +557,42 @@ const SqlEditorPanel = forwardRef<
   const [aiActionId, setAiActionId] = useState(AI_ACTION_OPTIONS[0].id);
   const [selectedAiContexts, setSelectedAiContexts] = useState<AiContextOption['id'][]>(['schema', 'statement', 'last-error']);
   const [isAiContextMenuOpen, setIsAiContextMenuOpen] = useState(false);
-  const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [activeAiChatSessionId, setActiveAiChatSessionId] = useState<string | null | undefined>(undefined);
+  const [aiMessages, setAiMessages] = useState<AiTimelineMessage[]>([]);
+  const aiChatPendingRef = useRef(false);
 
   const noticeMessage =
     notice === 'error'
       ? (error ?? lastExecution?.errorMessage ?? 'Query failed')
       : null;
+
+  const { data: aiChatSessions = [], refetch: refetchAiChatSessions } = useQuery({
+    queryKey: ['ai-chat-sessions', sessionId],
+    queryFn: () => aiApi.listChatSessions(sessionId),
+    enabled: isAiOpen,
+  });
+
+  const activeAiChatSession = aiChatSessions.find((chat) => chat.id === activeAiChatSessionId) ?? aiChatSessions[0] ?? null;
+
+  const { data: persistedAiMessages = [] } = useQuery({
+    queryKey: ['ai-chat-messages', activeAiChatSession?.id],
+    queryFn: () => aiApi.listChatMessages(activeAiChatSession!.id),
+    enabled: isAiOpen && Boolean(activeAiChatSession?.id),
+  });
+
+  useEffect(() => {
+    if (!isAiOpen) return;
+    if (activeAiChatSessionId === undefined && aiChatSessions[0]) {
+      setActiveAiChatSessionId(aiChatSessions[0].id);
+    }
+  }, [activeAiChatSessionId, aiChatSessions, isAiOpen]);
+
+  useEffect(() => {
+    if (!isAiOpen || !activeAiChatSession?.id) return;
+    if (aiChatPendingRef.current) return;
+    setAiMessages(persistedAiMessages.map((message) => ({ role: message.role, content: message.role === 'user' ? cleanUserVisibleAiText(message.content) : message.content })));
+  }, [activeAiChatSession?.id, isAiOpen, persistedAiMessages]);
+
   const mentionableTables = useMemo(() => schemaTables?.slice(0, 12).map((table) => table.name) ?? [], [schemaTables]);
 
   const schemaContext = useMemo(() => {
@@ -545,11 +619,14 @@ const SqlEditorPanel = forwardRef<
   );
 
   const aiChatMutation = useMutation({
-    mutationFn: async ({ prompt, action, contextIds }: { prompt: string; action: AiActionOption; contextIds: AiContextOption['id'][] }) => {
+    mutationFn: async ({ displayPrompt, action, contextIds }: { displayPrompt: string; action: AiActionOption; contextIds: AiContextOption['id'][] }) => {
       const statement = editorRef.current?.getStatementAtCursor().trim() ?? '';
       const contextParts = [
         `Dialect: ${dialect ?? 'unknown'}`,
         `Database: ${databaseName ?? 'unknown'}`,
+        `Selected action: ${action.label}`,
+        `Action instruction: ${action.instruction}`,
+        `Selected context chips: ${contextIds.join(', ') || 'none'}`,
       ];
 
       if (contextIds.includes('schema')) {
@@ -575,16 +652,44 @@ const SqlEditorPanel = forwardRef<
 
       return aiApi.chat({
         feature: 'general',
-        prompt: `You are an expert SQL assistant inside SQLForge. The user chooses an action and context chips; only use the selected context included in the Context field. Do not ask the user to resend context that is already included. Answer concisely in the user's language. If you provide SQL, include runnable SQL for the current dialect unless the user asks otherwise.\n\nSelected action: ${action.label}\nAction instruction: ${action.instruction}\nSelected context chips: ${contextIds.join(', ') || 'none'}\n\nUser request:\n${prompt}`,
+        learningSessionId: sessionId,
+        chatSessionId: activeAiChatSessionId ?? undefined,
+        actionId: action.id,
+        actionLabel: action.label,
+        contextKeys: contextIds,
+        prompt: displayPrompt,
         sql: statement || currentQuery,
         context: contextParts.join('\n\n'),
       });
     },
-    onSuccess: (result, variables) => {
-      setAiMessages((messages) => [...messages, { role: 'user', content: `[${variables.action.label}] ${variables.prompt}` }, { role: 'assistant', content: result.content }]);
+    onMutate: (variables) => {
+      aiChatPendingRef.current = true;
       setAiPrompt('');
+      setAiMessages((messages) => [
+        ...messages,
+        { role: 'user', content: cleanUserVisibleAiText(variables.displayPrompt) },
+        { role: 'assistant', content: '', pending: true },
+      ]);
     },
-    onError: (err) => toastError('AI chat failed', err),
+    onSuccess: (result) => {
+      aiChatPendingRef.current = false;
+      setAiMessages((messages) => {
+        const next = [...messages];
+        const pendingIndex = next.findIndex((message) => message.role === 'assistant' && message.pending);
+        if (pendingIndex >= 0) {
+          next[pendingIndex] = { role: 'assistant', content: result.content };
+          return next;
+        }
+        return [...next, { role: 'assistant', content: result.content }];
+      });
+      if (result.chatSession?.id) setActiveAiChatSessionId(result.chatSession.id);
+      void refetchAiChatSessions();
+    },
+    onError: (err) => {
+      aiChatPendingRef.current = false;
+      setAiMessages((messages) => messages.filter((message) => !message.pending));
+      toastError('AI chat failed', err);
+    },
   });
 
   const selectedAiAction = AI_ACTION_OPTIONS.find((action) => action.id === aiActionId) ?? AI_ACTION_OPTIONS[0];
@@ -598,9 +703,9 @@ const SqlEditorPanel = forwardRef<
   }, []);
 
   const sendAiPrompt = useCallback((prompt: string) => {
-    const trimmed = prompt.trim();
-    if (!trimmed || aiChatMutation.isPending) return;
-    aiChatMutation.mutate({ prompt: trimmed, action: selectedAiAction, contextIds: selectedAiContexts });
+    const displayPrompt = prompt.trim();
+    if (!displayPrompt || aiChatMutation.isPending) return;
+    aiChatMutation.mutate({ displayPrompt, action: selectedAiAction, contextIds: selectedAiContexts });
   }, [aiChatMutation, selectedAiAction, selectedAiContexts]);
 
   const submitAiPrompt = useCallback((event?: FormEvent<HTMLFormElement>) => {
@@ -634,14 +739,35 @@ const SqlEditorPanel = forwardRef<
         testId="lab-sql-editor"
       />
       {isAiOpen ? (
-        <div className={cn('absolute bottom-14 right-3 z-30 flex flex-col overflow-hidden rounded-2xl border border-primary/20 bg-[#202020] shadow-[0_24px_80px_rgba(0,0,0,0.55)]', isAiExpanded ? 'h-[min(86vh,46rem)] w-[min(94vw,42rem)]' : 'h-[min(78vh,38rem)] w-[min(92vw,30rem)]')}>
+        <div onKeyDown={(event) => event.stopPropagation()} className={cn('absolute bottom-14 right-3 z-30 flex flex-col overflow-hidden rounded-2xl border border-primary/20 bg-[#202020] shadow-[0_24px_80px_rgba(0,0,0,0.55)]', isAiExpanded ? 'h-[min(86vh,46rem)] w-[min(94vw,42rem)]' : 'h-[min(78vh,38rem)] w-[min(92vw,30rem)]')}>
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <div>
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <span className="material-symbols-outlined text-base text-primary">auto_awesome</span>
                 SQL AI Assistant
               </div>
-              <p className="mt-0.5 text-[11px] text-white/45">Uses statement at cursor, schema context, and last error.</p>
+              <div className="mt-1 flex min-w-0 items-center gap-2">
+                <select
+                  value={activeAiChatSession?.id ?? ''}
+                  onChange={(event) => setActiveAiChatSessionId(event.target.value || null)}
+                  className="h-7 max-w-[14rem] rounded-md border border-white/10 bg-black/20 px-2 text-[11px] text-white/70 outline-none focus:border-primary/40"
+                  aria-label="Select AI chat history"
+                >
+                  {aiChatSessions.length === 0 ? <option value="">New chat</option> : null}
+                  {aiChatSessions.map((chat) => (
+                    <option key={chat.id} value={chat.id}>{cleanUserVisibleAiText(chat.title)}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => { setActiveAiChatSessionId(null); setAiMessages([]); }}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 text-[11px] text-white/60 hover:bg-white/10 hover:text-white"
+                  title="Start a new chat"
+                >
+                  <span className="material-symbols-outlined text-[14px]">add</span>
+                  New
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -768,28 +894,29 @@ const SqlEditorPanel = forwardRef<
                     {message.role === 'user' ? 'You' : 'AI'}
                   </div>
                   {message.role === 'assistant' ? (
-                    <>
+                    message.pending ? (
+                      <AiTypingDots />
+                    ) : (
                       <FormattedAiMessage
                         content={message.content}
                         onAddSql={(sql) => editorRef.current?.appendSql(sql)}
                       />
-                    </>
+                    )
                   ) : (
                     <div className="whitespace-pre-wrap">{message.content}</div>
                   )}
                 </div>
               ))
             )}
-            {aiChatMutation.isPending ? (
-              <div className="mr-8 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs text-white/55">Thinking…</div>
-            ) : null}
           </div>
           <form onSubmit={submitAiPrompt} className="border-t border-white/10 p-3">
             <textarea
               value={aiPrompt}
               onChange={(event) => setAiPrompt(event.target.value)}
               onKeyDown={(event) => {
+                event.stopPropagation();
                 if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault();
                   submitAiPrompt();
                 }
               }}

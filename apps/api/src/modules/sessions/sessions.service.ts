@@ -26,6 +26,7 @@ import {
 } from '../../lib/dataset-scales';
 import type { DatasetSize } from '@sqlcraft/types';
 import { enqueueProvisionSandbox, enqueueDestroySandbox } from '../../lib/queue';
+import { cleanupAiMemoryForLearningSession } from '../ai/ai.memory';
 import {
   anchorProvisioningEstimateToCreatedAt,
   computeSandboxProvisioningEstimate,
@@ -799,6 +800,7 @@ export async function endSession(
   const updated = await sessionsRepository.endSession(sessionId);
 
   await sessionsRepository.expireSandboxBySessionId(sessionId);
+  await cleanupAiMemoryForLearningSession(sessionId);
 
   // Get sandbox id to enqueue cleanup
   const sandbox = await sessionsRepository.getSandboxBySessionId(sessionId);
