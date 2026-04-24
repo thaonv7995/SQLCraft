@@ -19,6 +19,7 @@ import { useAuthStore } from '@/stores/auth';
 import type { User } from '@/lib/api';
 import { generateInitials } from '@/lib/utils';
 import type { ClientPageProps } from '@/lib/page-props';
+import { AiProviderSettingsSection } from '@/components/ai-provider-settings';
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ export default function SettingsPage(_props: ClientPageProps) {
 
 
       <PasswordSection />
+      <AiProviderSettingsSection />
       <NotificationsSection />
       <DangerSection onSignOut={() => { clearAuth(); router.push('/login'); }} />
 

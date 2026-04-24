@@ -282,6 +282,9 @@ export const schemaTemplateInvites = pgTable(
 /** none | pending | ready | failed — public catalog uses ready (with published) per golden snapshot plan */
 export const sandboxGoldenStatusValues = ['none', 'pending', 'ready', 'failed'] as const;
 
+export const aiProviderValues = ['openai', 'anthropic', 'gemini', 'openai-compatible'] as const;
+export const aiProviderEnum = pgEnum('ai_provider', aiProviderValues);
+
 export const datasetTemplates = pgTable(
   'dataset_templates',
   {
@@ -314,6 +317,32 @@ export const datasetTemplates = pgTable(
   },
   (table) => ({
     sandboxGoldenStatusIdx: index('dataset_templates_sandbox_golden_status_idx').on(table.sandboxGoldenStatus),
+  }),
+);
+
+export const aiProviderSettings = pgTable(
+  'ai_provider_settings',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: aiProviderEnum('provider').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    baseUrl: text('base_url'),
+    model: varchar('model', { length: 160 }).notNull(),
+    encryptedApiKey: text('encrypted_api_key').notNull(),
+    isEnabled: boolean('is_enabled').notNull().default(true),
+    isDefault: boolean('is_default').notNull().default(false),
+    lastTestStatus: varchar('last_test_status', { length: 24 }),
+    lastTestMessage: text('last_test_message'),
+    lastTestedAt: timestamp('last_tested_at'),
+    createdAt: timestamp('created_at').notNull().default(sql`now()`),
+    updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
+  },
+  (table) => ({
+    userIdx: index('ai_provider_settings_user_idx').on(table.userId),
+    userDefaultIdx: index('ai_provider_settings_user_default_idx').on(table.userId, table.isDefault),
   }),
 );
 

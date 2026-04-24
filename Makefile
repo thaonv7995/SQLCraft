@@ -79,6 +79,7 @@ prod-setup: ## Generate .env.production with auto secrets + first admin (interac
 	minio_password="$$(get_kv MINIO_ROOT_PASSWORD .env.production)"; \
 	storage_secret="$$(get_kv STORAGE_SECRET_KEY .env.production)"; \
 	sandbox_password="$$(get_kv SANDBOX_DB_PASSWORD .env.production)"; \
+	ai_settings_encryption_key="$$(get_kv AI_SETTINGS_ENCRYPTION_KEY .env.production)"; \
 	admin_email="$$(get_kv FIRST_ADMIN_EMAIL .env.production)"; \
 	admin_username="$$(get_kv FIRST_ADMIN_USERNAME .env.production)"; \
 	admin_password="$$(get_kv FIRST_ADMIN_PASSWORD .env.production)"; \
@@ -87,6 +88,7 @@ prod-setup: ## Generate .env.production with auto secrets + first admin (interac
 	if [ -z "$$minio_password" ] || [ "$$minio_password" = "change-me" ]; then minio_password="$$(openssl rand -hex 16)"; fi; \
 	if [ -z "$$storage_secret" ] || [ "$$storage_secret" = "change-me" ]; then storage_secret="$$minio_password"; fi; \
 	if [ -z "$$sandbox_password" ] || [ "$$sandbox_password" = "change-me" ]; then sandbox_password="$$(openssl rand -hex 16)"; fi; \
+	if [ -z "$$ai_settings_encryption_key" ] || [ "$$ai_settings_encryption_key" = "change-me" ]; then ai_settings_encryption_key="$$(openssl rand -hex 32)"; fi; \
 	if [ -z "$$admin_email" ]; then admin_email="admin@sqlcraft.local"; fi; \
 	if [ -z "$$admin_username" ]; then admin_username="admin"; fi; \
 	if [ -z "$$admin_email" ] || [ -z "$$admin_username" ] || [ -z "$$admin_password" ] || [ "$$admin_password" = "change-me" ]; then \
@@ -116,6 +118,7 @@ prod-setup: ## Generate .env.production with auto secrets + first admin (interac
 	set_kv "MINIO_ROOT_PASSWORD" "$$minio_password" ".env.production"; \
 	set_kv "STORAGE_SECRET_KEY" "$$storage_secret" ".env.production"; \
 	set_kv "SANDBOX_DB_PASSWORD" "$$sandbox_password" ".env.production"; \
+	set_kv "AI_SETTINGS_ENCRYPTION_KEY" "$$ai_settings_encryption_key" ".env.production"; \
 	set_kv "FIRST_ADMIN_EMAIL" "$$admin_email" ".env.production"; \
 	set_kv "FIRST_ADMIN_USERNAME" "$$admin_username" ".env.production"; \
 	set_kv "FIRST_ADMIN_PASSWORD" "$$admin_password" ".env.production"; \

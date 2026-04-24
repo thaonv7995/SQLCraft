@@ -2083,6 +2083,67 @@ export const notificationsApi = {
     api.post<{ marked: number }>('/notifications/read-all').then((r) => r.data),
 };
 
+// ─── AI Providers ────────────────────────────────────────────────────────────
+
+export type AiProvider = 'openai' | 'anthropic' | 'gemini' | 'openai-compatible';
+
+export interface AiProviderSetting {
+  id: string;
+  provider: AiProvider;
+  name: string;
+  baseUrl: string | null;
+  model: string;
+  apiKeyMasked: string;
+  isEnabled: boolean;
+  isDefault: boolean;
+  lastTestStatus: string | null;
+  lastTestMessage: string | null;
+  lastTestedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiProviderSettingPayload {
+  provider: AiProvider;
+  name?: string;
+  baseUrl?: string;
+  model: string;
+  apiKey?: string;
+  isEnabled?: boolean;
+  isDefault?: boolean;
+}
+
+export interface AiChatResult {
+  content: string;
+  provider: AiProvider;
+  model: string;
+  settingId: string;
+  latencyMs: number;
+  usage: Record<string, unknown> | null;
+}
+
+export const aiApi = {
+  listSettings: () => api.get<AiProviderSetting[]>('/ai/settings').then((r) => r.data),
+  createSetting: (payload: AiProviderSettingPayload & { apiKey: string }) =>
+    api.post<AiProviderSetting>('/ai/settings', payload).then((r) => r.data),
+  updateSetting: (id: string, payload: Partial<AiProviderSettingPayload>) =>
+    api.patch<AiProviderSetting>(`/ai/settings/${id}`, payload).then((r) => r.data),
+  deleteSetting: (id: string) => api.delete(`/ai/settings/${id}`).then((r) => r.data),
+  testSetting: (id: string) =>
+    api
+      .post<{ ok: boolean; message: string; latencyMs: number; setting: AiProviderSetting }>(
+        `/ai/settings/${id}/test`,
+      )
+      .then((r) => r.data),
+  chat: (payload: {
+    settingId?: string;
+    feature?: 'sql-explain' | 'query-optimize' | 'general';
+    prompt: string;
+    sql?: string;
+    context?: string;
+  }) => api.post<AiChatResult>('/ai/chat', payload, { timeout: 60_000 }).then((r) => r.data),
+};
+
 // ─── Users API ────────────────────────────────────────────────────────────────
 
 export interface UpdateProfilePayload {

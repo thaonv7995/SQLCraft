@@ -25,6 +25,7 @@ import {
 import { formatSqlInBrowser } from '@/lib/format-sql';
 import { StatusBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { toastError } from '@/lib/toast-error';
 import {
   Table,
   TableHeader,
@@ -45,6 +46,7 @@ import {
 } from '@/lib/utils';
 import {
   challengesApi,
+  aiApi,
   sandboxesApi,
   sessionsApi,
   type RevertSessionSchemaChangePayload,
@@ -2574,9 +2576,49 @@ const TABS = [
   { id: 'compare', label: 'Compare', icon: 'compare_arrows' },
   { id: 'history', label: 'History', icon: 'history' },
   { id: 'schema', label: 'Schema', icon: 'schema' },
+  { id: 'ai', label: 'AI', icon: 'auto_awesome' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
+
+function AiPanel({ answer, isLoading }: { answer: string; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <div className="space-y-3 text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+          <p className="text-sm text-on-surface-variant">Asking your AI provider…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!answer.trim()) {
+    return (
+      <div className="flex flex-1 items-center justify-center px-6 text-center">
+        <div className="max-w-md space-y-2">
+          <span className="material-symbols-outlined block text-4xl text-outline">auto_awesome</span>
+          <p className="text-sm font-medium text-on-surface">No AI response yet</p>
+          <p className="text-xs leading-relaxed text-on-surface-variant">
+            Configure a provider in Settings, then use AI Explain from the Lab toolbar to analyze the SQL statement at your cursor.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-auto p-4">
+      <div className="rounded-xl border border-outline-variant/15 bg-surface-container-low p-4">
+        <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
+          <span className="material-symbols-outlined text-base">auto_awesome</span>
+          AI Explain
+        </div>
+        <div className="whitespace-pre-wrap text-sm leading-6 text-on-surface-variant">{answer}</div>
+      </div>
+    </div>
+  );
+}
 
 function LabSessionLoading() {
   return (
@@ -2905,6 +2947,22 @@ export default function LabPage({ params }: ClientPageProps) {
   const [editorNotice, setEditorNotice] = useState<'success' | 'error' | 'info' | null>(null);
   const [appliedNoticeKey, setAppliedNoticeKey] = useState('');
   const editorNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [aiAnswer, setAiAnswer] = useState('');
+
+  const aiExplainMutation = useMutation({
+    mutationFn: (sql: string) =>
+      aiApi.chat({
+        feature: 'sql-explain',
+        prompt: sql,
+        sql,
+        context: `Dialect: ${session?.dialect ?? 'unknown'}\nDatabase: ${displayDatabaseName}`,
+      }),
+    onSuccess: (result) => {
+      setAiAnswer(result.content);
+      setActiveTab('ai');
+    },
+    onError: (err) => toastError('AI explain failed', err),
+  });
   const [challengeFeedbackExpanded, setChallengeFeedbackExpanded] = useState(false);
   const lastChallengeAttemptIdRef = useRef<string | null>(null);
   const persistedEditorState = useMemo(
@@ -3044,6 +3102,15 @@ export default function LabPage({ params }: ClientPageProps) {
     }
     explainQuery({ sessionId, sql });
   }, [explainQuery, sessionId]);
+
+  const aiExplainStatementAtCursor = useCallback(() => {
+    const sql = sqlEditorRef.current?.getStatementAtCursor().trim() ?? '';
+    if (!sql) {
+      toast.error('No SQL statement at cursor');
+      return;
+    }
+    aiExplainMutation.mutate(sql);
+  }, [aiExplainMutation]);
 
   // Global keyboard shortcut: Ctrl+Enter = run statement at caret (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
@@ -3349,6 +3416,17 @@ export default function LabPage({ params }: ClientPageProps) {
                   Submit
                 </Button>
               ) : null}
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={aiExplainMutation.isPending}
+                disabled={!currentQuery.trim() || aiExplainMutation.isPending}
+                onClick={aiExplainStatementAtCursor}
+                title="Explain the SQL statement at the cursor with your default AI provider"
+                leftIcon={<span className="material-symbols-outlined text-[18px]">auto_awesome</span>}
+              >
+                AI Explain
+              </Button>
             </div>
             <DatasetScaleSelector
               selectedScale={selectedScale}
@@ -3694,6 +3772,7 @@ export default function LabPage({ params }: ClientPageProps) {
                 </div>
               </div>
             )}
+            {activeTab === 'ai' && <AiPanel answer={aiAnswer} isLoading={aiExplainMutation.isPending} />}
           </div>
         </div>
       </div>

@@ -244,6 +244,7 @@ ensure_core_env() {
   ensure_or_generate_secret "POSTGRES_PASSWORD" 16
   ensure_or_generate_secret "MINIO_ROOT_PASSWORD" 16
   ensure_or_generate_secret "SANDBOX_DB_PASSWORD" 16
+  ensure_or_generate_secret "AI_SETTINGS_ENCRYPTION_KEY" 32
 
   # Storage client credentials must match MinIO root credentials unless a dedicated user is provisioned.
   # SQLCraft installer does not provision a separate MinIO user, so keep them aligned by default.

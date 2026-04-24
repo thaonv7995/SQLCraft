@@ -86,6 +86,10 @@ const EnvSchema = z.object({
    * Set to 0 to disable auto-cleanup (manual-only via the admin endpoint).
    */
   SQL_DUMP_SCAN_STALE_DAYS: z.coerce.number().int().min(0).max(365).default(7),
+
+  // ── AI provider settings ─────────────────────────────────────────────────
+  AI_SETTINGS_ENCRYPTION_KEY: z.string().min(32).optional(),
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 const result = EnvSchema.safeParse(process.env);

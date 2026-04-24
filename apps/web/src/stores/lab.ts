@@ -55,8 +55,8 @@ interface LabState {
   queryHistory: QueryExecution[];
 
   // Active tab
-  activeTab: 'results' | 'plan' | 'history' | 'schema' | 'compare' | 'schemaDiff';
-  setActiveTab: (tab: 'results' | 'plan' | 'history' | 'schema' | 'compare' | 'schemaDiff') => void;
+  activeTab: 'results' | 'plan' | 'history' | 'schema' | 'compare' | 'schemaDiff' | 'ai';
+  setActiveTab: (tab: 'results' | 'plan' | 'history' | 'schema' | 'compare' | 'schemaDiff' | 'ai') => void;
 
   // Actions
   executeQuery: (sessionId: string) => Promise<void>;
