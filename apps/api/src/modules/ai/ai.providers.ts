@@ -49,7 +49,10 @@ function toDockerHostUrl(url: string): string | null {
 }
 
 function formatFetchError(url: string, err: unknown): Error {
-  const message = err instanceof Error ? err.message : String(err);
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const message = rawMessage === 'This operation was aborted' || rawMessage.toLowerCase().includes('aborted')
+    ? `AI request timed out after ${Math.round(config.AI_REQUEST_TIMEOUT_MS / 1000)}s`
+    : rawMessage;
   try {
     const parsed = new URL(url);
     if (isLoopbackHost(parsed.hostname)) {

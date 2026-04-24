@@ -2181,7 +2181,7 @@ export const aiApi = {
     prompt: string;
     sql?: string;
     context?: string;
-  }) => api.post<AiChatResult>('/ai/chat', payload, { timeout: 60_000 }).then((r) => r.data),
+  }) => api.post<AiChatResult>('/ai/chat', payload, { timeout: 120_000 }).then((r) => r.data),
 };
 
 // ─── Users API ────────────────────────────────────────────────────────────────

@@ -280,7 +280,8 @@ const AI_CONTEXT_OPTIONS: AiContextOption[] = [
   { id: 'execution-plan', label: 'Plan', icon: 'account_tree' },
 ];
 
-type AiTimelineMessage = Pick<AiChatMessage, 'role' | 'content'> & { pending?: boolean };
+type AiRetryPayload = { displayPrompt: string; action: AiActionOption; contextIds: AiContextOption['id'][] };
+type AiTimelineMessage = Pick<AiChatMessage, 'role' | 'content'> & { pending?: boolean; error?: boolean; retryPayload?: AiRetryPayload };
 
 function cleanUserVisibleAiText(content: string): string {
   const userRequestMatch = content.match(/User request:\s*([\s\S]*)$/i);
@@ -560,6 +561,8 @@ const SqlEditorPanel = forwardRef<
   const [activeAiChatSessionId, setActiveAiChatSessionId] = useState<string | null | undefined>(undefined);
   const [aiMessages, setAiMessages] = useState<AiTimelineMessage[]>([]);
   const aiChatPendingRef = useRef(false);
+  const aiTimelineEndRef = useRef<HTMLDivElement | null>(null);
+  const aiContextMenuRef = useRef<HTMLDivElement | null>(null);
 
   const noticeMessage =
     notice === 'error'
@@ -580,6 +583,16 @@ const SqlEditorPanel = forwardRef<
     enabled: isAiOpen && Boolean(activeAiChatSession?.id),
   });
 
+  const createAiChatSessionMutation = useMutation({
+    mutationFn: () => aiApi.createChatSession({ learningSessionId: sessionId }),
+    onSuccess: (chatSession) => {
+      setActiveAiChatSessionId(chatSession.id);
+      setAiMessages([]);
+      void refetchAiChatSessions();
+    },
+    onError: (err) => toastError('Failed to create AI chat session', err),
+  });
+
   useEffect(() => {
     if (!isAiOpen) return;
     if (activeAiChatSessionId === undefined && aiChatSessions[0]) {
@@ -592,6 +605,31 @@ const SqlEditorPanel = forwardRef<
     if (aiChatPendingRef.current) return;
     setAiMessages(persistedAiMessages.map((message) => ({ role: message.role, content: message.role === 'user' ? cleanUserVisibleAiText(message.content) : message.content })));
   }, [activeAiChatSession?.id, isAiOpen, persistedAiMessages]);
+
+  useEffect(() => {
+    if (!isAiOpen) return;
+    aiTimelineEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [aiMessages, isAiOpen]);
+
+  useEffect(() => {
+    if (!isAiContextMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && aiContextMenuRef.current?.contains(target)) return;
+      setIsAiContextMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsAiContextMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAiContextMenuOpen]);
 
   const mentionableTables = useMemo(() => schemaTables?.slice(0, 12).map((table) => table.name) ?? [], [schemaTables]);
 
@@ -619,7 +657,7 @@ const SqlEditorPanel = forwardRef<
   );
 
   const aiChatMutation = useMutation({
-    mutationFn: async ({ displayPrompt, action, contextIds }: { displayPrompt: string; action: AiActionOption; contextIds: AiContextOption['id'][] }) => {
+    mutationFn: async ({ displayPrompt, action, contextIds }: AiRetryPayload) => {
       const statement = editorRef.current?.getStatementAtCursor().trim() ?? '';
       const contextParts = [
         `Dialect: ${dialect ?? 'unknown'}`,
@@ -668,7 +706,7 @@ const SqlEditorPanel = forwardRef<
       setAiMessages((messages) => [
         ...messages,
         { role: 'user', content: cleanUserVisibleAiText(variables.displayPrompt) },
-        { role: 'assistant', content: '', pending: true },
+        { role: 'assistant', content: '', pending: true, retryPayload: variables },
       ]);
     },
     onSuccess: (result) => {
@@ -687,7 +725,17 @@ const SqlEditorPanel = forwardRef<
     },
     onError: (err) => {
       aiChatPendingRef.current = false;
-      setAiMessages((messages) => messages.filter((message) => !message.pending));
+      const message = err instanceof Error ? err.message : 'AI chat failed';
+      setAiMessages((messages) => {
+        const next = [...messages];
+        const pendingIndex = next.findIndex((item) => item.role === 'assistant' && item.pending);
+        if (pendingIndex >= 0) {
+          const retryPayload = next[pendingIndex]?.retryPayload;
+          next[pendingIndex] = { role: 'assistant', content: message, error: true, retryPayload };
+          return next;
+        }
+        return [...next, { role: 'assistant', content: message, error: true }];
+      });
       toastError('AI chat failed', err);
     },
   });
@@ -707,6 +755,18 @@ const SqlEditorPanel = forwardRef<
     if (!displayPrompt || aiChatMutation.isPending) return;
     aiChatMutation.mutate({ displayPrompt, action: selectedAiAction, contextIds: selectedAiContexts });
   }, [aiChatMutation, selectedAiAction, selectedAiContexts]);
+
+  const retryAiMessage = useCallback((payload?: AiRetryPayload) => {
+    if (!payload || aiChatMutation.isPending) return;
+    aiChatMutation.mutate(payload);
+  }, [aiChatMutation]);
+
+  const applyRetryPrompt = useCallback((payload?: AiRetryPayload) => {
+    if (!payload) return;
+    setAiActionId(payload.action.id);
+    setSelectedAiContexts(payload.contextIds);
+    setAiPrompt(payload.displayPrompt);
+  }, []);
 
   const submitAiPrompt = useCallback((event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
@@ -745,26 +805,14 @@ const SqlEditorPanel = forwardRef<
               <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <span className="material-symbols-outlined text-base text-primary">auto_awesome</span>
                 SQL AI Assistant
-              </div>
-              <div className="mt-1 flex min-w-0 items-center gap-2">
-                <select
-                  value={activeAiChatSession?.id ?? ''}
-                  onChange={(event) => setActiveAiChatSessionId(event.target.value || null)}
-                  className="h-7 max-w-[14rem] rounded-md border border-white/10 bg-black/20 px-2 text-[11px] text-white/70 outline-none focus:border-primary/40"
-                  aria-label="Select AI chat history"
-                >
-                  {aiChatSessions.length === 0 ? <option value="">New chat</option> : null}
-                  {aiChatSessions.map((chat) => (
-                    <option key={chat.id} value={chat.id}>{cleanUserVisibleAiText(chat.title)}</option>
-                  ))}
-                </select>
                 <button
                   type="button"
-                  onClick={() => { setActiveAiChatSessionId(null); setAiMessages([]); }}
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 text-[11px] text-white/60 hover:bg-white/10 hover:text-white"
+                  onClick={() => createAiChatSessionMutation.mutate()}
+                  disabled={createAiChatSessionMutation.isPending}
+                  className="ml-1 inline-flex h-6 items-center gap-0.5 rounded-md border border-white/10 bg-white/[0.04] px-1.5 text-[10px] font-medium text-white/55 hover:bg-white/10 hover:text-white disabled:opacity-45"
                   title="Start a new chat"
                 >
-                  <span className="material-symbols-outlined text-[14px]">add</span>
+                  <span className="material-symbols-outlined text-[13px]">add</span>
                   New
                 </button>
               </div>
@@ -820,7 +868,7 @@ const SqlEditorPanel = forwardRef<
                     </button>
                   );
                 })}
-                <div className="relative shrink-0">
+                <div ref={aiContextMenuRef} className="relative shrink-0">
                   <button
                     type="button"
                     onClick={() => setIsAiContextMenuOpen((open) => !open)}
@@ -896,6 +944,36 @@ const SqlEditorPanel = forwardRef<
                   {message.role === 'assistant' ? (
                     message.pending ? (
                       <AiTypingDots />
+                    ) : message.error ? (
+                      <div className="space-y-3">
+                        <div className="flex gap-2 text-error">
+                          <span className="material-symbols-outlined text-base">warning</span>
+                          <div>
+                            <p className="font-medium">AI response failed</p>
+                            <p className="mt-1 text-white/65">{message.content}</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-2 border-t border-white/10 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => retryAiMessage(message.retryPayload)}
+                            disabled={aiChatMutation.isPending || !message.retryPayload}
+                            className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20 disabled:opacity-45"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">refresh</span>
+                            Retry
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => applyRetryPrompt(message.retryPayload)}
+                            disabled={!message.retryPayload}
+                            className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-medium text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-45"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">edit</span>
+                            Edit prompt
+                          </button>
+                        </div>
+                      </div>
                     ) : (
                       <FormattedAiMessage
                         content={message.content}
@@ -908,6 +986,7 @@ const SqlEditorPanel = forwardRef<
                 </div>
               ))
             )}
+            <div ref={aiTimelineEndRef} />
           </div>
           <form onSubmit={submitAiPrompt} className="border-t border-white/10 p-3">
             <textarea
