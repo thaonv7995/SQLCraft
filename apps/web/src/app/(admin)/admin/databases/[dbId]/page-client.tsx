@@ -33,13 +33,12 @@ import { cn, formatRelativeTime, formatRows } from '@/lib/utils';
 import { searchParamFirst } from '@/lib/next-app-page';
 import type { ClientPageProps } from '@/lib/page-props';
 
-type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'golden-snapshots' | 'generation-jobs';
+type DatabaseDetailTab = 'schema-template' | 'dataset-templates' | 'golden-snapshots';
 
 const DETAIL_TABS: Array<{ id: DatabaseDetailTab; label: string }> = [
   { id: 'schema-template', label: 'Schema Template' },
   { id: 'dataset-templates', label: 'Dataset Templates' },
   { id: 'golden-snapshots', label: 'Golden Snapshots' },
-  { id: 'generation-jobs', label: 'Generation Jobs' },
 ];
 
 function isDetailTab(value: string | null): value is DatabaseDetailTab {
@@ -374,102 +373,6 @@ function DatasetTemplatesTab({
   );
 }
 
-function GenerationJobsTab({
-  database,
-  jobs,
-  jobsLoading,
-}: {
-  database: Database;
-  jobs: Awaited<ReturnType<typeof adminApi.systemJobs>>;
-  jobsLoading: boolean;
-}) {
-  const schemaTemplateId = database.schemaTemplateId ?? database.id;
-
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-3 md:grid-cols-3">
-        <DetailStat
-          label="Recent Jobs"
-          value={String(jobs.length)}
-          hint="Recent import and dataset generation jobs linked to this database."
-        />
-        <DetailStat
-          label="Schema Target"
-          value={schemaTemplateId.slice(0, 8)}
-          hint="System jobs are matched against this schema template identifier."
-        />
-        <DetailStat
-          label="Database Name"
-          value={database.name}
-          hint="Recent canonical import jobs also target this schema name."
-        />
-      </div>
-
-      <Card className="border border-outline-variant/10">
-        <CardHeader className="flex-col items-start gap-2">
-          <CardTitle>Recent Generation Jobs</CardTitle>
-          <CardDescription>
-            Recent import and derived dataset generation runs associated with this database.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="px-0 pb-0 pt-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Job Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Duration</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {jobsLoading ? (
-                <TableSkeleton rows={4} cols={5} />
-              ) : jobs.length === 0 ? (
-                <TableEmpty message="No recent generation jobs linked to this database" colSpan={5} />
-              ) : (
-                jobs.map((job) => {
-                  const duration = job.completedAt
-                    ? `${Math.round(
-                        (new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime()) /
-                          1000,
-                      )}s`
-                    : job.status === 'running'
-                      ? 'Running...'
-                      : '—';
-
-                  return (
-                    <TableRow key={job.id}>
-                      <TableCell>
-                        <span className="rounded bg-surface-container-high px-2 py-0.5 font-mono text-xs text-on-surface-variant">
-                          {job.type}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={job.status} />
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-on-surface-variant">
-                        {job.target ?? '—'}
-                      </TableCell>
-                      <TableCell className="text-xs text-on-surface-variant">
-                        {formatRelativeTime(job.startedAt)}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-on-surface-variant">
-                        {duration}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 function DetailSkeleton() {
   return (
     <div className="page-shell-wide page-stack">
@@ -655,33 +558,7 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
     },
   });
 
-  const { data: generationJobs = [], isLoading: jobsLoading } = useQuery({
-    queryKey: ['admin-database-generation-jobs', database?.schemaTemplateId ?? database?.id, database?.name],
-    enabled: activeTab === 'generation-jobs' && Boolean(database),
-    queryFn: async () => {
-      if (!database) {
-        return [];
-      }
 
-      const schemaTemplateId = database.schemaTemplateId ?? database.id;
-
-      const [importJobs, datasetJobs] = await Promise.all([
-        adminApi.systemJobs({ limit: 50, type: 'canonical-dataset-import' }),
-        adminApi.systemJobs({ limit: 50, type: 'dataset-template-generation' }),
-      ]);
-
-      return [...importJobs, ...datasetJobs]
-        .filter(
-          (job) =>
-            job.target === schemaTemplateId || job.target === database.name,
-        )
-        .sort(
-          (left, right) =>
-            new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime(),
-        );
-    },
-    staleTime: 30_000,
-  });
 
   const handleVersionImported = useCallback(
     (_importedAnchorId: string) => {
@@ -933,13 +810,6 @@ export default function AdminDatabaseDetailPage({ params, searchParams }: Client
       ) : null}
       {activeTab === 'golden-snapshots' ? (
         <GoldenSnapshotsTab schemaTemplateId={database.schemaTemplateId ?? database.id} />
-      ) : null}
-      {activeTab === 'generation-jobs' ? (
-        <GenerationJobsTab
-          database={database}
-          jobs={generationJobs}
-          jobsLoading={jobsLoading}
-        />
       ) : null}
 
       <ConfirmModal
