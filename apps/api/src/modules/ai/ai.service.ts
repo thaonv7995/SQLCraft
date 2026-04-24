@@ -231,33 +231,18 @@ async function getSystemChatSetting(): Promise<AiProviderSettingRow | null> {
   return systemSetting ?? null;
 }
 
-async function resolveChatSettings(userId: string, settingId?: string): Promise<AiProviderSettingRow[]> {
-  if (settingId) return [await getOwnedSetting(userId, settingId)];
+async function resolveChatSetting(userId: string, settingId?: string): Promise<AiProviderSettingRow> {
+  if (settingId) return getOwnedSetting(userId, settingId);
   const [userSetting] = await getDb()
     .select()
     .from(schema.aiProviderSettings)
     .where(and(eq(schema.aiProviderSettings.scope, 'user'), eq(schema.aiProviderSettings.userId, userId), eq(schema.aiProviderSettings.isEnabled, true)))
     .orderBy(desc(schema.aiProviderSettings.updatedAt))
     .limit(1);
+  if (userSetting) return userSetting;
   const systemSetting = await getSystemChatSetting();
-  if (userSetting && systemSetting) return [userSetting, systemSetting];
-  if (userSetting) return [userSetting];
-  if (systemSetting) return [systemSetting];
+  if (systemSetting) return systemSetting;
   throw new ValidationError('No enabled AI provider configured. Add one in Settings → AI Providers, or ask an admin to configure the system provider.');
-}
-
-async function callWithFallback(rows: AiProviderSettingRow[], prompt: string) {
-  let lastError: unknown;
-  for (const row of rows) {
-    try {
-      const result = await runProviderCall(row, prompt);
-      return { row, result };
-    } catch (err) {
-      lastError = err;
-      if (row.scope !== 'user') break;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? 'AI provider failed'));
 }
 
 function buildPrompt(body: AiChatBody): string {
@@ -283,7 +268,7 @@ export async function chatWithAi(userId: string, body: AiChatBody): Promise<{
   usage: Record<string, unknown> | null;
   chatSession: AiChatSessionDto | null;
 }> {
-  const candidateRows = await resolveChatSettings(userId, body.settingId);
+  const row = await resolveChatSetting(userId, body.settingId);
   let chatSession = null as Awaited<ReturnType<typeof resolveAiChatSessionForMessage>> | null;
   let memoryPrompt = buildPrompt(body);
 
@@ -301,7 +286,7 @@ export async function chatWithAi(userId: string, body: AiChatBody): Promise<{
   }
 
   const started = Date.now();
-  const { row, result } = await callWithFallback(candidateRows, memoryPrompt);
+  const result = await runProviderCall(row, memoryPrompt);
   const latencyMs = Date.now() - started;
   let chatSessionDto: AiChatSessionDto | null = null;
 

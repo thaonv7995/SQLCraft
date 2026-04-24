@@ -148,8 +148,8 @@ export function AiProviderSettingsSection({ scope = 'user' }: AiProviderSettings
 
   const title = isSystem ? 'System AI Provider' : 'AI Provider';
   const description = isSystem
-    ? 'Admin config used when a user has no personal provider or their personal provider fails. Only one system provider is active.'
-    : 'Configure your personal AI provider. It is always tried first; SQLForge falls back to the admin system provider only when this is missing or fails.';
+    ? 'Admin config used only when a user has no personal provider configured. Only one system provider is active.'
+    : 'Configure your personal AI provider. When configured, SQLForge always uses this provider; admin provider is used only when this is not set.';
 
   return (
     <section className="section-card card-padding">
@@ -189,7 +189,9 @@ export function AiProviderSettingsSection({ scope = 'user' }: AiProviderSettings
               <div className="flex flex-wrap gap-2">
                 <Button variant="ghost" size="sm" loading={testMutation.isPending} onClick={() => testMutation.mutate(setting.id)}>Test</Button>
                 <Button variant="ghost" size="sm" onClick={() => { setForm(toForm(setting)); setIsEditing(true); }}>Edit</Button>
-                <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(setting.id)}>{isSystem ? 'Remove' : 'Delete personal provider'}</Button>
+                <Button variant="destructive" size="sm" onClick={() => deleteMutation.mutate(setting.id)} title={isSystem ? 'Remove system provider' : 'Delete provider config'} aria-label={isSystem ? 'Remove system provider' : 'Delete provider config'}>
+                  <span className="material-symbols-outlined text-base">delete</span>
+                </Button>
               </div>
             </div>
           </div>
