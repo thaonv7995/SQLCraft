@@ -54,7 +54,7 @@ export function inferSqlDialectFromDump(rawUtf8: string): {
   if (/\$\$[\s\S]{0,500}\$\$/m.test(w)) pg += 8;                       // dollar-quoting
   if (/\bSERIAL\b|\bBIGSERIAL\b/i.test(w)) pg += 6;                    // pg serial types
   if (/\bCREATE\s+SEQUENCE\b/i.test(w)) pg += 5;
-  if (/::[\w\s\[\]]+/i.test(w)) pg += 5;                               // pg cast syntax
+  if (/::[\w\s[\]]+/i.test(w)) pg += 5;                               // pg cast syntax
   if (/\bRETURNING\b/i.test(w)) pg += 4;
   if (/\bON\s+CONFLICT\b/i.test(w)) pg += 4;
 

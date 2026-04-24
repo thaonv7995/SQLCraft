@@ -134,7 +134,7 @@ export function getSqlStatementAtCursor(sql: string, cursor: number): string {
     low = high;
   }
 
-  let text = sql.slice(ranges[idx].from, ranges[idx].toExclusive).trim();
+  const text = sql.slice(ranges[idx].from, ranges[idx].toExclusive).trim();
   if (!text) {
     for (let j = idx - 1; j >= 0; j -= 1) {
       const t = sql.slice(ranges[j].from, ranges[j].toExclusive).trim();

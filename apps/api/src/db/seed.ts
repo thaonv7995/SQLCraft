@@ -4,7 +4,7 @@ import { eq, or, sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import * as schema from './schema/index';
 import { NotificationType } from '../modules/notifications/notifications.types';
-import { createSeedContext, getFirstAdminConfig, seedBootstrapCore } from './seed-core';
+import { createSeedContext, seedBootstrapCore } from './seed-core';
 
 async function seed() {
   const { pool, db } = createSeedContext();

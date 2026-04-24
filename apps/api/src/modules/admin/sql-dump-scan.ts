@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { randomUUID } from 'node:crypto';
 import { buildDefinitionTables, parseSqlSchemaFromText } from '@sqlcraft/sql-dump-parser';
 import type { DatasetSize, SchemaSqlDialect } from '@sqlcraft/types';

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { createSeedContext, getFirstAdminConfig, seedBootstrapCore } from './seed-core';
+import { createSeedContext, seedBootstrapCore } from './seed-core';
 
 async function bootstrap() {
   const { pool, db } = createSeedContext();

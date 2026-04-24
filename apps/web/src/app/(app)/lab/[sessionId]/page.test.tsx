@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import React, { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -74,9 +74,7 @@ vi.mock('@/hooks/use-query-execution', () => ({
   }),
 }));
 
-vi.mock('@/components/ui/sql-editor', () => {
-  const React = require('react') as typeof import('react');
-  return {
+vi.mock('@/components/ui/sql-editor', () => ({
     SqlEditor: React.forwardRef(function SqlEditorMock(
       { testId = 'lab-sql-editor' }: { testId?: string },
       ref: React.Ref<{ getStatementAtCursor: () => string }>,
@@ -86,8 +84,7 @@ vi.mock('@/components/ui/sql-editor', () => {
       }));
       return <div data-testid={testId}>sql editor stub</div>;
     }),
-  };
-});
+}));
 
 vi.mock('@/components/lab/execution-plan-tree', () => ({
   ExecutionPlanTree: () => <div data-testid="execution-plan-tree" />,

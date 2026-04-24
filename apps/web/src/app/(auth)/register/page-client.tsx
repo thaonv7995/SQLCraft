@@ -78,7 +78,7 @@ export default function RegisterPage(_props: ClientPageProps) {
           </div>
           <h1 className="text-xl font-semibold text-on-surface">Account created</h1>
           <p className="mt-3 text-sm leading-6 text-on-surface-variant">
-            Your account is pending admin approval. You'll be able to sign in once an administrator
+            Your account is pending admin approval. You&apos;ll be able to sign in once an administrator
             activates it.
           </p>
           <Link

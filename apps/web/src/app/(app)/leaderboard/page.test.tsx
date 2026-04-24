@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/api', () => ({
+  registerTokensRefreshedCallback: vi.fn(),
   challengesApi: mocks.challengesApi,
   leaderboardApi: mocks.leaderboardApi,
   lessonsApi: mocks.lessonsApi,

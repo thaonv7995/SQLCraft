@@ -33,6 +33,7 @@ vi.mock('react-hot-toast', () => ({
 }));
 
 vi.mock('@/lib/api', () => ({
+  registerTokensRefreshedCallback: vi.fn(),
   databasesApi: {
     get: mocks.getDatabase,
     createSession: mocks.createSession,

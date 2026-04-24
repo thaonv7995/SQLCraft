@@ -254,8 +254,6 @@ function addOnConflictDoNothing(sql: string): string {
 }
 
 function rewriteInsertsInChunk(sql: string, schema: SchemaDefinition | null): string {
-  if (!schema?.tables?.length) return sql;
-
   const lines = sql.split(/\r?\n/);
   const out: string[] = [];
   let i = 0;
@@ -269,7 +267,8 @@ function rewriteInsertsInChunk(sql: string, schema: SchemaDefinition | null): st
         if (j < lines.length) buf += '\n' + lines[j];
       }
       if (/\bVALUES\b/i.test(buf) && buf.includes(';')) {
-        out.push(rewriteInsertIntegerBooleansForPg(buf, schema));
+        const rewritten = schema?.tables?.length ? rewriteInsertIntegerBooleansForPg(buf, schema) : buf;
+        out.push(addOnConflictDoNothing(rewritten));
       } else {
         for (let k = i; k <= j; k++) out.push(lines[k]);
       }
@@ -301,14 +300,7 @@ export function sanitizePostgresDumpForPsql(
     kept.push(line);
   }
   let joined = kept.join('\n');
-  if (schema) {
-    joined = rewriteInsertsInChunk(joined, schema);
-  }
-  // Rewrite single-line INSERT...VALUES to include ON CONFLICT DO NOTHING
-  joined = joined
-    .split('\n')
-    .map((line) => (/^\s*INSERT\s+/i.test(line) ? addOnConflictDoNothing(line) : line))
-    .join('\n');
+  joined = rewriteInsertsInChunk(joined, schema ?? null);
   return Buffer.from(joined, 'utf8');
 }
 
