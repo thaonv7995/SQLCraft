@@ -6,10 +6,12 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
 } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLabStore } from '@/stores/lab';
@@ -223,6 +225,114 @@ function DatasetScaleSelector({
 
 // ─── SQL Editor (CodeMirror 6) ────────────────────────────────────────────────
 
+type AiActionOption = {
+  id: string;
+  label: string;
+  instruction: string;
+};
+
+type AiContextOption = {
+  id: 'schema' | 'statement' | 'full-sql' | 'last-error' | 'execution-result' | 'execution-plan';
+  label: string;
+  icon: string;
+};
+
+const AI_ACTION_OPTIONS: AiActionOption[] = [
+  {
+    id: 'general',
+    label: 'General chat',
+    instruction: 'Answer the user request using the selected SQLForge context.',
+  },
+  {
+    id: 'suggest-indexes',
+    label: 'Suggest indexes',
+    instruction: 'Recommend useful indexes from the selected context. Explain which queries each index helps and mention write/storage trade-offs.',
+  },
+  {
+    id: 'explain-query',
+    label: 'Explain query',
+    instruction: 'Explain the selected/current SQL step by step, including what it returns, important joins/filters, and possible pitfalls.',
+  },
+  {
+    id: 'optimize-query',
+    label: 'Optimize query',
+    instruction: 'Optimize the selected/current SQL. Return an improved SQL version first, then explain changes and helpful indexes.',
+  },
+  {
+    id: 'fix-error',
+    label: 'Fix error',
+    instruction: 'Fix the SQL error using the selected context. Return corrected SQL and explain the root cause.',
+  },
+  {
+    id: 'generate-sql',
+    label: 'Generate SQL',
+    instruction: 'Generate runnable SQL for the current dialect. Ask one concise clarification question only if the request is ambiguous.',
+  },
+];
+
+const AI_CONTEXT_OPTIONS: AiContextOption[] = [
+  { id: 'schema', label: 'Schema', icon: 'schema' },
+  { id: 'statement', label: 'Cursor SQL', icon: 'data_object' },
+  { id: 'full-sql', label: 'Full editor', icon: 'subject' },
+  { id: 'last-error', label: 'Last error', icon: 'bug_report' },
+  { id: 'execution-result', label: 'Results', icon: 'table_rows' },
+  { id: 'execution-plan', label: 'Plan', icon: 'account_tree' },
+];
+
+function FormattedAiMessage({
+  content,
+  onAddSql,
+}: {
+  content: string;
+  onAddSql: (sql: string) => void;
+}) {
+  const parts = content.split(/```(?:\w+)?\s*([\s\S]*?)```/g);
+
+  return (
+    <div className="space-y-2">
+      {parts.map((part, index) => {
+        if (!part) return null;
+        const isCode = index % 2 === 1;
+        if (isCode) {
+          const sql = part.trim();
+          return (
+            <div key={index} className="group relative overflow-hidden rounded-lg border border-white/10 bg-black/25">
+              <div className="absolute right-1.5 top-1.5 z-10 flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={() => onAddSql(sql)}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-primary/30 bg-[#202020]/90 text-primary shadow-sm hover:bg-primary/15"
+                  title="Add SQL to editor"
+                  aria-label="Add SQL to editor"
+                >
+                  <span className="material-symbols-outlined text-[14px]">add_notes</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard.writeText(sql)}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-white/10 bg-[#202020]/90 text-white/60 shadow-sm hover:bg-white/10 hover:text-white"
+                  title="Copy SQL"
+                  aria-label="Copy SQL"
+                >
+                  <span className="material-symbols-outlined text-[14px]">content_copy</span>
+                </button>
+              </div>
+              <pre className="overflow-auto p-2 pr-16 font-mono text-[11px] leading-relaxed text-white/80">
+                <code>{sql}</code>
+              </pre>
+            </div>
+          );
+        }
+        return (
+          <div key={index} className="whitespace-pre-wrap leading-relaxed">
+            {part.trim()}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function EditorTabsBar() {
   const editorTabs = useLabStore((state) => state.editorTabs);
   const activeEditorTabId = useLabStore((state) => state.activeEditorTabId);
@@ -382,21 +492,48 @@ const SqlEditorPanel = forwardRef<
     onClear: () => void;
     notice: 'success' | 'error' | 'info' | null;
     onDismissErrorNotice: () => void;
+    dialect?: string | null;
+    databaseName?: string | null;
   }
 >(function SqlEditorPanel(
-  { sessionId, schemaTables, onFormat, onCopy, onClear, notice, onDismissErrorNotice },
+  { sessionId, schemaTables, onFormat, onCopy, onClear, notice, onDismissErrorNotice, dialect, databaseName },
   ref,
 ) {
   const currentQuery = useLabStore((state) => state.currentQuery);
   const setQuery = useLabStore((state) => state.setQuery);
   const error = useLabStore((state) => state.error);
+  const results = useLabStore((state) => state.results);
+  const executionPlan = useLabStore((state) => state.executionPlan);
   const lastExecution = useLabStore((state) => state.lastExecution);
   const { mutate: executeQuery } = useExecuteQuery();
+  const editorRef = useRef<SqlEditorHandle | null>(null);
+  const [isAiOpen, setIsAiOpen] = useState(false);
+  const [isAiExpanded, setIsAiExpanded] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiActionId, setAiActionId] = useState(AI_ACTION_OPTIONS[0].id);
+  const [selectedAiContexts, setSelectedAiContexts] = useState<AiContextOption['id'][]>(['schema', 'statement', 'last-error']);
+  const [isAiContextMenuOpen, setIsAiContextMenuOpen] = useState(false);
+  const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
 
   const noticeMessage =
     notice === 'error'
       ? (error ?? lastExecution?.errorMessage ?? 'Query failed')
       : null;
+  const mentionableTables = useMemo(() => schemaTables?.slice(0, 12).map((table) => table.name) ?? [], [schemaTables]);
+
+  const schemaContext = useMemo(() => {
+    if (!schemaTables?.length) return '';
+    return schemaTables
+      .slice(0, 30)
+      .map((table) => {
+        const columns = table.columns
+          .slice(0, 24)
+          .map((column) => `${column.name}${column.type ? ` ${column.type}` : ''}`)
+          .join(', ');
+        return `${table.name}(${columns})`;
+      })
+      .join('\n');
+  }, [schemaTables]);
 
   const handleExecute = useCallback(
     (statementSql: string) => {
@@ -407,22 +544,269 @@ const SqlEditorPanel = forwardRef<
     [executeQuery, sessionId],
   );
 
+  const aiChatMutation = useMutation({
+    mutationFn: async ({ prompt, action, contextIds }: { prompt: string; action: AiActionOption; contextIds: AiContextOption['id'][] }) => {
+      const statement = editorRef.current?.getStatementAtCursor().trim() ?? '';
+      const contextParts = [
+        `Dialect: ${dialect ?? 'unknown'}`,
+        `Database: ${databaseName ?? 'unknown'}`,
+      ];
+
+      if (contextIds.includes('schema')) {
+        contextParts.push(schemaContext
+          ? `Schema summary (${schemaTables?.length ?? 0} tables, truncated):\n${schemaContext}`
+          : 'Schema summary: No schema tables are loaded in the current session.');
+      }
+      if (contextIds.includes('statement')) {
+        contextParts.push(statement ? `SQL statement at cursor:\n${statement}` : 'SQL statement at cursor: none');
+      }
+      if (contextIds.includes('full-sql')) {
+        contextParts.push(currentQuery.trim() ? `Full editor SQL:\n${currentQuery}` : 'Full editor SQL: empty');
+      }
+      if (contextIds.includes('last-error')) {
+        contextParts.push(noticeMessage ? `Last execution error:\n${noticeMessage}` : 'Last execution error: none');
+      }
+      if (contextIds.includes('execution-result')) {
+        contextParts.push(results ? `Latest result preview:\nColumns: ${results.columns.map((column) => column.name).join(', ')}\nRows: ${JSON.stringify(results.rows.slice(0, 20))}` : 'Latest result preview: none');
+      }
+      if (contextIds.includes('execution-plan')) {
+        contextParts.push(executionPlan ? `Latest execution plan:\n${JSON.stringify(executionPlan).slice(0, 8000)}` : 'Latest execution plan: none');
+      }
+
+      return aiApi.chat({
+        feature: 'general',
+        prompt: `You are an expert SQL assistant inside SQLForge. The user chooses an action and context chips; only use the selected context included in the Context field. Do not ask the user to resend context that is already included. Answer concisely in the user's language. If you provide SQL, include runnable SQL for the current dialect unless the user asks otherwise.\n\nSelected action: ${action.label}\nAction instruction: ${action.instruction}\nSelected context chips: ${contextIds.join(', ') || 'none'}\n\nUser request:\n${prompt}`,
+        sql: statement || currentQuery,
+        context: contextParts.join('\n\n'),
+      });
+    },
+    onSuccess: (result, variables) => {
+      setAiMessages((messages) => [...messages, { role: 'user', content: `[${variables.action.label}] ${variables.prompt}` }, { role: 'assistant', content: result.content }]);
+      setAiPrompt('');
+    },
+    onError: (err) => toastError('AI chat failed', err),
+  });
+
+  const selectedAiAction = AI_ACTION_OPTIONS.find((action) => action.id === aiActionId) ?? AI_ACTION_OPTIONS[0];
+
+  const toggleAiContext = useCallback((contextId: AiContextOption['id']) => {
+    setSelectedAiContexts((current) => (
+      current.includes(contextId)
+        ? current.filter((id) => id !== contextId)
+        : [...current, contextId]
+    ));
+  }, []);
+
+  const sendAiPrompt = useCallback((prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!trimmed || aiChatMutation.isPending) return;
+    aiChatMutation.mutate({ prompt: trimmed, action: selectedAiAction, contextIds: selectedAiContexts });
+  }, [aiChatMutation, selectedAiAction, selectedAiContexts]);
+
+  const submitAiPrompt = useCallback((event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    setIsAiContextMenuOpen(false);
+    sendAiPrompt(aiPrompt);
+  }, [aiPrompt, sendAiPrompt]);
+
+  useImperativeHandle(ref, () => ({
+    getStatementAtCursor: () => editorRef.current?.getStatementAtCursor() ?? '',
+    appendSql: (sql: string) => editorRef.current?.appendSql(sql),
+  }), []);
+
   return (
-    <SqlEditor
-      ref={ref}
-      value={currentQuery}
-      onChange={setQuery}
-      onExecute={handleExecute}
-      onFormat={onFormat}
-      onCopy={onCopy}
-      onClear={onClear}
-      notice={notice}
-      noticeMessage={noticeMessage}
-      onDismissErrorNotice={onDismissErrorNotice}
-      schema={schemaTables}
-      placeholder="-- Statements separated by ;&#10;-- Ctrl+Enter runs the statement at the cursor"
-      testId="lab-sql-editor"
-    />
+    <div className="relative h-full">
+      <SqlEditor
+        ref={editorRef}
+        value={currentQuery}
+        onChange={setQuery}
+        onExecute={handleExecute}
+        onFormat={onFormat}
+        onCopy={onCopy}
+        onClear={onClear}
+        onAiClick={() => { setIsAiContextMenuOpen(false); setIsAiOpen((open) => !open); }}
+        aiOpen={isAiOpen}
+        notice={notice}
+        noticeMessage={noticeMessage}
+        onDismissErrorNotice={onDismissErrorNotice}
+        schema={schemaTables}
+        placeholder="-- Statements separated by ;&#10;-- Ctrl+Enter runs the statement at the cursor"
+        testId="lab-sql-editor"
+      />
+      {isAiOpen ? (
+        <div className={cn('absolute bottom-14 right-3 z-30 flex flex-col overflow-hidden rounded-2xl border border-primary/20 bg-[#202020] shadow-[0_24px_80px_rgba(0,0,0,0.55)]', isAiExpanded ? 'h-[min(86vh,46rem)] w-[min(94vw,42rem)]' : 'h-[min(78vh,38rem)] w-[min(92vw,30rem)]')}>
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <span className="material-symbols-outlined text-base text-primary">auto_awesome</span>
+                SQL AI Assistant
+              </div>
+              <p className="mt-0.5 text-[11px] text-white/45">Uses statement at cursor, schema context, and last error.</p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setIsAiExpanded((expanded) => !expanded)}
+                className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white"
+                aria-label={isAiExpanded ? 'Collapse AI assistant' : 'Expand AI assistant'}
+                title={isAiExpanded ? 'Collapse' : 'Expand'}
+              >
+                <span className="material-symbols-outlined text-base">{isAiExpanded ? 'collapse_content' : 'open_in_full'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsAiContextMenuOpen(false); setIsAiOpen(false); }}
+                className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white"
+                aria-label="Close AI assistant"
+              >
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+          </div>
+          <div className="border-b border-white/10 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={aiActionId}
+                onChange={(event) => setAiActionId(event.target.value)}
+                disabled={aiChatMutation.isPending}
+                title={selectedAiAction.instruction}
+                className="h-7 w-[9.25rem] shrink-0 rounded-md border border-white/10 bg-black/20 px-2 text-[11px] font-medium text-white outline-none focus:border-primary/40 disabled:opacity-50"
+              >
+                {AI_ACTION_OPTIONS.map((action) => (
+                  <option key={action.id} value={action.id}>{action.label}</option>
+                ))}
+              </select>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                {selectedAiContexts.map((contextId) => {
+                  const contextOption = AI_CONTEXT_OPTIONS.find((option) => option.id === contextId);
+                  if (!contextOption) return null;
+                  return (
+                    <button
+                      key={contextOption.id}
+                      type="button"
+                      onClick={() => toggleAiContext(contextOption.id)}
+                      disabled={aiChatMutation.isPending}
+                      title={`Remove ${contextOption.label}`}
+                      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full border border-primary/35 bg-primary/12 px-1.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-45"
+                    >
+                      <span className="material-symbols-outlined text-[12px]">{contextOption.icon}</span>
+                      <span className="max-w-[4.5rem] truncate">{contextOption.label}</span>
+                    </button>
+                  );
+                })}
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsAiContextMenuOpen((open) => !open)}
+                    disabled={aiChatMutation.isPending}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-white/55 transition-colors hover:border-white/20 hover:text-white disabled:opacity-45"
+                    title="Choose context"
+                    aria-label="Choose AI context"
+                    aria-expanded={isAiContextMenuOpen}
+                  >
+                    <span className="material-symbols-outlined text-[14px]">add</span>
+                  </button>
+                  {isAiContextMenuOpen ? (
+                    <div className="absolute right-0 top-8 z-40 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#252525] p-1 shadow-[0_16px_50px_rgba(0,0,0,0.45)]">
+                      {AI_CONTEXT_OPTIONS.map((contextOption) => {
+                        const selected = selectedAiContexts.includes(contextOption.id);
+                        return (
+                          <button
+                            key={contextOption.id}
+                            type="button"
+                            onClick={() => toggleAiContext(contextOption.id)}
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                          >
+                            <span className="material-symbols-outlined text-[15px] text-white/45">{contextOption.icon}</span>
+                            <span className="flex-1">{contextOption.label}</span>
+                            {selected ? <span className="material-symbols-outlined text-[14px] text-primary">check</span> : null}
+                          </button>
+                        );
+                      })}
+                      {mentionableTables.length > 0 ? (
+                        <div className="mt-1 border-t border-white/10 pt-1">
+                          <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/35">Mention table</div>
+                          {mentionableTables.map((tableName) => (
+                            <button
+                              key={tableName}
+                              type="button"
+                              onClick={() => {
+                                setAiPrompt((current) => `${current}${current && !current.endsWith(' ') ? ' ' : ''}@${tableName} `);
+                                setIsAiContextMenuOpen(false);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-white/65 transition-colors hover:bg-white/10 hover:text-white"
+                            >
+                              <span className="material-symbols-outlined text-[15px] text-white/40">table</span>
+                              <span className="truncate">@{tableName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+            {aiMessages.length === 0 ? (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-relaxed text-white/55">
+                Ask AI to explain, optimize, fix errors, or generate SQL for the current editor.
+              </div>
+            ) : (
+              aiMessages.map((message, index) => (
+                <div
+                  key={`${message.role}-${index}`}
+                  className={cn(
+                    'rounded-xl border p-3 text-xs leading-relaxed',
+                    message.role === 'user'
+                      ? 'ml-8 border-primary/20 bg-primary/10 text-primary'
+                      : 'mr-8 border-white/10 bg-white/[0.04] text-white/75',
+                  )}
+                >
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">
+                    {message.role === 'user' ? 'You' : 'AI'}
+                  </div>
+                  {message.role === 'assistant' ? (
+                    <>
+                      <FormattedAiMessage
+                        content={message.content}
+                        onAddSql={(sql) => editorRef.current?.appendSql(sql)}
+                      />
+                    </>
+                  ) : (
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  )}
+                </div>
+              ))
+            )}
+            {aiChatMutation.isPending ? (
+              <div className="mr-8 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs text-white/55">Thinking…</div>
+            ) : null}
+          </div>
+          <form onSubmit={submitAiPrompt} className="border-t border-white/10 p-3">
+            <textarea
+              value={aiPrompt}
+              onChange={(event) => setAiPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  submitAiPrompt();
+                }
+              }}
+              placeholder="Ask: explain this query, optimize it, fix the error…"
+              rows={isAiExpanded ? 4 : 3}
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs leading-relaxed text-white outline-none placeholder:text-white/30 focus:border-primary/40"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[10px] text-white/35">⌘/Ctrl + Enter to send</span>
+              <Button type="submit" variant="primary" size="sm" loading={aiChatMutation.isPending} disabled={!aiPrompt.trim()}>
+                Send
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+    </div>
   );
 });
 
@@ -2576,49 +2960,9 @@ const TABS = [
   { id: 'compare', label: 'Compare', icon: 'compare_arrows' },
   { id: 'history', label: 'History', icon: 'history' },
   { id: 'schema', label: 'Schema', icon: 'schema' },
-  { id: 'ai', label: 'AI', icon: 'auto_awesome' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
-
-function AiPanel({ answer, isLoading }: { answer: string; isLoading: boolean }) {
-  if (isLoading) {
-    return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="space-y-3 text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
-          <p className="text-sm text-on-surface-variant">Asking your AI provider…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!answer.trim()) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 text-center">
-        <div className="max-w-md space-y-2">
-          <span className="material-symbols-outlined block text-4xl text-outline">auto_awesome</span>
-          <p className="text-sm font-medium text-on-surface">No AI response yet</p>
-          <p className="text-xs leading-relaxed text-on-surface-variant">
-            Configure a provider in Settings, then use AI Explain from the Lab toolbar to analyze the SQL statement at your cursor.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 overflow-auto p-4">
-      <div className="rounded-xl border border-outline-variant/15 bg-surface-container-low p-4">
-        <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-primary">
-          <span className="material-symbols-outlined text-base">auto_awesome</span>
-          AI Explain
-        </div>
-        <div className="whitespace-pre-wrap text-sm leading-6 text-on-surface-variant">{answer}</div>
-      </div>
-    </div>
-  );
-}
 
 function LabSessionLoading() {
   return (
@@ -2947,22 +3291,6 @@ export default function LabPage({ params }: ClientPageProps) {
   const [editorNotice, setEditorNotice] = useState<'success' | 'error' | 'info' | null>(null);
   const [appliedNoticeKey, setAppliedNoticeKey] = useState('');
   const editorNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [aiAnswer, setAiAnswer] = useState('');
-
-  const aiExplainMutation = useMutation({
-    mutationFn: (sql: string) =>
-      aiApi.chat({
-        feature: 'sql-explain',
-        prompt: sql,
-        sql,
-        context: `Dialect: ${session?.dialect ?? 'unknown'}\nDatabase: ${displayDatabaseName}`,
-      }),
-    onSuccess: (result) => {
-      setAiAnswer(result.content);
-      setActiveTab('ai');
-    },
-    onError: (err) => toastError('AI explain failed', err),
-  });
   const [challengeFeedbackExpanded, setChallengeFeedbackExpanded] = useState(false);
   const lastChallengeAttemptIdRef = useRef<string | null>(null);
   const persistedEditorState = useMemo(
@@ -3103,14 +3431,7 @@ export default function LabPage({ params }: ClientPageProps) {
     explainQuery({ sessionId, sql });
   }, [explainQuery, sessionId]);
 
-  const aiExplainStatementAtCursor = useCallback(() => {
-    const sql = sqlEditorRef.current?.getStatementAtCursor().trim() ?? '';
-    if (!sql) {
-      toast.error('No SQL statement at cursor');
-      return;
-    }
-    aiExplainMutation.mutate(sql);
-  }, [aiExplainMutation]);
+
 
   // Global keyboard shortcut: Ctrl+Enter = run statement at caret (must run before any conditional return — Rules of Hooks)
   useEffect(() => {
@@ -3416,17 +3737,6 @@ export default function LabPage({ params }: ClientPageProps) {
                   Submit
                 </Button>
               ) : null}
-              <Button
-                variant="secondary"
-                size="sm"
-                loading={aiExplainMutation.isPending}
-                disabled={!currentQuery.trim() || aiExplainMutation.isPending}
-                onClick={aiExplainStatementAtCursor}
-                title="Explain the SQL statement at the cursor with your default AI provider"
-                leftIcon={<span className="material-symbols-outlined text-[18px]">auto_awesome</span>}
-              >
-                AI Explain
-              </Button>
             </div>
             <DatasetScaleSelector
               selectedScale={selectedScale}
@@ -3668,6 +3978,8 @@ export default function LabPage({ params }: ClientPageProps) {
               onClear={handleClearEditor}
               notice={editorNotice}
               onDismissErrorNotice={() => setEditorNotice(null)}
+              dialect={session?.dialect ?? null}
+              databaseName={displayDatabaseName}
             />
           </div>
         </div>
@@ -3772,7 +4084,6 @@ export default function LabPage({ params }: ClientPageProps) {
                 </div>
               </div>
             )}
-            {activeTab === 'ai' && <AiPanel answer={aiAnswer} isLoading={aiExplainMutation.isPending} />}
           </div>
         </div>
       </div>

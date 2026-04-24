@@ -200,7 +200,11 @@ function buildPrompt(body: AiChatBody): string {
   if (body.feature === 'query-optimize') {
     return `Suggest practical optimizations for this SQL query. Mention indexes only when justified.\n\nSQL:\n${body.sql || body.prompt}\n\nContext:\n${body.context || 'No extra context.'}`;
   }
-  return body.prompt;
+  return `User request:
+${body.prompt}
+
+Context:
+${body.context || 'No extra context.'}`;
 }
 
 export async function chatWithAi(userId: string, body: AiChatBody) {

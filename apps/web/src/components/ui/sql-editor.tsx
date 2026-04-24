@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { autocompletion } from '@codemirror/autocomplete';
 import { schemaCompletionSource, sql, PostgreSQL, type SQLNamespace } from '@codemirror/lang-sql';
@@ -673,6 +673,7 @@ function buildSqlSchemaCompletionSource(schema?: SQLNamespace) {
 export interface SqlEditorHandle {
   /** Trimmed SQL statement containing the caret (split on `;` outside strings/comments). */
   getStatementAtCursor: () => string;
+  appendSql: (sql: string) => void;
 }
 
 export interface SqlEditorProps {
@@ -683,6 +684,8 @@ export interface SqlEditorProps {
   onFormat?: () => void;
   onCopy?: () => void;
   onClear?: () => void;
+  onAiClick?: () => void;
+  aiOpen?: boolean;
   notice?: 'success' | 'error' | 'info' | null;
   /** Shown when notice is error; click icon to expand */
   noticeMessage?: string | null;
@@ -702,6 +705,8 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     onFormat,
     onCopy,
     onClear,
+    onAiClick,
+    aiOpen = false,
     notice = null,
     noticeMessage = null,
     onDismissErrorNotice,
@@ -725,19 +730,33 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     return getSqlStatementAtCursor(doc, head);
   }, [value]);
 
-  const runAtCursor = useCallback(() => {
-    const stmt = readStatementAtCursor();
-    if (stmt.trim() && onExecute) {
-      onExecute(stmt);
+  const appendSql = useCallback((sql: string) => {
+    const view = editorRef.current?.view;
+    const text = sql.trim();
+    if (!text) return;
+    if (!view) {
+      onChange(`${value.trimEnd()}\n\n${text}\n`);
+      return;
     }
-  }, [onExecute, readStatementAtCursor]);
+
+    const doc = view.state.doc.toString();
+    const prefix = doc.trim().length > 0 ? `${doc.trimEnd()}\n\n` : '';
+    const nextText = `${prefix}${text}\n`;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: nextText },
+      selection: { anchor: nextText.length },
+    });
+    onChange(nextText);
+    view.focus();
+  }, [onChange, value]);
 
   useImperativeHandle(
     ref,
     () => ({
       getStatementAtCursor: () => readStatementAtCursor(),
+      appendSql,
     }),
-    [readStatementAtCursor],
+    [appendSql, readStatementAtCursor],
   );
 
   useEffect(() => {
@@ -763,7 +782,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     };
   }, [errorDetailOpen]);
 
-  const extensions = useCallback(() => {
+  const extensions = useMemo(() => {
     const exts = [
       sql({
         dialect: PostgreSQL,
@@ -800,8 +819,13 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
             {
               key: 'Ctrl-Enter',
               mac: 'Cmd-Enter',
-              run: () => {
-                runAtCursor();
+              run: (view) => {
+                const doc = view.state.doc.toString();
+                const head = view.state.selection.main.head;
+                const stmt = getSqlStatementAtCursor(doc, head);
+                if (stmt.trim()) {
+                  onExecute(stmt);
+                }
                 return true;
               },
             },
@@ -811,9 +835,9 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
     }
 
     return exts;
-  }, [completionSchema, onExecute, runAtCursor]);
+  }, [completionSchema, onExecute]);
 
-  const hasActions = onFormat || onCopy || onClear;
+  const hasActions = onFormat || onCopy || onClear || onAiClick;
 
   if (notice !== 'error' && errorDetailOpen) {
     setErrorDetailOpen(false);
@@ -825,7 +849,7 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
         ref={editorRef}
         value={value}
         onChange={onChange}
-        extensions={extensions()}
+        extensions={extensions}
         theme="dark"
         readOnly={readOnly}
         placeholder={placeholder}
@@ -855,6 +879,24 @@ export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function Sq
       {/* Inline editor actions — bottom-right inside input */}
       {hasActions && (
         <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1">
+          {onAiClick && (
+            <button
+              type="button"
+              onClick={onAiClick}
+              title={aiOpen ? 'Close AI assistant' : 'Open AI assistant'}
+              aria-label={aiOpen ? 'Close AI assistant' : 'Open AI assistant'}
+              aria-pressed={aiOpen}
+              className={cn(
+                'flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors disabled:opacity-30 backdrop-blur-sm',
+                aiOpen
+                  ? 'border-primary/40 bg-primary/20 text-primary'
+                  : 'border-primary/25 bg-primary/10 text-primary hover:bg-primary/20',
+              )}
+            >
+              <span className="material-symbols-outlined text-sm">auto_awesome</span>
+              AI
+            </button>
+          )}
           {onFormat && (
             <button
               type="button"

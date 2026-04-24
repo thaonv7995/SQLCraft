@@ -266,7 +266,14 @@ export function AiProviderSettingsSection() {
             {form.model === '__custom__' ? (
               <Input label="Custom model" value={form.customModel} onChange={(e) => setForm((current) => ({ ...current, customModel: e.target.value }))} />
             ) : null}
-            <Input label="Base URL" value={form.baseUrl} placeholder={selectedMeta.defaultBaseUrl || 'https://your-provider.example/v1'} onChange={(e) => setForm((current) => ({ ...current, baseUrl: e.target.value }))} />
+            <div className="space-y-1.5">
+              <Input label="Base URL" value={form.baseUrl} placeholder={selectedMeta.defaultBaseUrl || 'https://your-provider.example/v1'} onChange={(e) => setForm((current) => ({ ...current, baseUrl: e.target.value }))} />
+              {form.baseUrl.includes('localhost') || form.baseUrl.includes('127.0.0.1') ? (
+                <p className="text-xs leading-relaxed text-outline">
+                  If SQLForge API runs in Docker, localhost points to the API container. Use <code className="rounded bg-surface-container-high px-1 py-0.5 text-on-surface-variant">host.docker.internal</code> for services running on your Mac.
+                </p>
+              ) : null}
+            </div>
             <Input label={form.id ? 'API key (leave blank to keep existing)' : 'API key'} type="password" value={form.apiKey} onChange={(e) => setForm((current) => ({ ...current, apiKey: e.target.value }))} />
             <div className="flex flex-col justify-end gap-2 text-sm text-on-surface-variant">
               <label className="inline-flex items-center gap-2">

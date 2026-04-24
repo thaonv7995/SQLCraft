@@ -33,7 +33,35 @@ function resolveBaseUrl(provider: AiProvider, baseUrl: string | null): string {
   return url.replace(/\/+$/, '');
 }
 
-async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function toDockerHostUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (!isLoopbackHost(parsed.hostname)) return null;
+    parsed.hostname = 'host.docker.internal';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function formatFetchError(url: string, err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  try {
+    const parsed = new URL(url);
+    if (isLoopbackHost(parsed.hostname)) {
+      return new Error(`${message}. The API server cannot reach ${parsed.host}. If SQLForge runs in Docker and your AI gateway runs on your Mac, use http://host.docker.internal:${parsed.port || 'PORT'} instead of localhost.`);
+    }
+  } catch {
+    // Fall through to the original message.
+  }
+  return new Error(message);
+}
+
+async function fetchJsonOnce(url: string, init: RequestInit): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.AI_REQUEST_TIMEOUT_MS);
   try {
@@ -49,6 +77,22 @@ async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
     return data;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function fetchJson(url: string, init: RequestInit): Promise<unknown> {
+  try {
+    return await fetchJsonOnce(url, init);
+  } catch (err) {
+    const fallbackUrl = toDockerHostUrl(url);
+    if (fallbackUrl) {
+      try {
+        return await fetchJsonOnce(fallbackUrl, init);
+      } catch (fallbackErr) {
+        throw formatFetchError(fallbackUrl, fallbackErr);
+      }
+    }
+    throw formatFetchError(url, err);
   }
 }
 
