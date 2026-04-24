@@ -1,6 +1,6 @@
 {
   "name": "@sqlcraft/sandbox-schema-diff",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "private": true,
   "main": "./dist/index.js",
   "types": "./src/index.ts",

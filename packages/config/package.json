@@ -1,6 +1,6 @@
 {
   "name": "@sqlcraft/config",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "main": "./index.js",
   "scripts": {
     "typecheck": "echo 'No typecheck for config package'"
