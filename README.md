@@ -81,6 +81,82 @@ Credentials for the **first admin** are printed at the end of the run (also in `
 
 The API container **runs migrations on each start** (`apps/api/docker-entrypoint.sh`) — safe to restart.
 
+## Update
+
+### One-liner update
+
+Rerun the installer. It refreshes the bootstrapped source in `SQLCRAFT_INSTALL_DIR` (default `~/.sqlcraft`) while preserving `.env.production`:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/install.sh)
+```
+
+For a custom install directory:
+
+```bash
+SQLCRAFT_INSTALL_DIR=/opt/sqlcraft bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/install.sh)
+```
+
+`install.sh` preserves your existing `.env.production`, refreshes missing generated secrets only, runs migrations, and restarts the stack.
+
+### Update from a clone
+
+```bash
+cd SQLCraft
+git pull --ff-only
+./install.sh
+```
+
+To update to a tagged release or a different branch before rerunning the installer:
+
+```bash
+git fetch --tags
+git checkout v0.1.6   # example tag
+./install.sh
+```
+
+### Only refresh Docker images
+
+If `.env.production` already points to published images and you only want to pull/recreate containers:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml pull api web worker
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+
+## Uninstall
+
+### One-liner uninstall
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
+```
+
+For a custom install directory:
+
+```bash
+SQLCRAFT_INSTALL_DIR=/opt/sqlcraft bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
+```
+
+### Uninstall from a clone
+
+Use the included uninstall script from the project directory:
+
+```bash
+./uninstall.sh
+```
+
+By default this stops the production Compose stack, removes containers, removes named volumes, and cleans the stack network. It keeps `.env.production` so you can reinstall with the same secrets and ports.
+
+Optional cleanup:
+
+```bash
+./uninstall.sh --purge-env                         # also remove .env.production
+SQLCRAFT_INSTALL_DIR="$HOME/.sqlcraft" ./uninstall.sh --remove-source
+```
+
+If you installed with the one-liner and are not inside the install directory, either `cd ~/.sqlcraft` first or set `SQLCRAFT_INSTALL_DIR` as shown above.
+
 ## Public internet (HTTPS)
 
 For a **real domain**, `install.sh` alone does **not** configure TLS or firewall. After install:
