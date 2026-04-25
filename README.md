@@ -1,10 +1,7 @@
 # SQLCraft
 
-**Master SQL — from correctness to performance.**
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-Open-source SQL platform for **sandboxed query execution**, **realistic datasets**, **execution-plan analysis**, and **admin-reviewed** lessons, challenges, and catalog content.
+SQL platform for **sandboxed query execution**, **realistic datasets**, **execution-plan analysis**, and **admin-reviewed** lessons, challenges, and catalog content.
 
 <p align="center">
   <img src="docs/system-architecture.png" alt="System architecture" width="300" />
@@ -14,6 +11,7 @@ Open-source SQL platform for **sandboxed query execution**, **realistic datasets
 
 - **SQL Lab** — Browser SQL editor, execution plans, history, result comparison.
 - **Isolated sandboxes** — Per-session database containers (engine from the schema template), auto-expiry.
+- **AI Assistant** — AI-powered SQL query generation, optimization, and explanation.
 - **Dataset scaling** — Same schema from tiny to large row counts for real performance tradeoffs.
 - **Optimization labs** — Side-by-side runs, index tooling, schema diff.
 
