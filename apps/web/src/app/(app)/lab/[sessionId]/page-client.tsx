@@ -563,6 +563,8 @@ const SqlEditorPanel = forwardRef<
   const aiChatPendingRef = useRef(false);
   const aiTimelineEndRef = useRef<HTMLDivElement | null>(null);
   const aiContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const aiPanelHostRef = useRef<HTMLDivElement | null>(null);
+  const [aiPanelSize, setAiPanelSize] = useState({ width: 480, height: 608 });
 
   const noticeMessage =
     notice === 'error'
@@ -630,6 +632,58 @@ const SqlEditorPanel = forwardRef<
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isAiContextMenuOpen]);
+
+  useEffect(() => {
+    if (!isAiOpen) return;
+
+    const measureAiPanel = () => {
+      const host = aiPanelHostRef.current;
+      if (!host) return;
+
+      const rect = host.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || rect.width;
+      const viewportHeight = window.innerHeight || rect.height;
+      const horizontalInset = 12;
+      const topInset = 12;
+      const bottomOffset = 56;
+      const preferredWidth = isAiExpanded ? 672 : 480;
+      const preferredHeight = isAiExpanded ? 736 : 608;
+      const minimumWidth = 280;
+      const minimumHeight = 260;
+
+      const visibleEditorTop = Math.max(rect.top, 0);
+      const visibleEditorBottom = Math.min(rect.bottom, viewportHeight);
+      const visibleEditorHeight = Math.max(0, visibleEditorBottom - visibleEditorTop);
+      const editorWidth = rect.width || viewportWidth;
+      const editorHeight = visibleEditorHeight || rect.height || viewportHeight;
+      const availableWidth = Math.max(0, Math.min(editorWidth, viewportWidth) - horizontalInset * 2);
+      const availableHeight = Math.max(0, Math.min(editorHeight, viewportHeight) - bottomOffset - topInset);
+      const width = availableWidth <= minimumWidth ? availableWidth : Math.min(preferredWidth, availableWidth);
+      const height = availableHeight <= minimumHeight ? availableHeight : Math.min(preferredHeight, availableHeight);
+
+      setAiPanelSize((current) => {
+        const nextWidth = Math.round(width);
+        const nextHeight = Math.round(height);
+        if (current.width === nextWidth && current.height === nextHeight) return current;
+        return { width: nextWidth, height: nextHeight };
+      });
+    };
+
+    measureAiPanel();
+    window.addEventListener('resize', measureAiPanel);
+
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => measureAiPanel());
+    if (resizeObserver && aiPanelHostRef.current) {
+      resizeObserver.observe(aiPanelHostRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', measureAiPanel);
+      resizeObserver?.disconnect();
+    };
+  }, [isAiExpanded, isAiOpen]);
 
   const mentionableTables = useMemo(() => schemaTables?.slice(0, 12).map((table) => table.name) ?? [], [schemaTables]);
 
@@ -780,7 +834,7 @@ const SqlEditorPanel = forwardRef<
   }), []);
 
   return (
-    <div className="relative h-full">
+    <div ref={aiPanelHostRef} className="relative h-full">
       <SqlEditor
         ref={editorRef}
         value={currentQuery}
@@ -799,7 +853,16 @@ const SqlEditorPanel = forwardRef<
         testId="lab-sql-editor"
       />
       {isAiOpen ? (
-        <div onKeyDown={(event) => event.stopPropagation()} className={cn('absolute bottom-14 right-3 z-30 flex flex-col overflow-hidden rounded-2xl border border-primary/20 bg-[#202020] shadow-[0_24px_80px_rgba(0,0,0,0.55)]', isAiExpanded ? 'h-[min(86vh,46rem)] w-[min(94vw,42rem)]' : 'h-[min(78vh,38rem)] w-[min(92vw,30rem)]')}>
+        <div
+          onKeyDown={(event) => event.stopPropagation()}
+          className="absolute bottom-14 right-3 z-30 flex min-w-0 flex-col overflow-hidden rounded-2xl border border-primary/20 bg-[#202020] shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
+          style={{
+            width: aiPanelSize.width,
+            height: aiPanelSize.height,
+            maxWidth: 'calc(100% - 1.5rem)',
+            maxHeight: 'calc(100% - 4.25rem)',
+          } satisfies CSSProperties}
+        >
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold text-white">
