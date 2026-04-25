@@ -132,6 +132,12 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
 ```
 
+If the installed source directory is missing, the script falls back to direct Docker cleanup and auto-detects the stack from container names. For a non-default stack name:
+
+```bash
+STACK_NAME=sqlcraft bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
+```
+
 For a custom install directory:
 
 ```bash
@@ -155,7 +161,7 @@ Optional cleanup:
 SQLCRAFT_INSTALL_DIR="$HOME/.sqlcraft" ./uninstall.sh --remove-source
 ```
 
-If you installed with the one-liner and are not inside the install directory, either `cd ~/.sqlcraft` first or set `SQLCRAFT_INSTALL_DIR` as shown above.
+If you installed with the one-liner and are not inside the install directory, either `cd ~/.sqlcraft` first or use the one-liner uninstall command.
 
 ## Public internet (HTTPS)
 

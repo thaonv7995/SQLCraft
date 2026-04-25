@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="${PWD}"
 ENV_FILE=""
 COMPOSE_FILE=""
-STACK_NAME=""
+STACK_NAME="${STACK_NAME:-}"
 REMOVE_ENV=0
 REMOVE_SOURCE=0
 
@@ -31,6 +31,8 @@ Options:
 Examples:
   ./uninstall.sh
   ./uninstall.sh --purge-env
+  bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
+  STACK_NAME=sqlcraft bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
   SQLCRAFT_INSTALL_DIR=/opt/sqlcraft ./uninstall.sh --remove-source
 EOF
 }
@@ -49,30 +51,76 @@ get_env_value() {
 }
 
 resolve_root() {
-  local candidate
   if [[ -f "${ROOT_DIR}/docker-compose.prod.yml" ]]; then
     return
   fi
-  candidate="${SQLCRAFT_INSTALL_DIR:-$HOME/.sqlcraft}"
-  if [[ -f "${candidate}/docker-compose.prod.yml" ]]; then
-    ROOT_DIR="$candidate"
+
+  local candidate candidates=()
+  if [[ -n "${SQLCRAFT_INSTALL_DIR:-}" ]]; then
+    candidates+=("$SQLCRAFT_INSTALL_DIR")
+  fi
+  candidates+=("$HOME/.sqlcraft" "/opt/sqlcraft")
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${candidate}/docker-compose.prod.yml" ]]; then
+      ROOT_DIR="$candidate"
+      return
+    fi
+  done
+
+  ROOT_DIR=""
+}
+
+detect_stack_name() {
+  if [[ -n "$STACK_NAME" ]]; then
+    echo "$STACK_NAME"
     return
   fi
-  err "Could not locate SQLCraft project directory."
-  err "Run this inside project root or set SQLCRAFT_INSTALL_DIR."
-  exit 1
+
+  local candidates count
+  candidates="$(
+    docker ps -a --format '{{.Names}}' 2>/dev/null \
+      | sed -nE 's/^(.*)-(postgres|redis|minio|api|web|worker|worker-query)$/\1/p' \
+      | sort -u
+  )"
+
+  if grep -qx 'sqlcraft' <<<"$candidates"; then
+    echo "sqlcraft"
+    return
+  fi
+
+  count="$(grep -cve '^[[:space:]]*$' <<<"$candidates" || true)"
+  if [[ "$count" -eq 1 ]]; then
+    printf "%s\n" "$candidates"
+    return
+  fi
+
+  if [[ "$count" -gt 1 ]]; then
+    warn "Multiple possible SQLCraft stacks found:" >&2
+    printf "%s\n" "$candidates" | sed 's/^/  - /' >&2
+    warn "Set STACK_NAME=<name> to uninstall a specific stack. Falling back to sqlcraft." >&2
+  fi
+
+  echo "sqlcraft"
 }
 
 load_paths() {
-  COMPOSE_FILE="${ROOT_DIR}/docker-compose.prod.yml"
-  ENV_FILE="${ROOT_DIR}/.env.production"
+  if [[ -n "$ROOT_DIR" ]]; then
+    COMPOSE_FILE="${ROOT_DIR}/docker-compose.prod.yml"
+    ENV_FILE="${ROOT_DIR}/.env.production"
+  fi
   if [[ -f "$ENV_FILE" ]]; then
     STACK_NAME="$(get_env_value STACK_NAME "$ENV_FILE")"
   fi
-  STACK_NAME="${STACK_NAME:-sqlcraft}"
+  STACK_NAME="$(detect_stack_name)"
 }
 
 stop_stack() {
+  if [[ ! -f "$COMPOSE_FILE" ]]; then
+    warn "No docker-compose.prod.yml found. Using direct Docker cleanup for stack '${STACK_NAME}'."
+    return
+  fi
+
   if [[ -f "$ENV_FILE" ]]; then
     log "Stopping compose stack (${STACK_NAME}) ..."
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down -v || true
@@ -82,13 +130,38 @@ stop_stack() {
   fi
 }
 
+compose_projects_for_stack() {
+  local service
+  for service in postgres redis minio api web worker worker-query; do
+    docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "${STACK_NAME}-${service}" 2>/dev/null || true
+  done \
+    | grep -v '^<no value>$' \
+    | grep -v '^[[:space:]]*$' \
+    | sort -u
+}
+
 cleanup_stack_artifacts() {
-  local pattern network
-  pattern="^${STACK_NAME}-(postgres|redis|minio|api|web|worker|worker-query)$"
+  local network compose_projects project service
   network="${STACK_NAME}-prod"
+  compose_projects="$(compose_projects_for_stack || true)"
 
   log "Cleaning leftover containers for stack: ${STACK_NAME}"
-  docker ps -a --format '{{.Names}}' | grep -E "$pattern" | xargs -r docker rm -f >/dev/null 2>&1 || true
+  for service in postgres redis minio api web worker worker-query; do
+    docker rm -f "${STACK_NAME}-${service}" >/dev/null 2>&1 || true
+  done
+
+  if [[ -n "$compose_projects" ]]; then
+    while IFS= read -r project; do
+      [[ -z "$project" ]] && continue
+      log "Cleaning compose volumes for project: ${project}"
+      docker volume ls -q --filter "label=com.docker.compose.project=${project}" \
+        | xargs -r docker volume rm -f >/dev/null 2>&1 || true
+
+      log "Cleaning compose networks for project: ${project}"
+      docker network ls -q --filter "label=com.docker.compose.project=${project}" \
+        | xargs -r docker network rm >/dev/null 2>&1 || true
+    done <<<"$compose_projects"
+  fi
 
   log "Cleaning leftover network: ${network}"
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -98,6 +171,8 @@ maybe_remove_env() {
   if [[ "$REMOVE_ENV" -eq 1 && -f "$ENV_FILE" ]]; then
     log "Removing ${ENV_FILE}"
     rm -f "$ENV_FILE"
+  elif [[ "$REMOVE_ENV" -eq 1 ]]; then
+    warn "--purge-env requested, but no .env.production file was found."
   fi
 }
 
@@ -107,9 +182,9 @@ maybe_remove_source() {
   fi
   local default_dir
   default_dir="${SQLCRAFT_INSTALL_DIR:-$HOME/.sqlcraft}"
-  if [[ "$ROOT_DIR" == "$default_dir" ]]; then
-    log "Removing source directory: ${ROOT_DIR}"
-    rm -rf "$ROOT_DIR"
+  if [[ -d "$default_dir" && ( -z "$ROOT_DIR" || "$ROOT_DIR" == "$default_dir" ) ]]; then
+    log "Removing source directory: ${default_dir}"
+    rm -rf "$default_dir"
   else
     warn "--remove-source is only allowed for ${default_dir}"
   fi
@@ -135,7 +210,11 @@ main() {
   load_paths
 
   printf "\n${BOLD}${CYAN}SQLCraft uninstall${RESET}\n"
-  printf "Project: %s\n" "$ROOT_DIR"
+  if [[ -n "$ROOT_DIR" ]]; then
+    printf "Project: %s\n" "$ROOT_DIR"
+  else
+    printf "Project: %s\n" "not found (standalone Docker cleanup)"
+  fi
   printf "Stack:   %s\n\n" "$STACK_NAME"
 
   stop_stack
@@ -147,4 +226,3 @@ main() {
 }
 
 main "$@"
-
