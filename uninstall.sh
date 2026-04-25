@@ -7,6 +7,8 @@ COMPOSE_FILE=""
 STACK_NAME="${STACK_NAME:-}"
 REMOVE_ENV=0
 REMOVE_SOURCE=0
+CHECK_ONLY=0
+SERVICES=(postgres redis minio api web worker worker-query)
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -24,13 +26,17 @@ usage() {
 Usage: ./uninstall.sh [options]
 
 Options:
+  --check          Show detected stack resources without removing anything
+  --dry-run        Alias for --check
   --purge-env       Remove .env.production after uninstall
   --remove-source   Remove installed source directory (only for ~/.sqlcraft)
   -h, --help        Show help
 
 Examples:
+  ./uninstall.sh --check
   ./uninstall.sh
   ./uninstall.sh --purge-env
+  bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh) --check
   bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
   STACK_NAME=sqlcraft bash <(curl -fsSL https://raw.githubusercontent.com/thaonv7995/SQLCraft/main/uninstall.sh)
   SQLCRAFT_INSTALL_DIR=/opt/sqlcraft ./uninstall.sh --remove-source
@@ -132,7 +138,7 @@ stop_stack() {
 
 compose_projects_for_stack() {
   local service
-  for service in postgres redis minio api web worker worker-query; do
+  for service in "${SERVICES[@]}"; do
     docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "${STACK_NAME}-${service}" 2>/dev/null || true
   done \
     | grep -v '^<no value>$' \
@@ -146,7 +152,7 @@ cleanup_stack_artifacts() {
   compose_projects="$(compose_projects_for_stack || true)"
 
   log "Cleaning leftover containers for stack: ${STACK_NAME}"
-  for service in postgres redis minio api web worker worker-query; do
+  for service in "${SERVICES[@]}"; do
     docker rm -f "${STACK_NAME}-${service}" >/dev/null 2>&1 || true
   done
 
@@ -165,6 +171,79 @@ cleanup_stack_artifacts() {
 
   log "Cleaning leftover network: ${network}"
   docker network rm "$network" >/dev/null 2>&1 || true
+}
+
+stack_containers() {
+  local service
+  for service in "${SERVICES[@]}"; do
+    docker inspect -f '{{ .Name }}  status={{ .State.Status }}  image={{ .Config.Image }}' "${STACK_NAME}-${service}" 2>/dev/null \
+      | sed 's#^/##' || true
+  done
+}
+
+compose_volumes_for_project() {
+  local project="$1"
+  docker volume ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null || true
+}
+
+compose_networks_for_project() {
+  local project="$1"
+  docker network ls --format '{{.Name}}' --filter "label=com.docker.compose.project=${project}" 2>/dev/null || true
+}
+
+standalone_networks_for_stack() {
+  docker network inspect -f '{{ .Name }}' "${STACK_NAME}-prod" 2>/dev/null || true
+}
+
+print_block() {
+  local title="$1"
+  local value="$2"
+  printf "%s:\n" "$title"
+  if [[ -n "$value" ]]; then
+    printf "%s\n" "$value" | sed 's/^/  - /'
+  else
+    printf "  (none)\n"
+  fi
+}
+
+print_check_report() {
+  local containers compose_projects project volumes networks standalone_networks
+  containers="$(stack_containers || true)"
+  compose_projects="$(compose_projects_for_stack || true)"
+  standalone_networks="$(standalone_networks_for_stack || true)"
+
+  printf "${BOLD}${CYAN}Detected resources${RESET}\n"
+  print_block "Containers" "$containers"
+  print_block "Standalone stack network" "$standalone_networks"
+
+  if [[ -n "$compose_projects" ]]; then
+    printf "Compose projects:\n"
+    printf "%s\n" "$compose_projects" | sed 's/^/  - /'
+    while IFS= read -r project; do
+      [[ -z "$project" ]] && continue
+      volumes="$(compose_volumes_for_project "$project")"
+      networks="$(compose_networks_for_project "$project")"
+      print_block "Compose volumes (${project})" "$volumes"
+      print_block "Compose networks (${project})" "$networks"
+    done <<<"$compose_projects"
+  else
+    print_block "Compose projects" ""
+    print_block "Compose volumes" ""
+    print_block "Compose networks" ""
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    printf "Env file:\n  - %s\n" "$ENV_FILE"
+  else
+    print_block "Env file" ""
+  fi
+
+  if [[ "$REMOVE_ENV" -eq 1 ]]; then
+    printf "Requested env purge: yes\n"
+  fi
+  if [[ "$REMOVE_SOURCE" -eq 1 ]]; then
+    printf "Requested source removal: yes\n"
+  fi
 }
 
 maybe_remove_env() {
@@ -193,6 +272,7 @@ maybe_remove_source() {
 main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --check|--dry-run) CHECK_ONLY=1 ;;
       --purge-env) REMOVE_ENV=1 ;;
       --remove-source) REMOVE_SOURCE=1 ;;
       -h|--help) usage; exit 0 ;;
@@ -216,6 +296,12 @@ main() {
     printf "Project: %s\n" "not found (standalone Docker cleanup)"
   fi
   printf "Stack:   %s\n\n" "$STACK_NAME"
+
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    print_check_report
+    printf "\n${BOLD}${GREEN}Check complete. No resources were removed.${RESET}\n"
+    exit 0
+  fi
 
   stop_stack
   cleanup_stack_artifacts
