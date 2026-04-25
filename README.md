@@ -1,7 +1,3 @@
-# SQLCraft
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
 SQL platform for **sandboxed query execution**, **realistic datasets**, **execution-plan analysis**, and **admin-reviewed** lessons, challenges, and catalog content.
 
 <p align="center">
