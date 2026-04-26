@@ -16,6 +16,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     networks:
       - sqlcraft
 
@@ -31,6 +32,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
     networks:
       - sqlcraft
 
@@ -51,6 +53,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
     networks:
       - sqlcraft
 
