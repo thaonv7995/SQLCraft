@@ -27,9 +27,33 @@ describe('validateSql', () => {
       expect(result.valid).toBe(true);
     });
 
+    it('allows DROP PROCEDURE so users can iterate on routines they created', () => {
+      expect(validateSql('DROP PROCEDURE IF EXISTS GetPatientVitals;').valid).toBe(true);
+    });
+
+    it('allows DROP FUNCTION', () => {
+      expect(validateSql('DROP FUNCTION IF EXISTS get_patient_age(int);').valid).toBe(true);
+    });
+
+    it('allows DROP VIEW and DROP MATERIALIZED VIEW', () => {
+      expect(validateSql('DROP VIEW IF EXISTS active_users;').valid).toBe(true);
+      expect(validateSql('DROP MATERIALIZED VIEW IF EXISTS daily_summary;').valid).toBe(true);
+    });
+
+    it('allows DROP TRIGGER', () => {
+      expect(validateSql('DROP TRIGGER IF EXISTS audit_log_after_insert ON orders;').valid).toBe(
+        true,
+      );
+    });
+
     it('blocks DROP with leading whitespace', () => {
       const result = validateSql('  drop table orders;');
       expect(result.valid).toBe(false);
+    });
+
+    it('still blocks DROP DATABASE / SCHEMA', () => {
+      expect(validateSql('DROP DATABASE prod;').valid).toBe(false);
+      expect(validateSql('DROP SCHEMA public CASCADE;').valid).toBe(false);
     });
 
     it('blocks TRUNCATE', () => {

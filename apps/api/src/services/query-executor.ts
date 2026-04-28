@@ -5,9 +5,18 @@ import type { QueryResultPreview } from '@sqlcraft/types';
 const MAX_ROWS = 500;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-// Patterns that are completely blocked
+// Patterns that are completely blocked.
+// DROP is allowed for object-level resources the user typically creates themselves
+// (indexes, views, materialized views, procedures, functions, triggers, events). DROP
+// against tables/schemas/databases/users is still blocked because it destroys dataset
+// rows or the sandbox itself.
 const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /^\s*drop\s+(?!index\b)/i, reason: 'DROP statements are not allowed' },
+  {
+    pattern:
+      /^\s*drop\s+(?!(?:index|view|materialized\s+view|procedure|function|trigger|event)\b)/i,
+    reason:
+      'DROP is only allowed for indexes, views, materialized views, procedures, functions, triggers, and events',
+  },
   { pattern: /^\s*truncate\s+/i, reason: 'TRUNCATE statements are not allowed' },
   { pattern: /^\s*create\s+user\b/i, reason: 'CREATE USER is not allowed' },
   { pattern: /^\s*alter\s+user\b/i, reason: 'ALTER USER is not allowed' },

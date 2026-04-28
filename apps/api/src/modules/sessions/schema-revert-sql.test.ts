@@ -64,6 +64,81 @@ describe('buildMysqlRevertStatements', () => {
     );
     expect(stmts).toEqual(['CREATE INDEX `idx_old` ON `t` (`c`);']);
   });
+
+  it('drops an added PROCEDURE when reverting a routine the user just created', () => {
+    const diff = minimalDiff({
+      functions: {
+        ...emptySection(),
+        added: [
+          {
+            name: 'GetPatientVitals',
+            signature: '',
+            language: 'SQL',
+            definition: 'BEGIN SELECT 1; END',
+            objectType: 'PROCEDURE',
+          },
+        ],
+      },
+    });
+    const stmts = buildMysqlRevertStatements(
+      { resourceType: 'functions', changeType: 'added', name: 'GetPatientVitals' },
+      diff,
+    );
+    expect(stmts).toEqual(['DROP PROCEDURE IF EXISTS `GetPatientVitals`;']);
+  });
+
+  it('drops an added FUNCTION using the recorded objectType', () => {
+    const diff = minimalDiff({
+      functions: {
+        ...emptySection(),
+        added: [
+          {
+            name: 'patient_age',
+            signature: '',
+            language: 'SQL',
+            definition: 'RETURNS int DETERMINISTIC RETURN 1',
+            objectType: 'FUNCTION',
+          },
+        ],
+      },
+    });
+    const stmts = buildMysqlRevertStatements(
+      { resourceType: 'functions', changeType: 'added', name: 'patient_age' },
+      diff,
+    );
+    expect(stmts).toEqual(['DROP FUNCTION IF EXISTS `patient_age`;']);
+  });
+
+  it('falls back to PROCEDURE when objectType is missing on legacy snapshots', () => {
+    const diff = minimalDiff({
+      functions: {
+        ...emptySection(),
+        added: [
+          {
+            name: 'legacy_routine',
+            signature: '',
+            language: 'SQL',
+            definition: 'BEGIN END',
+          },
+        ],
+      },
+    });
+    const stmts = buildMysqlRevertStatements(
+      { resourceType: 'functions', changeType: 'added', name: 'legacy_routine' },
+      diff,
+    );
+    expect(stmts).toEqual(['DROP PROCEDURE IF EXISTS `legacy_routine`;']);
+  });
+
+  it('still rejects partition reverts with a clear message', () => {
+    const diff = minimalDiff({});
+    expect(() =>
+      buildMysqlRevertStatements(
+        { resourceType: 'partitions', changeType: 'added', name: 'p1' },
+        diff,
+      ),
+    ).toThrow(/partition/i);
+  });
 });
 
 describe('buildSqlServerRevertStatements', () => {

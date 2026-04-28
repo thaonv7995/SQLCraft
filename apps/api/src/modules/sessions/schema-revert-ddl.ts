@@ -189,7 +189,16 @@ function mysqlDropView(name: string): string {
   return `DROP VIEW IF EXISTS ${quoteMysqlIdent(name)}`;
 }
 
-/** Revert DDL for MySQL/MariaDB (indexes + views; other kinds are not supported yet). */
+/** Pick `PROCEDURE` vs `FUNCTION` for MySQL/MariaDB DROP based on the snapshot's recorded routine type. */
+function mysqlRoutineKind(item: SandboxSchemaFunction): 'PROCEDURE' | 'FUNCTION' {
+  return (item.objectType ?? '').toUpperCase() === 'FUNCTION' ? 'FUNCTION' : 'PROCEDURE';
+}
+
+function mysqlDropRoutine(item: SandboxSchemaFunction): string {
+  return `DROP ${mysqlRoutineKind(item)} IF EXISTS ${quoteMysqlIdent(item.name)};`;
+}
+
+/** Revert DDL for MySQL/MariaDB (indexes, views, and added procedures/functions). */
 export function buildMysqlRevertStatements(
   target: RevertSchemaDiffChangeBody,
   diff: SandboxSchemaDiff,
@@ -197,9 +206,26 @@ export function buildMysqlRevertStatements(
   if (target.resourceType === 'materializedViews') {
     throw new ValidationError('Materialized views are not used in MySQL/MariaDB sandboxes.');
   }
-  if (target.resourceType === 'functions' || target.resourceType === 'partitions') {
+  if (target.resourceType === 'partitions') {
     throw new ValidationError(
-      'Reverting functions or partitions is not yet supported for MySQL/MariaDB. Revert indexes or views only.',
+      'Reverting partition changes is not yet supported for MySQL/MariaDB.',
+    );
+  }
+
+  if (target.resourceType === 'functions') {
+    const section = diff.functions;
+    if (target.changeType === 'added') {
+      const current = section.added.find((item) => matchesRevertTarget(item, target));
+      if (!current) throw new NotFoundError('Target change was not found in schema diff');
+      return [mysqlDropRoutine(current)];
+    }
+    // Recreating a removed/changed routine requires the full original CREATE statement
+    // (parameters + return type + body), which the MySQL info_schema snapshot does not
+    // currently capture. Reverting the user's hand-written routine via DROP is supported
+    // (the `added` branch above); restoring a baseline routine is not yet.
+    throw new ValidationError(
+      'Reverting modifications to existing procedures or functions is not yet supported for MySQL/MariaDB. ' +
+        'Drop the routine manually with DROP PROCEDURE / DROP FUNCTION and recreate it as needed.',
     );
   }
 

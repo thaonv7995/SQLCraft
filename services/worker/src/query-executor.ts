@@ -8,6 +8,10 @@ import {
   summarizeMssqlShowPlan,
   wrapMssqlShowPlanJson,
 } from './mssql-showplan-json';
+import {
+  hasMysqlDelimiterDirective,
+  splitMysqlStatementsWithDelimiter,
+} from './mysql-statement-splitter';
 
 const MAX_ROWS = 500;
 const DEFAULT_TIMEOUT_MS = Math.max(
@@ -51,8 +55,17 @@ export class QueryExecutionFailedError extends Error {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
+// DROP is allowed for object-level resources the user typically creates themselves
+// (indexes, views, materialized views, procedures, functions, triggers, events). DROP
+// against tables/schemas/databases/users is still blocked because it destroys dataset
+// rows or the sandbox itself.
 const BLOCKED_PATTERNS_COMMON: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /^\s*drop\s+(?!index\b)/i, reason: 'DROP statements are not allowed' },
+  {
+    pattern:
+      /^\s*drop\s+(?!(?:index|view|materialized\s+view|procedure|function|trigger|event)\b)/i,
+    reason:
+      'DROP is only allowed for indexes, views, materialized views, procedures, functions, triggers, and events',
+  },
   { pattern: /^\s*truncate\s+/i, reason: 'TRUNCATE statements are not allowed' },
   { pattern: /^\s*create\s+user\b/i, reason: 'CREATE USER is not allowed' },
   { pattern: /^\s*alter\s+user\b/i, reason: 'ALTER USER is not allowed' },
@@ -384,33 +397,59 @@ async function executeSqlMysql(
     }
     const cap = Math.min(timeoutMs, 2_147_483_647);
     await conn.query(`SET SESSION max_execution_time = ${cap}`).catch(() => undefined);
-    const [rows, fields] = await conn.query(sqlText);
-    const durationMs = Date.now() - start;
 
-    if (!Array.isArray(rows)) {
-      const header = rows as mysql.ResultSetHeader;
-      return {
-        columns: [],
-        rows: [],
-        rowCount: header.affectedRows ?? 0,
-        truncated: false,
-        durationMs,
+    // `DELIMITER` is a CLI-side directive the MySQL server does not understand. When the
+    // user pastes a `CREATE PROCEDURE` template wrapped in DELIMITER directives, parse it
+    // out and run each underlying statement separately on this same connection.
+    const statements = hasMysqlDelimiterDirective(sqlText)
+      ? splitMysqlStatementsWithDelimiter(sqlText).map((s) => s.sql)
+      : [sqlText];
+
+    let last: ExecuteSqlResult = {
+      columns: [],
+      rows: [],
+      rowCount: 0,
+      truncated: false,
+      durationMs: 0,
+    };
+    let totalAffected = 0;
+
+    for (const stmt of statements) {
+      const [rows, fields] = await conn.query(stmt);
+
+      if (!Array.isArray(rows)) {
+        const header = rows as mysql.ResultSetHeader;
+        totalAffected += header.affectedRows ?? 0;
+        last = {
+          columns: [],
+          rows: [],
+          rowCount: header.affectedRows ?? 0,
+          truncated: false,
+          durationMs: Date.now() - start,
+        };
+        continue;
+      }
+
+      const fieldList = fields as mysql.FieldPacket[] | undefined;
+      const rowObjs = rows as mysql.RowDataPacket[];
+      const columns =
+        fieldList?.map((f) => f.name) ?? (rowObjs[0] ? Object.keys(rowObjs[0] as object) : []);
+      const allRows = rowObjs.map((row) => Object.values(row));
+      const truncated = allRows.length > maxRows;
+      last = {
+        columns,
+        rows: truncated ? allRows.slice(0, maxRows) : allRows,
+        rowCount: allRows.length,
+        truncated,
+        durationMs: Date.now() - start,
       };
     }
 
-    const fieldList = fields as mysql.FieldPacket[] | undefined;
-    const rowObjs = rows as mysql.RowDataPacket[];
-    const columns =
-      fieldList?.map((f) => f.name) ?? (rowObjs[0] ? Object.keys(rowObjs[0] as object) : []);
-    const allRows = rowObjs.map((row) => Object.values(row));
-    const truncated = allRows.length > maxRows;
-    return {
-      columns,
-      rows: truncated ? allRows.slice(0, maxRows) : allRows,
-      rowCount: allRows.length,
-      truncated,
-      durationMs,
-    };
+    if (last.columns.length === 0 && last.rows.length === 0 && totalAffected > 0) {
+      last = { ...last, rowCount: totalAffected };
+    }
+
+    return last;
   } catch (err: unknown) {
     const e = err as { code?: string; message?: string };
     const durationMs = Date.now() - start;

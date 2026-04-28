@@ -115,12 +115,20 @@ async function fetchMysqlRoutines(conn: mysql.Connection): Promise<SandboxSchema
       ORDER BY ROUTINE_NAME
     `,
   );
-  return (rows as RowDataPacket[]).map((r) => ({
-    name: String(r.name ?? ''),
-    signature: '',
-    language: r.extLang != null && String(r.extLang).trim() !== '' ? String(r.extLang) : 'SQL',
-    definition: collapseWs(String(r.definition ?? '')),
-  }));
+  return (rows as RowDataPacket[]).map((r) => {
+    // ROUTINE_TYPE is the only signal that distinguishes a PROCEDURE from a FUNCTION
+    // when generating revert DDL — both share the same `ROUTINES` info_schema view.
+    const routineType = r.ROUTINE_TYPE != null ? String(r.ROUTINE_TYPE).toUpperCase() : '';
+    const objectType =
+      routineType === 'PROCEDURE' || routineType === 'FUNCTION' ? routineType : null;
+    return {
+      name: String(r.name ?? ''),
+      signature: '',
+      language: r.extLang != null && String(r.extLang).trim() !== '' ? String(r.extLang) : 'SQL',
+      definition: collapseWs(String(r.definition ?? '')),
+      ...(objectType != null ? { objectType } : {}),
+    };
+  });
 }
 
 async function fetchMysqlPartitions(conn: mysql.Connection): Promise<SandboxSchemaPartition[]> {

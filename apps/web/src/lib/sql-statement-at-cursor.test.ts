@@ -31,6 +31,28 @@ describe('splitSqlStatements', () => {
     expect(r).toHaveLength(2);
     expect(sql.slice(r[0].from, r[0].toExclusive).trim()).toBe('SELECT $$a;b$$');
   });
+
+  it('splits MySQL DELIMITER blocks using the active delimiter', () => {
+    const sql = `DELIMITER $$
+CREATE PROCEDURE foo() BEGIN SELECT 1; END $$
+DELIMITER ;`;
+    const r = splitSqlStatements(sql);
+    const non = r
+      .map((range) => sql.slice(range.from, range.toExclusive).trim())
+      .filter(Boolean);
+    expect(non).toEqual(['CREATE PROCEDURE foo() BEGIN SELECT 1; END']);
+  });
+
+  it('does not treat $$ as a dollar-quote once a DELIMITER directive switched modes', () => {
+    const sql = `DELIMITER $$
+SELECT 1 $$
+SELECT 2 $$
+DELIMITER ;`;
+    const non = splitSqlStatements(sql)
+      .map((range) => sql.slice(range.from, range.toExclusive).trim())
+      .filter(Boolean);
+    expect(non).toEqual(['SELECT 1', 'SELECT 2']);
+  });
 });
 
 describe('getSqlStatementAtCursor', () => {
@@ -66,5 +88,34 @@ describe('getSqlStatementAtCursor', () => {
     const sql = 'SELECT 1;;';
     const idx = sql.lastIndexOf(';');
     expect(getSqlStatementAtCursor(sql, idx).trim()).toBe('SELECT 1');
+  });
+
+  it('returns the CREATE PROCEDURE body without DELIMITER directives when cursor is inside it', () => {
+    const sql = `DELIMITER $$
+
+CREATE PROCEDURE GetPatientVitals(IN patientId INT)
+BEGIN
+    SELECT v.heart_rate
+    FROM vitals v
+    WHERE v.patient_id = patientId;
+END $$
+
+DELIMITER ;`;
+    const cursor = sql.indexOf('SELECT v.heart_rate');
+    const stmt = getSqlStatementAtCursor(sql, cursor);
+    expect(stmt).toMatch(/^CREATE PROCEDURE GetPatientVitals\(IN patientId INT\)/);
+    expect(stmt).toMatch(/END$/);
+    expect(stmt).not.toMatch(/DELIMITER/i);
+    expect(stmt).not.toMatch(/\$\$/);
+  });
+
+  it('returns the procedure body when the caret is on a DELIMITER directive line', () => {
+    const sql = `DELIMITER $$
+CREATE PROCEDURE foo() BEGIN SELECT 1; END $$
+DELIMITER ;`;
+    const onDirective = sql.indexOf('DELIMITER ;');
+    expect(getSqlStatementAtCursor(sql, onDirective)).toBe(
+      'CREATE PROCEDURE foo() BEGIN SELECT 1; END',
+    );
   });
 });
