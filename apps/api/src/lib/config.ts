@@ -127,7 +127,7 @@ const EnvSchema = z.object({
 
   // ── AI provider settings ─────────────────────────────────────────────────
   AI_SETTINGS_ENCRYPTION_KEY: z.string().min(32).optional(),
-  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
 });
 
 const result = EnvSchema.safeParse(process.env);
