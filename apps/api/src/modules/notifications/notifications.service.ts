@@ -1,4 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { notificationsRepository } from '../../db/repositories/notifications.repository';
+import { getDb, schema } from '../../db';
 import type { ImportCanonicalDatabaseResult } from '../admin/admin.types';
 import { NotificationType, type NotificationListItem, type NotificationListResult } from './notifications.types';
 
@@ -27,6 +29,43 @@ export async function notifyDatasetReviewPending(
       schemaTemplateId: result.schemaTemplate.id,
     },
   });
+}
+
+/**
+ * Fan-out the same review-pending notification to every admin user so the
+ * moderation queue is visible without polling. Uploader is intentionally
+ * excluded (they already get their own confirmation via
+ * `notifyDatasetReviewPending`).
+ */
+export async function notifyAdminsDatasetReviewPending(
+  uploader: { id: string; displayName: string },
+  result: ImportCanonicalDatabaseResult,
+): Promise<void> {
+  const name = result.schemaTemplate.name?.trim() || 'A database';
+  const db = getDb();
+  const adminRows = await db
+    .select({ userId: schema.userRoles.userId })
+    .from(schema.userRoles)
+    .innerJoin(schema.roles, eq(schema.userRoles.roleId, schema.roles.id))
+    .where(eq(schema.roles.name, 'admin'));
+  const adminIds = Array.from(new Set(adminRows.map((r) => r.userId))).filter(
+    (id) => id !== uploader.id,
+  );
+  if (adminIds.length === 0) return;
+
+  for (const adminId of adminIds) {
+    await createNotification({
+      userId: adminId,
+      type: NotificationType.DATASET_REVIEW_PENDING,
+      title: 'New public database awaiting review',
+      body: `${uploader.displayName} submitted “${name}” for catalog approval.`,
+      metadata: {
+        databaseId: result.databaseId,
+        schemaTemplateId: result.schemaTemplate.id,
+        uploaderUserId: uploader.id,
+      },
+    });
+  }
 }
 
 export async function notifyDatasetReviewApproved(ownerUserId: string, name: string, catalogAnchorId: string): Promise<void> {

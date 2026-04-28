@@ -310,3 +310,36 @@ export async function abortMultipartUpload(objectName: string, uploadId: string)
 export function multipartPartSizeForObjectSize(byteSize: number): number {
   return getClient().calculatePartSize(byteSize);
 }
+
+export interface IncompleteMultipartUploadInfo {
+  /** Object key for which the multipart upload was started. */
+  key: string;
+  /** Multipart `uploadId` returned by `initiateNewMultipartUpload`. */
+  uploadId: string;
+  /** Initiated timestamp (when MinIO supplies one). */
+  initiated: Date | null;
+}
+
+/**
+ * List in-progress multipart uploads (S3 ListMultipartUploads). Used by the
+ * orphan-multipart cleanup job to abort uploads whose API session has been
+ * lost or expired.
+ */
+export async function listIncompleteMultipartUploads(
+  prefix: string,
+): Promise<IncompleteMultipartUploadInfo[]> {
+  await ensureBucket();
+  const client = getClient();
+  const stream = client.listIncompleteUploads(config.STORAGE_BUCKET, prefix, true);
+  const out: IncompleteMultipartUploadInfo[] = [];
+  for await (const item of stream) {
+    if (!item || typeof item !== 'object') continue;
+    const key = 'key' in item && typeof item.key === 'string' ? item.key : null;
+    const uploadId = 'uploadId' in item && typeof item.uploadId === 'string' ? item.uploadId : null;
+    if (!key || !uploadId) continue;
+    const initiated =
+      'initiated' in item && item.initiated instanceof Date ? item.initiated : null;
+    out.push({ key, uploadId, initiated });
+  }
+  return out;
+}

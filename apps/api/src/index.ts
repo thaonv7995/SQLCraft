@@ -23,6 +23,8 @@ import adminRoutes from './modules/admin/admin.router';
 import notificationsRoutes from './modules/notifications/notifications.router';
 import aiRoutes from './modules/ai/ai.router';
 import { cleanupStalePendingSqlDumpScans } from './modules/admin/sql-dump-pending';
+import { cleanupStaleUploadSessions } from './jobs/cleanup-stale-upload-sessions';
+import { cleanupOrphanMultipartUploads } from './jobs/cleanup-orphan-multipart';
 
 const { API_PORT: PORT, HOST, JWT_SECRET, NODE_ENV } = config;
 
@@ -279,10 +281,58 @@ function scheduleStaleScansCleanup(log: { info: (msg: string) => void; warn: (ob
   setInterval(run, CLEANUP_INTERVAL_MS);
 }
 
+function scheduleStaleUploadSessionsCleanup(log: {
+  info: (msg: string) => void;
+  warn: (obj: unknown, msg: string) => void;
+}) {
+  const intervalMs = config.STALE_UPLOAD_SESSION_INTERVAL_MS;
+  if (intervalMs <= 0) return;
+
+  const run = () => {
+    cleanupStaleUploadSessions()
+      .then((r) =>
+        log.info(
+          `Auto-cleanup: aborted ${r.aborted} stale upload session(s) (${r.errors} error(s))`,
+        ),
+      )
+      .catch((err) => log.warn(err, 'Auto-cleanup: stale upload session reconciler failed'));
+  };
+
+  setTimeout(run, 30_000);
+  setInterval(run, intervalMs);
+}
+
+function scheduleOrphanMultipartCleanup(log: {
+  info: (msg: string) => void;
+  warn: (obj: unknown, msg: string) => void;
+}) {
+  const intervalMs = config.ORPHAN_MULTIPART_INTERVAL_MS;
+  if (intervalMs <= 0) return;
+  const maxAgeMs = config.ORPHAN_MULTIPART_MAX_AGE_MS;
+
+  const run = () => {
+    cleanupOrphanMultipartUploads(
+      ['admin/sql-dumps/staging/', 'user-uploads/'],
+      maxAgeMs,
+    )
+      .then((r) =>
+        log.info(
+          `Auto-cleanup: aborted ${r.aborted}/${r.scanned} orphan multipart upload(s) (${r.errors} error(s))`,
+        ),
+      )
+      .catch((err) => log.warn(err, 'Auto-cleanup: orphan multipart cleanup failed'));
+  };
+
+  setTimeout(run, 90_000);
+  setInterval(run, intervalMs);
+}
+
 async function main() {
   const app = await buildApp();
 
   scheduleStaleScansCleanup(app.log);
+  scheduleStaleUploadSessionsCleanup(app.log);
+  scheduleOrphanMultipartCleanup(app.log);
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

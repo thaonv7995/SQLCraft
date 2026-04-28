@@ -4,6 +4,9 @@ import type { StoredSqlDumpScan } from '../sql-dump-scan';
 const listObjectsWithPrefix = vi.hoisted(() => vi.fn());
 const getDistinctSqlDumpScanIdsFromTemplates = vi.hoisted(() => vi.fn());
 const loadStoredSqlDumpScan = vi.hoisted(() => vi.fn());
+// DB rows: the count query returns dbScanCount, the row query returns dbScanRows.
+const dbScanCount = vi.hoisted<{ value: number }>(() => ({ value: 0 }));
+const dbScanRows = vi.hoisted<{ value: any[] }>(() => ({ value: [] }));
 
 vi.mock('../../../lib/storage.js', () => ({
   listObjectsWithPrefix,
@@ -13,6 +16,51 @@ vi.mock('../../../db/repositories/admin.repository.js', () => ({
   adminRepository: {
     getDistinctSqlDumpScanIdsFromTemplates: getDistinctSqlDumpScanIdsFromTemplates,
   },
+}));
+
+vi.mock('../../../db/index.js', () => {
+  /**
+   * Minimal drizzle-style chainable that:
+   *  - resolves to `[{ count: dbScanCount }]` for `select({ count: ... }).from(...).where(...)`.
+   *  - resolves to `dbScanRows` for `select().from(...).where(...).orderBy(...).limit(...).offset(...)`.
+   */
+  const chainable = (kind: 'count' | 'rows') => {
+    const obj: any = {
+      from: () => obj,
+      where: () => {
+        if (kind === 'count') {
+          return Promise.resolve([{ count: dbScanCount.value }]);
+        }
+        return obj;
+      },
+      orderBy: () => obj,
+      limit: () => obj,
+      offset: () => Promise.resolve(dbScanRows.value),
+    };
+    return obj;
+  };
+  return {
+    getDb: () => ({
+      select: (sel?: unknown) => chainable(sel ? 'count' : 'rows'),
+    }),
+    schema: {
+      sqlDumpScans: {
+        id: 'id',
+        status: 'status',
+        createdAt: 'createdAt',
+        updatedAt: 'updatedAt',
+      },
+    },
+  };
+});
+
+// drizzle-orm: stub minimal helpers used by sql-dump-pending.
+vi.mock('drizzle-orm', () => ({
+  and: (..._args: unknown[]) => undefined,
+  desc: (col: unknown) => col,
+  eq: (..._args: unknown[]) => undefined,
+  inArray: (..._args: unknown[]) => undefined,
+  sql: (..._args: unknown[]) => ({ raw: 'count(*)::int' }),
 }));
 
 vi.mock('../sql-dump-scan.js', async (importOriginal) => {
@@ -71,26 +119,57 @@ describe('sql-dump-pending', () => {
     vi.clearAllMocks();
     getDistinctSqlDumpScanIdsFromTemplates.mockResolvedValue(new Set());
     loadStoredSqlDumpScan.mockResolvedValue(minimalStored);
+    dbScanRows.value = [];
+    dbScanCount.value = 0;
+    listObjectsWithPrefix.mockResolvedValue([]);
   });
 
-  it('dedupes metadata keys by scan id (case-insensitive) and keeps latest lastModified', async () => {
+  it('returns DB rows as the primary source and keeps total accurate', async () => {
+    dbScanCount.value = 1;
+    dbScanRows.value = [
+      {
+        id: SCAN,
+        userId: 'user-1',
+        fileName: 'demo.sql',
+        byteSize: 1234,
+        artifactUrl: 's3://bucket/k',
+        metadataUrl: 's3://bucket/k.json',
+        artifactOnly: false,
+        status: 'queued',
+        progressBytes: 0,
+        totalBytes: 1234,
+        totalRows: 0,
+        errorMessage: null,
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-02'),
+        expiresAt: new Date(),
+      },
+    ];
+
+    const page = await listPendingSqlDumpScans({ page: 1, limit: 10 });
+    expect(page.total).toBe(1);
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.scanId).toBe(SCAN);
+    expect(page.items[0]?.status).toBe('queued');
+    // Storage was not consulted — DB row already filled the page.
+    expect(loadStoredSqlDumpScan).not.toHaveBeenCalled();
+  });
+
+  it('falls back to MinIO listing for legacy scans without DB rows', async () => {
+    dbScanCount.value = 0;
+    dbScanRows.value = [];
     listObjectsWithPrefix.mockResolvedValue([
       {
         name: `admin/sql-dumps/${SCAN}.json`,
         lastModified: new Date('2020-01-01'),
         size: 10,
       },
-      {
-        name: `admin/sql-dumps/${SCAN.toUpperCase()}.json`,
-        lastModified: new Date('2021-06-01'),
-        size: 12,
-      },
       { name: 'admin/sql-dumps/derived/skip.json', lastModified: new Date(), size: 1 },
     ]);
 
     const page = await listPendingSqlDumpScans({ page: 1, limit: 10 });
-    expect(page.total).toBe(1);
     expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.scanId).toBe(SCAN);
     expect(loadStoredSqlDumpScan).toHaveBeenCalledTimes(1);
   });
 

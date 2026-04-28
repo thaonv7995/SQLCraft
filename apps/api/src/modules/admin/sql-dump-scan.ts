@@ -399,7 +399,7 @@ function splitTopLevelList(input: string): string[] {
   return parts;
 }
 
-function splitStatements(input: string): string[] {
+export function splitStatements(input: string): string[] {
   const statements: string[] = [];
   let current = '';
   let inSingleQuote = false;
@@ -861,15 +861,71 @@ function collectDefinitionIndexes(
   });
 }
 
-function inferDomain(name: string, description: string): AdminDatabaseDomain {
-  const haystack = `${name} ${description}`.toLowerCase();
-  if (/(ecommerce|commerce|retail|order|product|inventory)/.test(haystack)) return 'ecommerce';
-  if (/(fintech|ledger|payment|merchant|bank|fraud|compliance)/.test(haystack)) return 'fintech';
-  if (/(health|patient|ehr|clinical|fhir|prescription)/.test(haystack)) return 'health';
-  if (/(iot|sensor|telemetry|device)/.test(haystack)) return 'iot';
-  if (/(social|community|post|comment|feed)/.test(haystack)) return 'social';
-  if (/(analytics|event|warehouse|report|insight)/.test(haystack)) return 'analytics';
-  return 'other';
+/**
+ * Score-weighted domain inference. Each domain has a list of keywords with a
+ * weight (table-name matches are stronger signals than DB-name matches). We
+ * pick the highest-scoring domain only if it clears `MIN_DOMAIN_SCORE`; below
+ * that we return `'other'` so the admin UI does not slap a confidently-wrong
+ * label on the import.
+ */
+const DOMAIN_KEYWORDS: Record<Exclude<AdminDatabaseDomain, 'other'>, string[]> = {
+  ecommerce: [
+    'ecommerce', 'commerce', 'retail', 'shop', 'cart', 'checkout', 'order',
+    'product', 'inventory', 'sku', 'shipment', 'invoice', 'discount',
+  ],
+  fintech: [
+    'fintech', 'ledger', 'payment', 'merchant', 'bank', 'fraud', 'compliance',
+    'transaction', 'account', 'statement', 'transfer', 'card', 'wallet',
+  ],
+  health: [
+    'health', 'patient', 'ehr', 'clinical', 'fhir', 'prescription', 'doctor',
+    'diagnosis', 'medication', 'appointment', 'lab',
+  ],
+  iot: ['iot', 'sensor', 'telemetry', 'device', 'reading', 'metric_sample'],
+  social: [
+    'social', 'community', 'post', 'comment', 'feed', 'follower', 'like',
+    'reaction', 'thread', 'message',
+  ],
+  analytics: [
+    'analytics', 'event', 'warehouse', 'report', 'insight', 'fact_', 'dim_',
+    'session', 'pageview', 'tracking',
+  ],
+};
+
+const MIN_DOMAIN_SCORE = 3;
+
+function inferDomain(
+  name: string,
+  description: string,
+  tableNames: string[] = [],
+): AdminDatabaseDomain {
+  const tableHay = tableNames.join(' ').toLowerCase();
+  const metaHay = `${name} ${description}`.toLowerCase();
+  const scores = new Map<Exclude<AdminDatabaseDomain, 'other'>, number>();
+
+  for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS) as Array<
+    [Exclude<AdminDatabaseDomain, 'other'>, string[]]
+  >) {
+    let score = 0;
+    for (const kw of keywords) {
+      if (tableHay.includes(kw)) score += 2;
+      if (metaHay.includes(kw)) score += 1;
+    }
+    if (score > 0) scores.set(domain, score);
+  }
+
+  if (scores.size === 0) return 'other';
+
+  let bestDomain: Exclude<AdminDatabaseDomain, 'other'> = 'other' as never;
+  let bestScore = 0;
+  for (const [domain, score] of scores) {
+    if (score > bestScore) {
+      bestScore = score;
+      bestDomain = domain;
+    }
+  }
+
+  return bestScore >= MIN_DOMAIN_SCORE ? bestDomain : 'other';
 }
 
 function countInsertValueGroups(statement: string): number {
@@ -1233,7 +1289,8 @@ export function parseSqlDumpBuffer(
   const inferredScale = schema.totalRows > 0 ? classifyDatasetScaleFromTotalRows(schema.totalRows) : null;
   const inferredDomain = inferDomain(
     schema.databaseName ?? fileName.replace(/\.sql$/i, ''),
-    schema.tables.map((table) => table.name).join(' '),
+    schema.schemaName ?? '',
+    schema.tables.map((table) => table.name),
   );
   const scannedAt = new Date().toISOString();
   const artifactObjectName = makeScanSqlObjectName(scanId);
@@ -1653,6 +1710,14 @@ export async function createStoredSqlDumpScan(
   return toSqlDumpScanResult(persistedScan);
 }
 
+/**
+ * Hard runtime safety: anything above this size MUST use the streaming/artifact-only
+ * scan path even if the operator misconfigured `SQL_DUMP_FULL_PARSE_MAX_MB`.
+ * `parseSqlDumpBuffer` keeps the whole file in RAM as both Buffer and decoded UTF-8
+ * string, so a 2 GiB dump can briefly need ~4 GiB of heap and crash a worker.
+ */
+const SQL_DUMP_HARD_FULL_PARSE_LIMIT_BYTES = Math.floor(1.5 * 1024 * 1024 * 1024);
+
 /** Scan + persist from a temp file path (streams the artifact to object storage). */
 export async function createStoredSqlDumpScanFromFile(
   filePath: string,
@@ -1664,7 +1729,8 @@ export async function createStoredSqlDumpScanFromFile(
   const userArtifactOnly = Boolean(options?.artifactOnly);
   const insertScanMaxMb = config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB ?? config.SQL_DUMP_FULL_PARSE_MAX_MB;
   // Large dumps: keep the scan responsive; still compute accurate row counts via a stream worker.
-  const autoArtifactOnly = byteSize > insertScanMaxMb * 1024 * 1024;
+  const autoArtifactOnly =
+    byteSize > insertScanMaxMb * 1024 * 1024 || byteSize > SQL_DUMP_HARD_FULL_PARSE_LIMIT_BYTES;
   const artifactOnly = userArtifactOnly || autoArtifactOnly;
   const { readFile } = await import('node:fs/promises');
 
@@ -1732,7 +1798,8 @@ export async function createStoredSqlDumpScanFromStagingObject(
   const maxFullParse = config.SQL_DUMP_FULL_PARSE_MAX_MB * 1024 * 1024;
   const userArtifactOnly = Boolean(options?.artifactOnly);
   const insertScanMaxMb = config.SQL_DUMP_INSERT_SCAN_MAX_UTF8_MB ?? config.SQL_DUMP_FULL_PARSE_MAX_MB;
-  const autoArtifactOnly = byteSize > insertScanMaxMb * 1024 * 1024;
+  const autoArtifactOnly =
+    byteSize > insertScanMaxMb * 1024 * 1024 || byteSize > SQL_DUMP_HARD_FULL_PARSE_LIMIT_BYTES;
   const artifactOnly = userArtifactOnly || autoArtifactOnly;
 
   if (!artifactOnly && byteSize > maxFullParse) {
@@ -1856,9 +1923,34 @@ export async function loadStoredSqlDumpScan(scanId: string): Promise<StoredSqlDu
     return cached;
   }
 
+  const { readFile } = await import('../../lib/storage');
+
+  // First try the legacy `admin/sql-dumps/` location (covers admin uploads
+  // and pre-multi-prefix scans).
   try {
-    const { readFile } = await import('../../lib/storage');
     const sidecar = await readFile(makeScanMetadataObjectName(scanId));
+    const parsed = JSON.parse(sidecar.toString('utf8')) as StoredSqlDumpScan;
+    const normalized = ensureScanDialectFields(parsed);
+    setCachedScan(normalized);
+    return normalized;
+  } catch {
+    // Fall through to DB-resolved location for newer user-scoped uploads.
+  }
+
+  // For user uploads (and any future custom prefix) the canonical location
+  // is recorded on the `sql_dump_scans` row. Resolve it before giving up.
+  try {
+    const { getDb, schema: dbSchema } = await import('../../db');
+    const { eq } = await import('drizzle-orm');
+    const [row] = await getDb()
+      .select({ metadataUrl: dbSchema.sqlDumpScans.metadataUrl })
+      .from(dbSchema.sqlDumpScans)
+      .where(eq(dbSchema.sqlDumpScans.id, scanId))
+      .limit(1);
+    if (!row?.metadataUrl) return null;
+    const objectName = parseS3Url(row.metadataUrl);
+    if (!objectName) return null;
+    const sidecar = await readFile(objectName);
     const parsed = JSON.parse(sidecar.toString('utf8')) as StoredSqlDumpScan;
     const normalized = ensureScanDialectFields(parsed);
     setCachedScan(normalized);
@@ -1868,16 +1960,51 @@ export async function loadStoredSqlDumpScan(scanId: string): Promise<StoredSqlDu
   }
 }
 
+function parseS3Url(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 's3:') return null;
+    return u.pathname.replace(/^\/+/, '');
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Delete both S3 objects for a scan (metadata JSON + SQL dump file).
  * Evicts from in-process cache. Best-effort: errors from individual deletes are suppressed.
+ *
+ * Tries the legacy `admin/sql-dumps/` keys first, then any DB-recorded
+ * artifact/metadata URLs (covers user-scoped uploads under `user-uploads/...`).
  */
 export async function deleteSqlDumpScanObjects(scanId: string): Promise<void> {
   const { deleteFile } = await import('../../lib/storage');
   scanCache.delete(scanId);
   scanCache.delete(scanId.toLowerCase());
-  await Promise.allSettled([
-    deleteFile(makeScanMetadataObjectName(scanId)),
-    deleteFile(makeScanSqlObjectName(scanId)),
+
+  const targets = new Set<string>([
+    makeScanMetadataObjectName(scanId),
+    makeScanSqlObjectName(scanId),
   ]);
+
+  try {
+    const { getDb, schema: dbSchema } = await import('../../db');
+    const { eq } = await import('drizzle-orm');
+    const [row] = await getDb()
+      .select({
+        artifactUrl: dbSchema.sqlDumpScans.artifactUrl,
+        metadataUrl: dbSchema.sqlDumpScans.metadataUrl,
+      })
+      .from(dbSchema.sqlDumpScans)
+      .where(eq(dbSchema.sqlDumpScans.id, scanId))
+      .limit(1);
+    const artifactKey = row?.artifactUrl ? parseS3Url(row.artifactUrl) : null;
+    const metadataKey = row?.metadataUrl ? parseS3Url(row.metadataUrl) : null;
+    if (artifactKey) targets.add(artifactKey);
+    if (metadataKey) targets.add(metadataKey);
+  } catch {
+    // Best effort — fall back to legacy paths only.
+  }
+
+  await Promise.allSettled([...targets].map((key) => deleteFile(key)));
 }

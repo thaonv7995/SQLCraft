@@ -51,6 +51,7 @@ import {
 } from './query-executor';
 import {
   createSandboxEngineContainer,
+  deleteS3ObjectViaMinioContainer,
   ensureSandboxContainerRemoved,
   sandboxContainerName,
   waitForSandboxEngine,
@@ -59,6 +60,8 @@ import {
   statS3ObjectSizeViaMinioContainer,
 } from './docker';
 import { runSqlDumpScanJob } from './sql-dump-scan';
+import { reconcileStalledSqlDumpScans } from './scan-reconciler';
+import { runArchivedSnapshotGc } from './archived-snapshot-gc';
 import { resolveSandboxEngineSpec } from './sandbox-engine-image';
 import { sandboxDbNameFromInstanceId } from './sandbox-naming';
 import { applySchemaAndDatasetToContainer } from './sandbox-apply-dataset';
@@ -341,6 +344,33 @@ const longJobOpts = {
 };
 
 /**
+ * Per-queue concurrency knobs (env-driven). Most jobs touch Docker / object
+ * storage so the safe default is 1; the cleanup queue can run several jobs in
+ * parallel because each one is a single Docker rm + DB update.
+ */
+function envConcurrency(envName: string, fallback: number): number {
+  const raw = process.env[envName]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return fallback;
+  return Math.min(64, Math.floor(n));
+}
+
+const SANDBOX_PROVISIONING_CONCURRENCY = envConcurrency('SANDBOX_PROVISIONING_CONCURRENCY', 1);
+const SANDBOX_CLEANUP_CONCURRENCY = envConcurrency('SANDBOX_CLEANUP_CONCURRENCY', 4);
+const SANDBOX_RESET_CONCURRENCY = envConcurrency('SANDBOX_RESET_CONCURRENCY', 1);
+const DATASET_GOLDEN_BAKE_CONCURRENCY = envConcurrency('DATASET_GOLDEN_BAKE_CONCURRENCY', 1);
+const SQL_DUMP_SCAN_CONCURRENCY = envConcurrency('SQL_DUMP_SCAN_CONCURRENCY', 4);
+const GOLDEN_SNAPSHOT_CANDIDATE_BAKE_CONCURRENCY = envConcurrency(
+  'GOLDEN_SNAPSHOT_CANDIDATE_BAKE_CONCURRENCY',
+  1,
+);
+
+function withConcurrency<T extends Record<string, unknown>>(opts: T, concurrency: number): T & { concurrency: number } {
+  return { ...opts, concurrency };
+}
+
+/**
  * BullMQ can fail jobs (stalled, UnrecoverableError) while the processor promise is still running.
  * The handler's catch/finally may not run in time; golden-bake also skips catch if the job is failed externally.
  * These listeners align Docker + DB with the failed job.
@@ -510,7 +540,7 @@ const sandboxProvisioningWorker = sandboxQueuesEnabled
       throw err;
     }
   },
-  longJobOpts,
+  withConcurrency(longJobOpts, SANDBOX_PROVISIONING_CONCURRENCY),
 )
   : null;
 
@@ -571,7 +601,7 @@ const sandboxCleanupWorker = sandboxQueuesEnabled
 
     logger.info({ sandboxInstanceId }, 'Sandbox destroyed');
   },
-  longJobOpts,
+  withConcurrency(longJobOpts, SANDBOX_CLEANUP_CONCURRENCY),
 )
   : null;
 
@@ -670,7 +700,7 @@ const sandboxResetWorker = sandboxQueuesEnabled
       throw err;
     }
   },
-  longJobOpts,
+  withConcurrency(longJobOpts, SANDBOX_RESET_CONCURRENCY),
 )
   : null;
 
@@ -709,11 +739,29 @@ const datasetGoldenBakeWorker = sandboxQueuesEnabled
           throw err;
         }
       },
-      longJobOpts,
+      withConcurrency(longJobOpts, DATASET_GOLDEN_BAKE_CONCURRENCY),
     )
   : null;
 
 
+
+/**
+ * Best-effort: drop any partial snapshot/schema artifacts the failed bake left
+ * behind. Without this, repeated retries pile up under
+ * `golden-snapshots/{dataset}/versions/{version}/...` and we can't tell good
+ * from orphan objects.
+ */
+async function cleanupGoldenSnapshotCandidateArtifacts(
+  datasetTemplateId: string,
+  versionId: string,
+): Promise<void> {
+  const bucket = process.env.STORAGE_BUCKET?.trim() || 'sqlcraft';
+  const prefix = `golden-snapshots/${datasetTemplateId}/versions/${versionId}`;
+  const keys = [`${prefix}/snapshot.dump`, `${prefix}/schema.json`];
+  for (const key of keys) {
+    await deleteS3ObjectViaMinioContainer(`s3://${bucket}/${key}`).catch(() => false);
+  }
+}
 
 const goldenSnapshotCandidateBakeWorker = sandboxQueuesEnabled
   ? new Worker(
@@ -737,12 +785,44 @@ const goldenSnapshotCandidateBakeWorker = sandboxQueuesEnabled
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           await updateGoldenSnapshotCandidateFailed(goldenSnapshotVersionId, message);
+          await cleanupGoldenSnapshotCandidateArtifacts(
+            candidate.datasetTemplateId,
+            candidate.id,
+          ).catch((cleanupErr) =>
+            logger.warn(
+              { cleanupErr, versionId: candidate.id },
+              'candidate-bake failed: artifact cleanup also failed',
+            ),
+          );
           throw err;
         }
       },
-      longJobOpts,
+      withConcurrency(longJobOpts, GOLDEN_SNAPSHOT_CANDIDATE_BAKE_CONCURRENCY),
     )
   : null;
+
+if (goldenSnapshotCandidateBakeWorker) {
+  goldenSnapshotCandidateBakeWorker.on('failed', async (job, err) => {
+    if (!job?.data) return;
+    const { goldenSnapshotVersionId } = job.data as { goldenSnapshotVersionId?: string };
+    if (!goldenSnapshotVersionId) return;
+    // BullMQ-side fail (stalled / unrecoverable) — same cleanup hook.
+    try {
+      const candidate = await fetchGoldenSnapshotCandidate(goldenSnapshotVersionId);
+      if (candidate) {
+        await cleanupGoldenSnapshotCandidateArtifacts(
+          candidate.datasetTemplateId,
+          candidate.id,
+        );
+      }
+    } catch (cleanupErr) {
+      logger.warn(
+        { cleanupErr, err, goldenSnapshotVersionId },
+        'candidate-bake BullMQ failed: artifact cleanup hook errored',
+      );
+    }
+  });
+}
 
 // ─── Worker: sql_dump_scan (async upload scan) ────────────────────────────────
 
@@ -772,7 +852,7 @@ const sqlDumpScanWorker = sandboxQueuesEnabled
           logger,
         );
       },
-      longJobOpts,
+      withConcurrency(longJobOpts, SQL_DUMP_SCAN_CONCURRENCY),
     )
   : null;
 
@@ -1122,6 +1202,68 @@ if (sandboxQueuesEnabled && datasetGoldenBakeWorker) {
   );
 }
 
+// ─── Stalled SQL dump scan reconciler ─────────────────────────────────────────
+
+const SCAN_RECONCILE_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.SQL_DUMP_SCAN_RECONCILE_INTERVAL_MS) || 5 * 60 * 1000,
+);
+const SCAN_STALLED_AFTER_MS = Math.max(
+  60_000,
+  Number(process.env.SQL_DUMP_SCAN_STALLED_AFTER_MS) || 15 * 60 * 1000,
+);
+
+async function runScanReconciler(): Promise<void> {
+  if (!sqlDumpScanWorker) return;
+  try {
+    const r = await reconcileStalledSqlDumpScans({
+      stalledAfterMs: SCAN_STALLED_AFTER_MS,
+      log: logger,
+    });
+    if (r.failed > 0) {
+      logger.warn({ failed: r.failed }, 'sql_dump_scan reconciler failed stalled scans');
+    }
+  } catch (err) {
+    logger.error({ err }, 'sql_dump_scan reconciler error');
+  }
+}
+
+const scanReconcilerScanner = sqlDumpScanWorker
+  ? setInterval(runScanReconciler, SCAN_RECONCILE_INTERVAL_MS)
+  : null;
+if (sqlDumpScanWorker) {
+  runScanReconciler().catch((err) => logger.error({ err }, 'Initial scan reconciler failed'));
+}
+
+// ─── Archived golden snapshot GC ──────────────────────────────────────────────
+
+const ARCHIVED_SNAPSHOT_GC_INTERVAL_MS = Math.max(
+  60 * 60 * 1000,
+  Number(process.env.ARCHIVED_SNAPSHOT_GC_INTERVAL_MS) || 24 * 60 * 60 * 1000,
+);
+const ARCHIVED_SNAPSHOT_RETENTION_DAYS = Math.max(
+  1,
+  Number(process.env.GOLDEN_SNAPSHOT_RETENTION_DAYS) || 30,
+);
+
+async function runArchivedSnapshotGcOnce(): Promise<void> {
+  if (!datasetGoldenBakeWorker && !goldenSnapshotCandidateBakeWorker) return;
+  try {
+    await runArchivedSnapshotGc(logger, { olderThanDays: ARCHIVED_SNAPSHOT_RETENTION_DAYS });
+  } catch (err) {
+    logger.error({ err }, 'archived-snapshot-gc error');
+  }
+}
+
+const archivedSnapshotGcScanner =
+  process.env.GOLDEN_SNAPSHOT_RETENTION_DAYS !== '0' &&
+  (datasetGoldenBakeWorker || goldenSnapshotCandidateBakeWorker)
+    ? setInterval(runArchivedSnapshotGcOnce, ARCHIVED_SNAPSHOT_GC_INTERVAL_MS)
+    : null;
+if (archivedSnapshotGcScanner) {
+  setTimeout(runArchivedSnapshotGcOnce, 5 * 60 * 1000);
+}
+
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
 const workers: Array<{ name: string; worker: Worker }> = [];
@@ -1136,7 +1278,12 @@ if (sandboxResetWorker) {
 }
 if (datasetGoldenBakeWorker) {
   workers.push({ name: QUEUES.DATASET_SANDBOX_GOLDEN_BAKE, worker: datasetGoldenBakeWorker });
-if (goldenSnapshotCandidateBakeWorker) workers.push({ name: QUEUES.GOLDEN_SNAPSHOT_CANDIDATE_BAKE, worker: goldenSnapshotCandidateBakeWorker });
+}
+if (goldenSnapshotCandidateBakeWorker) {
+  workers.push({
+    name: QUEUES.GOLDEN_SNAPSHOT_CANDIDATE_BAKE,
+    worker: goldenSnapshotCandidateBakeWorker,
+  });
 }
 if (queryExecutionWorker) {
   workers.push({ name: QUEUES.QUERY_EXECUTION, worker: queryExecutionWorker });
@@ -1174,6 +1321,8 @@ async function shutdown(signal: string): Promise<void> {
 
   if (expiryScanner) clearInterval(expiryScanner);
   if (goldenBakeEnqueueScanner) clearInterval(goldenBakeEnqueueScanner);
+  if (scanReconcilerScanner) clearInterval(scanReconcilerScanner);
+  if (archivedSnapshotGcScanner) clearInterval(archivedSnapshotGcScanner);
   await Promise.all(workers.map(({ worker }) => worker.close()));
   await cleanupQueue.close();
   await queryExecutionQueueClient.close();

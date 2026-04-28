@@ -68,6 +68,7 @@ import {
   createStoredSqlDumpScan,
   loadStoredSqlDumpScan,
   toSqlDumpScanResult,
+  type StoredSqlDumpScan,
 } from './sql-dump-scan';
 import {
   isAllowedSqlDumpUpload,
@@ -80,6 +81,7 @@ import { enqueueSqlDumpScan } from '../../lib/queue';
 import { materializeDerivedSqlDumpArtifacts } from './real-dataset-artifact';
 import { deleteStorageForDatasetTemplates } from './delete-database-storage';
 import {
+  notifyAdminsDatasetReviewPending,
   notifyDatasetReviewApproved,
   notifyDatasetReviewPending,
   notifyDatasetReviewRejected,
@@ -664,6 +666,41 @@ async function countUserPublicPendingReviewDatabases(userId: string): Promise<nu
   return row?.c ?? 0;
 }
 
+/**
+ * Resolve a SQL dump scan that the worker has finished processing.
+ * Surfaces clearer errors when a scan is still queued/running or has failed,
+ * instead of the misleading "not found" produced by the storage sidecar miss.
+ */
+async function loadCompletedScanOrThrow(scanId: string): Promise<StoredSqlDumpScan> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      id: schema.sqlDumpScans.id,
+      status: schema.sqlDumpScans.status,
+      errorMessage: schema.sqlDumpScans.errorMessage,
+    })
+    .from(schema.sqlDumpScans)
+    .where(eq(schema.sqlDumpScans.id, scanId))
+    .limit(1);
+
+  if (row) {
+    if (row.status === 'queued' || row.status === 'running') {
+      throw new ConflictError('SQL dump scan is still in progress; retry after it finishes');
+    }
+    if (row.status === 'failed') {
+      throw new ValidationError(
+        `SQL dump scan failed: ${row.errorMessage ?? 'unknown error'}`,
+      );
+    }
+  }
+
+  const storedScan = await loadStoredSqlDumpScan(scanId);
+  if (!storedScan) {
+    throw new NotFoundError('SQL dump scan not found or has expired');
+  }
+  return storedScan;
+}
+
 async function importCanonicalDatabaseFromSqlDumpScan(
   userId: string,
   body: SqlDumpScanImportBody,
@@ -675,10 +712,7 @@ async function importCanonicalDatabaseFromSqlDumpScan(
     inviteUserIds?: string[];
   },
 ): Promise<ImportCanonicalDatabaseResult> {
-  const storedScan = await loadStoredSqlDumpScan(body.scanId);
-  if (!storedScan) {
-    throw new NotFoundError('SQL dump scan not found or has expired');
-  }
+  const storedScan = await loadCompletedScanOrThrow(body.scanId);
 
   const tableNamesForRowCounts = storedScan.definition.tables.map((t) => t.name);
   const isArtifactOnly = Boolean(
@@ -824,9 +858,24 @@ async function importCanonicalDatabaseFromSqlDumpScan(
 
   if (persist.schemaVisibility === 'public' && persist.schemaReviewStatus === 'pending') {
     await notifyDatasetReviewPending(userId, result);
+    const uploaderDisplayName = await loadUserDisplayName(userId);
+    await notifyAdminsDatasetReviewPending(
+      { id: userId, displayName: uploaderDisplayName },
+      result,
+    );
   }
 
   return result;
+}
+
+async function loadUserDisplayName(userId: string): Promise<string> {
+  const db = getDb();
+  const [u] = await db
+    .select({ username: schema.users.username, email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+  return u?.username?.trim() || u?.email?.trim() || 'A user';
 }
 
 function mergeDefinitionMetadata(
@@ -1231,7 +1280,49 @@ export async function scanSqlDumpFromUploadedFile(
 }
 
 export async function listPendingScans(query: ListPendingScansQuery) {
-  return listPendingSqlDumpScans({ page: query.page, limit: query.limit });
+  return listPendingSqlDumpScans({
+    page: query.page,
+    limit: query.limit,
+    status: query.status,
+  });
+}
+
+/**
+ * Map a `sql_dump_scans` row + (optional) baseScanJson sidecar into the user-facing
+ * `SqlDumpScanResult` shape used while the worker is still running. Falls back to
+ * the legacy "stub" shape (empty tables / domain `other`) when the base scan is missing.
+ */
+function inProgressScanResult(row: typeof schema.sqlDumpScans.$inferSelect): SqlDumpScanResult {
+  const base = (row.baseScanJson as Record<string, unknown> | null) ?? null;
+  const tables =
+    base && Array.isArray((base as { tables?: unknown }).tables)
+      ? ((base as { tables: unknown[] }).tables as SqlDumpScanResult['tables'])
+      : [];
+  return {
+    scanId: row.id,
+    fileName: row.fileName,
+    databaseName: ((base?.databaseName as string | null | undefined) ?? null),
+    schemaName: ((base?.schemaName as string | null | undefined) ?? null),
+    domain: ((base?.domain as SqlDumpScanResult['domain'] | undefined) ?? 'other'),
+    inferredScale: ((base?.inferredScale as SqlDumpScanResult['inferredScale'] | undefined) ?? null),
+    inferredDialect:
+      ((base?.inferredDialect as SqlDumpScanResult['inferredDialect'] | undefined) ?? 'postgresql'),
+    dialectConfidence:
+      ((base?.dialectConfidence as SqlDumpScanResult['dialectConfidence'] | undefined) ?? 'low'),
+    inferredEngineVersion:
+      ((base?.inferredEngineVersion as string | null | undefined) ?? null),
+    totalTables: Number((base?.totalTables as number | undefined) ?? 0),
+    totalRows: typeof row.totalRows === 'number' ? row.totalRows : 0,
+    columnCount: Number((base?.columnCount as number | undefined) ?? 0),
+    detectedPrimaryKeys: Number((base?.detectedPrimaryKeys as number | undefined) ?? 0),
+    detectedForeignKeys: Number((base?.detectedForeignKeys as number | undefined) ?? 0),
+    tables,
+    artifactOnly: typeof row.artifactOnly === 'boolean' ? row.artifactOnly : true,
+    scanStatus: row.status as SqlDumpScanResult['scanStatus'],
+    progressBytes: row.progressBytes ?? 0,
+    totalBytes: row.totalBytes ?? row.byteSize,
+    errorMessage: row.errorMessage ?? null,
+  };
 }
 
 export async function getAdminSqlDumpScan(scanId: string): Promise<SqlDumpScanResult> {
@@ -1249,28 +1340,7 @@ export async function getAdminSqlDumpScan(scanId: string): Promise<SqlDumpScanRe
       if (stored) return toSqlDumpScanResult(stored);
     }
 
-    return {
-      scanId: row.id,
-      fileName: row.fileName,
-      databaseName: null,
-      schemaName: null,
-      domain: 'other',
-      inferredScale: null,
-      inferredDialect: 'postgresql',
-      dialectConfidence: 'low',
-      inferredEngineVersion: null,
-      totalTables: 0,
-      totalRows: typeof row.totalRows === 'number' ? row.totalRows : 0,
-      columnCount: 0,
-      detectedPrimaryKeys: 0,
-      detectedForeignKeys: 0,
-      tables: [],
-      artifactOnly: typeof row.artifactOnly === 'boolean' ? row.artifactOnly : true,
-      scanStatus: row.status as SqlDumpScanResult['scanStatus'],
-      progressBytes: row.progressBytes ?? 0,
-      totalBytes: row.totalBytes ?? row.byteSize,
-      errorMessage: row.errorMessage ?? null,
-    };
+    return inProgressScanResult(row);
   }
 
   const result = await getSqlDumpScanById(scanId);
@@ -1294,39 +1364,14 @@ export async function getSqlDumpScanForUser(scanId: string, userId: string): Pro
       const stored = await loadStoredSqlDumpScan(row.id);
       if (stored) return toSqlDumpScanResult(stored);
     }
-    return {
-      scanId: row.id,
-      fileName: row.fileName,
-      databaseName: null,
-      schemaName: null,
-      domain: 'other',
-      inferredScale: null,
-      inferredDialect: 'postgresql',
-      dialectConfidence: 'low',
-      inferredEngineVersion: null,
-      totalTables: 0,
-      totalRows: typeof row.totalRows === 'number' ? row.totalRows : 0,
-      columnCount: 0,
-      detectedPrimaryKeys: 0,
-      detectedForeignKeys: 0,
-      tables: [],
-      artifactOnly: typeof row.artifactOnly === 'boolean' ? row.artifactOnly : true,
-      scanStatus: row.status as SqlDumpScanResult['scanStatus'],
-      progressBytes: row.progressBytes ?? 0,
-      totalBytes: row.totalBytes ?? row.byteSize,
-      errorMessage: row.errorMessage ?? null,
-    };
+    return inProgressScanResult(row);
   }
 
-  const stored = await loadStoredSqlDumpScan(scanId);
-  if (!stored) {
-    throw new NotFoundError('SQL dump scan not found or has expired');
-  }
-  const owner = stored.definition.metadata.uploadedByUserId;
-  if (!owner || owner !== userId) {
-    throw new ForbiddenError('You do not have access to this SQL dump scan');
-  }
-  return toSqlDumpScanResult(stored);
+  // No DB row → this scan is either expired/cleaned up, or it never belonged
+  // to this user. We deliberately do NOT fall back to the MinIO sidecar here:
+  // sidecars can outlive their DB row (e.g. partial GC) and trusting them as
+  // the ACL source of truth would let any user read any leaked scanId.
+  throw new NotFoundError('SQL dump scan not found or has expired');
 }
 
 export async function importCanonicalDatabase(
@@ -1352,10 +1397,7 @@ export async function importUserDatabaseFromSqlDumpScan(
   userId: string,
   body: UserImportSqlDumpDatabaseBody,
 ): Promise<ImportCanonicalDatabaseResult> {
-  const storedForOwnership = await loadStoredSqlDumpScan(body.scanId);
-  if (!storedForOwnership) {
-    throw new NotFoundError('SQL dump scan not found or has expired');
-  }
+  const storedForOwnership = await loadCompletedScanOrThrow(body.scanId);
   const scanOwner = storedForOwnership.definition.metadata.uploadedByUserId;
   if (!scanOwner || scanOwner !== userId) {
     throw new ForbiddenError('You can only import databases from your own SQL dump upload.');

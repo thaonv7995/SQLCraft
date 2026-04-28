@@ -1105,6 +1105,35 @@ export async function uploadFileToS3ViaMinioStreaming(params: {
 }
 
 /**
+ * Best-effort delete of an S3 object via `mc rm` in the MinIO sidecar.
+ * Returns true if the call succeeded (object removed or already gone).
+ */
+export async function deleteS3ObjectViaMinioContainer(artifactRef: string): Promise<boolean> {
+  let bucket: string;
+  let objectName: string;
+  try {
+    const parsed = new URL(artifactRef);
+    bucket = parsed.hostname;
+    objectName = parsed.pathname.replace(/^\/+/, '');
+  } catch {
+    return false;
+  }
+  if (!bucket || !objectName) return false;
+
+  const script = [
+    `mc alias set local http://localhost:9000 ${shQuote(storageAccessKey)} ${shQuote(storageSecretKey)} >/dev/null`,
+    `mc rm --force ${shQuote(`local/${bucket}/${objectName}`)}`,
+  ].join(' && ');
+
+  try {
+    await runDocker(['exec', storageDockerContainer, 'sh', '-lc', script]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get the byte size of an S3 object via `mc stat` in the MinIO sidecar.
  * Returns null if the object is not found or stat fails.
  */

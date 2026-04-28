@@ -1086,6 +1086,11 @@ export interface SqlDumpTableSummary {
 
 export type SqlDialectConfidence = 'high' | 'medium' | 'low';
 
+/**
+ * The API now always responds with `mode: 'multipart'` (single-PUT was removed for
+ * tamper-resistance). The single-PUT shape is kept here for backwards compatibility
+ * with older API deployments.
+ */
 export type SqlDumpDirectUploadSessionCreateResult =
   | {
       mode: 'single';

@@ -183,10 +183,21 @@ class RowCountTransform extends Transform {
   }
 }
 
-async function updateScan(scanId: string, patch: { status?: ScanStatus; progressBytes?: number; totalRows?: number; errorMessage?: string }) {
+async function updateScan(scanId: string, patch: { status?: ScanStatus; progressBytes?: number; totalRows?: number; errorMessage?: string; touchHeartbeat?: boolean }) {
+  // Always refresh `updated_at`. We also bump `last_heartbeat_at` for any
+  // status change or when progress is being reported, so the stalled-scan
+  // reconciler can rely on it as a true keep-alive signal.
   const sets: string[] = ['updated_at = now()'];
   const vals: unknown[] = [scanId];
   let idx = 2;
+  const shouldTouchHeartbeat =
+    patch.touchHeartbeat ??
+    (patch.status === 'running' ||
+      typeof patch.progressBytes === 'number' ||
+      patch.status === undefined);
+  if (shouldTouchHeartbeat) {
+    sets.push('last_heartbeat_at = now()');
+  }
   if (patch.status) {
     sets.push(`status = $${idx++}`);
     vals.push(patch.status);

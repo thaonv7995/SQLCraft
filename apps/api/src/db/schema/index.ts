@@ -308,6 +308,13 @@ export const goldenSnapshotVersions = pgTable(
   },
   (table) => ({
     schemaIdx: index('golden_snapshot_versions_schema_idx').on(table.schemaTemplateId, table.status, table.createdAt),
+    // Partial unique index: at most one row per dataset_template_id can be
+    // status='active'. Enforced via raw SQL in migration 0030 because
+    // drizzle-orm <0.30 has no native partial-index DSL — we still register
+    // it here so introspection commands surface it.
+    oneActiveUniqueIdx: uniqueIndex('golden_snapshot_versions_one_active_idx')
+      .on(table.datasetTemplateId)
+      .where(sql`${table.status} = 'active'`),
   }),
 );
 
@@ -611,6 +618,9 @@ export const sqlDumpUploadSessions = pgTable(
   (table) => ({
     userIdx: index('sql_dump_upload_sessions_user_id_idx').on(table.userId),
     expiresIdx: index('sql_dump_upload_sessions_expires_at_idx').on(table.expiresAt),
+    stateExpiresIdx: index('sql_dump_upload_sessions_state_expires_idx')
+      .on(table.state, table.expiresAt)
+      .where(sql`${table.state} IN ('pending', 'completing')`),
   }),
 );
 
@@ -632,6 +642,10 @@ export const sqlDumpScans = pgTable(
     totalBytes: bigint('total_bytes', { mode: 'number' }),
     totalRows: bigint('total_rows', { mode: 'number' }),
     errorMessage: text('error_message'),
+    /** Inferred dialect/domain/tables snapshot, written when the scan is first queued. */
+    baseScanJson: jsonb('base_scan_json'),
+    /** Worker keep-alive — used by the stalled-scan reconciler. */
+    lastHeartbeatAt: timestamp('last_heartbeat_at'),
     createdAt: timestamp('created_at').notNull().default(sql`now()`),
     updatedAt: timestamp('updated_at').notNull().default(sql`now()`),
     expiresAt: timestamp('expires_at').notNull(),
@@ -639,5 +653,9 @@ export const sqlDumpScans = pgTable(
   (table) => ({
     userIdx: index('sql_dump_scans_user_id_idx').on(table.userId, table.createdAt),
     statusIdx: index('sql_dump_scans_status_idx').on(table.status, table.updatedAt),
+    statusHeartbeatIdx: index('sql_dump_scans_status_heartbeat_idx').on(
+      table.status,
+      table.lastHeartbeatAt,
+    ),
   }),
 );

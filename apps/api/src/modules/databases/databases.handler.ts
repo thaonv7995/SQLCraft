@@ -138,7 +138,7 @@ export async function createUserSqlDumpUploadSessionHandler(
 ): Promise<void> {
   const userId = (request.user as JwtPayload).sub;
   const body = CreateSqlDumpUploadSessionSchema.parse(request.body);
-  const result = await createSqlDumpUploadSession(userId, body);
+  const result = await createSqlDumpUploadSession(userId, body, { scope: 'user' });
   reply.status(201).send(created(result, 'SQL dump upload session created'));
 }
 
