@@ -65,7 +65,7 @@ import {
 import { useAuthStore } from '@/stores/auth';
 import { SqlEditor, type SqlEditorHandle } from '@/components/ui/sql-editor';
 import { ChallengeAttemptCriteriaChecks } from '@/components/lab/challenge-attempt-criteria-checks';
-import { ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
+import { ExecutionPlanGraph, ExecutionPlanTree } from '@/components/lab/execution-plan-tree';
 import { markLabBootstrapConsumed, readLabBootstrap } from '@/lib/lab-bootstrap';
 import {
   clearLabEditorState,
@@ -1196,7 +1196,7 @@ function ResultsPanel() {
 
 function ExecutionPlanPanel() {
   const { executionPlan, isExplaining, lastExecution } = useLabStore();
-  const [viewMode, setViewMode] = useState<'tree' | 'raw'>('tree');
+  const [viewMode, setViewMode] = useState<'visualize' | 'tree' | 'raw'>('visualize');
 
   if (isExplaining) {
     return (
@@ -1232,6 +1232,18 @@ function ExecutionPlanPanel() {
         <div className="inline-flex items-center gap-1 rounded-lg border border-outline-variant/10 bg-surface-container p-1">
           <button
             type="button"
+            onClick={() => setViewMode('visualize')}
+            className={cn(
+              'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
+              viewMode === 'visualize'
+                ? 'bg-surface-container-high text-on-surface'
+                : 'text-on-surface-variant hover:bg-surface-container-high/70 hover:text-on-surface',
+            )}
+          >
+            Visualize
+          </button>
+          <button
+            type="button"
             onClick={() => setViewMode('tree')}
             className={cn(
               'rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
@@ -1259,7 +1271,12 @@ function ExecutionPlanPanel() {
       </div>
 
       <div className="flex-1 overflow-auto p-2.5 md:p-3">
-        {viewMode === 'tree' ? (
+        {viewMode === 'visualize' ? (
+          <ExecutionPlanGraph
+            executionPlan={executionPlan}
+            queryDurationMs={lastExecution?.durationMs}
+          />
+        ) : viewMode === 'tree' ? (
           <ExecutionPlanTree
             executionPlan={executionPlan}
             queryDurationMs={lastExecution?.durationMs}
@@ -3302,8 +3319,8 @@ export default function LabPage({ params }: ClientPageProps) {
     setSelectedScale,
   } = useLabStore();
 
-  const { mutate: executeQuery, cancelExecution } = useExecuteQuery();
-  const { mutate: explainQuery, cancelExplain } = useExplainQuery();
+  const { mutate: executeQuery, cancelExecution } = useExecuteQuery(sessionId);
+  const { mutate: explainQuery, cancelExplain } = useExplainQuery(sessionId);
   const queryClient = useQueryClient();
   const { data: persistedHistoryPage } = useQueryHistory(sessionId, 1, 100);
 

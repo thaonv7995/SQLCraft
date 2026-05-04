@@ -22,6 +22,7 @@ const POLL_TIMEOUT_MS =
     ? Math.max(60_000, Number(process.env.NEXT_PUBLIC_QUERY_POLL_TIMEOUT_MS) || 660_000)
     : DEFAULT_SERVER_STATEMENT_TIMEOUT_MS + 60_000;
 const SCHEMA_MUTATION_SQL = /^\s*(create|alter|drop|truncate|comment|rename)\b/i;
+const ACTIVE_EXECUTION_STORAGE_PREFIX = 'sqlforge.activeExecution';
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -29,6 +30,50 @@ function sleep(ms: number) {
 
 function mayAffectSchema(sql: string): boolean {
   return SCHEMA_MUTATION_SQL.test(sql);
+}
+
+function activeExecutionStorageKey(
+  kind: 'execute' | 'explain',
+  sessionId: string,
+): string {
+  return `${ACTIVE_EXECUTION_STORAGE_PREFIX}.${kind}.${sessionId}`;
+}
+
+function readActiveExecutionId(
+  kind: 'execute' | 'explain',
+  sessionId?: string,
+): string | null {
+  if (!sessionId || typeof window === 'undefined') return null;
+
+  try {
+    return window.localStorage.getItem(activeExecutionStorageKey(kind, sessionId));
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveExecutionId(
+  kind: 'execute' | 'explain',
+  sessionId: string | undefined,
+  executionId: string,
+): void {
+  if (!sessionId || typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(activeExecutionStorageKey(kind, sessionId), executionId);
+  } catch {
+    // Losing reload recovery is acceptable if storage is unavailable.
+  }
+}
+
+function clearActiveExecutionId(kind: 'execute' | 'explain', sessionId?: string): void {
+  if (!sessionId || typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.removeItem(activeExecutionStorageKey(kind, sessionId));
+  } catch {
+    // Storage cleanup is best-effort.
+  }
 }
 
 async function pollUntilDone(
@@ -51,11 +96,35 @@ async function pollUntilDone(
 
 // ─── Execute Query ────────────────────────────────────────────────────────────
 
-export function useExecuteQuery() {
+export function useExecuteQuery(sessionId?: string) {
   const queryClient = useQueryClient();
   const setActiveTab = useLabStore((s) => s.setActiveTab);
   const abortRef = useRef<AbortController | null>(null);
   const executionIdRef = useRef<string | null>(null);
+
+  const finishExecution = useCallback(
+    (data: QueryExecution, variables?: QueryExecutionRequest) => {
+      clearActiveExecutionId('execute', data.sessionId || variables?.sessionId || sessionId);
+      useLabStore.setState((state) => ({
+        isExecuting: false,
+        lastExecution: data,
+        results: data.result ?? null,
+        executionPlan: data.executionPlan ?? null,
+        error: data.status === 'error' ? (data.errorMessage ?? 'Query failed') : null,
+        queryHistory: [data, ...state.queryHistory.filter((item) => item.id !== data.id)].slice(0, 100),
+      }));
+      if (data.status === 'success') {
+        setActiveTab('results');
+      }
+      queryClient.invalidateQueries({ queryKey: ['query-history'] });
+
+      if (data.status === 'success' && variables && mayAffectSchema(variables.sql)) {
+        queryClient.invalidateQueries({ queryKey: ['session-schema', variables.sessionId] });
+        queryClient.invalidateQueries({ queryKey: ['session-schema-diff', variables.sessionId] });
+      }
+    },
+    [queryClient, sessionId, setActiveTab],
+  );
 
   const mutation = useMutation<QueryExecution, Error, QueryExecutionRequest>({
     mutationFn: async (payload) => {
@@ -64,6 +133,7 @@ export function useExecuteQuery() {
       try {
         const accepted = await queryApi.execute(payload);
         executionIdRef.current = accepted.id;
+        writeActiveExecutionId('execute', payload.sessionId, accepted.id);
         if (!TERMINAL_STATUSES.has(accepted.status)) {
           return await pollUntilDone(accepted.id, abortRef.current.signal);
         }
@@ -76,51 +146,91 @@ export function useExecuteQuery() {
       useLabStore.setState({ isExecuting: true, error: null, results: null, executionPlan: null });
     },
     onSuccess: (data, variables) => {
-      useLabStore.setState((state) => ({
-        isExecuting: false,
-        lastExecution: data,
-        results: data.result ?? null,
-        executionPlan: data.executionPlan ?? null,
-        error: data.status === 'error' ? (data.errorMessage ?? 'Query failed') : null,
-        queryHistory: [data, ...state.queryHistory].slice(0, 100),
-      }));
-      if (data.status === 'success') {
-        setActiveTab('results');
-      } else if (data.status === 'error') {
-        // Lab UI displays inline error state; avoid global toast noise.
-      }
-      queryClient.invalidateQueries({ queryKey: ['query-history'] });
-
-      if (data.status === 'success' && mayAffectSchema(variables.sql)) {
-        queryClient.invalidateQueries({ queryKey: ['session-schema', variables.sessionId] });
-        queryClient.invalidateQueries({ queryKey: ['session-schema-diff', variables.sessionId] });
-      }
+      finishExecution(data, variables);
     },
     onError: (err) => {
       if (err instanceof DOMException && err.name === 'AbortError') {
+        clearActiveExecutionId('execute', sessionId);
         useLabStore.setState({ isExecuting: false, error: null });
         return;
       }
+      clearActiveExecutionId('execute', sessionId);
       useLabStore.setState({ isExecuting: false, error: err.message });
     },
   });
 
+  useEffect(() => {
+    const recoveredExecutionId = readActiveExecutionId('execute', sessionId);
+    if (!sessionId || !recoveredExecutionId || mutation.isPending) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+    executionIdRef.current = recoveredExecutionId;
+    useLabStore.setState({ isExecuting: true, error: null, activeTab: 'results' });
+
+    void pollUntilDone(recoveredExecutionId, abortController.signal)
+      .then((execution) => {
+        if (!abortController.signal.aborted) {
+          finishExecution(execution);
+        }
+      })
+      .catch((err) => {
+        if (abortController.signal.aborted) return;
+        clearActiveExecutionId('execute', sessionId);
+        const message = err instanceof Error ? err.message : 'Query execution failed';
+        useLabStore.setState({ isExecuting: false, error: message });
+      })
+      .finally(() => {
+        if (executionIdRef.current === recoveredExecutionId) {
+          executionIdRef.current = null;
+        }
+      });
+
+    return () => {
+      abortController.abort();
+      if (executionIdRef.current === recoveredExecutionId) {
+        executionIdRef.current = null;
+      }
+    };
+  }, [finishExecution, mutation.isPending, sessionId]);
+
   const cancelExecution = useCallback(() => {
-    const id = executionIdRef.current;
+    const id = executionIdRef.current ?? readActiveExecutionId('execute', sessionId);
     abortRef.current?.abort();
     if (id) void queryApi.cancel(id);
-  }, []);
+    clearActiveExecutionId('execute', sessionId);
+    useLabStore.setState({ isExecuting: false, error: null });
+  }, [sessionId]);
 
   return { ...mutation, cancelExecution };
 }
 
 // ─── Explain Query ────────────────────────────────────────────────────────────
 
-export function useExplainQuery() {
+export function useExplainQuery(sessionId?: string) {
   const queryClient = useQueryClient();
   const setActiveTab = useLabStore((s) => s.setActiveTab);
   const abortRef = useRef<AbortController | null>(null);
   const executionIdRef = useRef<string | null>(null);
+
+  const finishExplain = useCallback(
+    (data: QueryExecution) => {
+      clearActiveExecutionId('explain', data.sessionId || sessionId);
+      useLabStore.setState({
+        isExplaining: false,
+        lastExecution: data,
+        executionPlan: data.executionPlan ?? null,
+        error: data.status === 'error' ? (data.errorMessage ?? 'Explain failed') : null,
+      });
+      if (data.status === 'success') {
+        setActiveTab('plan');
+      }
+      queryClient.invalidateQueries({ queryKey: ['query-history'] });
+    },
+    [queryClient, sessionId, setActiveTab],
+  );
 
   const mutation = useMutation<QueryExecution, Error, QueryExecutionRequest>({
     mutationFn: async (payload) => {
@@ -129,6 +239,7 @@ export function useExplainQuery() {
       try {
         const accepted = await queryApi.explain(payload);
         executionIdRef.current = accepted.id;
+        writeActiveExecutionId('explain', payload.sessionId, accepted.id);
         if (!TERMINAL_STATUSES.has(accepted.status)) {
           return await pollUntilDone(accepted.id, abortRef.current.signal);
         }
@@ -141,33 +252,63 @@ export function useExplainQuery() {
       useLabStore.setState({ isExplaining: true, error: null, executionPlan: null });
     },
     onSuccess: (data) => {
-      useLabStore.setState({
-        isExplaining: false,
-        lastExecution: data,
-        executionPlan: data.executionPlan ?? null,
-        error: data.status === 'error' ? (data.errorMessage ?? 'Explain failed') : null,
-      });
-      if (data.status === 'success') {
-        setActiveTab('plan');
-      } else {
-        // Lab UI displays inline error state; avoid global toast noise.
-      }
-      queryClient.invalidateQueries({ queryKey: ['query-history'] });
+      finishExplain(data);
     },
     onError: (err) => {
       if (err instanceof DOMException && err.name === 'AbortError') {
+        clearActiveExecutionId('explain', sessionId);
         useLabStore.setState({ isExplaining: false, error: null });
         return;
       }
+      clearActiveExecutionId('explain', sessionId);
       useLabStore.setState({ isExplaining: false, error: err.message });
     },
   });
 
+  useEffect(() => {
+    const recoveredExecutionId = readActiveExecutionId('explain', sessionId);
+    if (!sessionId || !recoveredExecutionId || mutation.isPending) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+    executionIdRef.current = recoveredExecutionId;
+    useLabStore.setState({ isExplaining: true, error: null, activeTab: 'plan' });
+
+    void pollUntilDone(recoveredExecutionId, abortController.signal)
+      .then((execution) => {
+        if (!abortController.signal.aborted) {
+          finishExplain(execution);
+        }
+      })
+      .catch((err) => {
+        if (abortController.signal.aborted) return;
+        clearActiveExecutionId('explain', sessionId);
+        const message = err instanceof Error ? err.message : 'Explain query failed';
+        useLabStore.setState({ isExplaining: false, error: message });
+      })
+      .finally(() => {
+        if (executionIdRef.current === recoveredExecutionId) {
+          executionIdRef.current = null;
+        }
+      });
+
+    return () => {
+      abortController.abort();
+      if (executionIdRef.current === recoveredExecutionId) {
+        executionIdRef.current = null;
+      }
+    };
+  }, [finishExplain, mutation.isPending, sessionId]);
+
   const cancelExplain = useCallback(() => {
-    const id = executionIdRef.current;
+    const id = executionIdRef.current ?? readActiveExecutionId('explain', sessionId);
     abortRef.current?.abort();
     if (id) void queryApi.cancel(id);
-  }, []);
+    clearActiveExecutionId('explain', sessionId);
+    useLabStore.setState({ isExplaining: false, error: null });
+  }, [sessionId]);
 
   return { ...mutation, cancelExplain };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ExecutionPlanTree } from './execution-plan-tree';
+import { ExecutionPlanGraph, ExecutionPlanTree } from './execution-plan-tree';
 
 describe('ExecutionPlanTree', () => {
   it('renders clear timing and access path labels for explain analyze output', () => {
@@ -49,7 +49,8 @@ describe('ExecutionPlanTree', () => {
 
     expect(markup).toContain('Nested Loop');
     expect(markup).toContain('orders');
-    expect(markup).toContain('customers via customers_pkey');
+    expect(markup).toContain('customers');
+    expect(markup).toContain('customers_pkey');
     expect(markup).toContain('Postgres executor time');
     expect(markup).toContain('End-to-end query time');
     expect(markup).toContain('166ms');
@@ -107,5 +108,62 @@ describe('ExecutionPlanTree', () => {
     expect(markup).toContain('0.003283');
     expect(markup).toContain('SQL Server operator time');
     expect(markup).not.toContain('"ShowPlanXML"');
+  });
+});
+
+describe('ExecutionPlanGraph', () => {
+  it('renders a visual graph with connector, node metrics, and selected details', () => {
+    const markup = renderToStaticMarkup(
+      <ExecutionPlanGraph
+        queryDurationMs={166}
+        executionPlan={{
+          type: 'json',
+          mode: 'explain_analyze',
+          totalCost: 180,
+          actualTime: 14.5,
+          plan: {
+            Plan: {
+              'Node Type': 'Nested Loop',
+              'Total Cost': 180,
+              'Actual Total Time': 14.5,
+              'Actual Rows': 20,
+              Plans: [
+                {
+                  'Node Type': 'Seq Scan',
+                  'Relation Name': 'orders',
+                  'Total Cost': 140,
+                  'Actual Total Time': 11,
+                  'Actual Rows': 12000,
+                  'Actual Loops': 1,
+                  'Filter': 'status = shipped',
+                },
+                {
+                  'Node Type': 'Index Scan',
+                  'Relation Name': 'customers',
+                  'Index Name': 'customers_pkey',
+                  'Total Cost': 40,
+                  'Actual Total Time': 1.2,
+                  'Actual Rows': 20,
+                  'Actual Loops': 20,
+                  'Index Cond': 'id = orders.customer_id',
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(markup).toContain('Execution plan graph connectors');
+    expect(markup).toContain('Nested Loop');
+    expect(markup).toContain('orders');
+    expect(markup).toContain('customers');
+    expect(markup).toContain('via customers_pkey');
+    expect(markup).toContain('outer');
+    expect(markup).toContain('lookup');
+    expect(markup).toContain('Subtree cost');
+    expect(markup).toContain('Cost');
+    expect(markup).toContain('Query');
+    expect(markup).toContain('166ms');
   });
 });
